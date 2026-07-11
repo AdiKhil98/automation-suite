@@ -206,3 +206,17 @@ rather than creating uncontrolled duplicates.
 Node 22 LTS · TypeScript strict · pnpm · Zod · Vitest · Playwright · Pino · ESLint · Prettier · PostgreSQL ·
 **Drizzle ORM** (see D-0001) · Docker Compose for local Postgres · env validation at startup · GitHub Actions
 CI · Netlify for demos · CLI-first (dashboard later). No dependency without a documented reason.
+
+## 11. Browser runtime distinction
+
+There are two distinct "browsers" in this project; they must not be conflated:
+
+- **Development / research / QA browser (Claude Code):** Claude Code's built-in web browsing and screenshot
+  capability may be used during development, research, debugging, and visual QA. It is a tool for *building*
+  the system.
+- **Production browser runtime (Playwright):** The deployed daily automation performs all website capture and
+  evidence extraction with **Playwright**, beginning in Phase 4. Playwright is the only browser runtime the
+  running pipeline depends on.
+
+Claude Code's browsing is never part of the production pipeline, and Playwright is never used merely for
+development convenience. Any website-capture code committed to the pipeline targets Playwright.

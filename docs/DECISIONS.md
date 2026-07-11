@@ -4,6 +4,25 @@ Every significant decision is recorded here in the required format. Newest first
 
 ---
 
+## D-0006 — Runtime: pin Node.js 24 (Krypton) Active LTS
+
+- **Date:** 2026-07-11
+- **Problem:** The spec says "current LTS" without a version. My initial claim of "Node 22 = current LTS"
+  was unverified and wrong; the correct version had to be confirmed against official docs before pinning.
+- **Options considered:** Node 24 (Active LTS, "Recommended For Most Users"); Node 22 (Maintenance LTS,
+  already installed); Node 26 (Current — not for production).
+- **Chosen option:** Node 24 (Krypton), pinned consistently across local dev, `package.json` engines
+  (`>=24.0.0 <25.0.0`), `.nvmrc` (`24`, resolves to the latest stable patch), and CI (`node-version-file`).
+- **Reason:** Verified via nodejs.org/en/download (recommended = v24.18.0 LTS) and the previous-releases page
+  (v24 = Active LTS to ~2028; v22 = Maintenance LTS to ~April 2027). User confirmed Node 24 and requested the
+  latest stable patch rather than a hardcoded old patch.
+- **Tradeoffs:** Required upgrading the local machine from v22.18.0 to v24.x. All chosen dependencies
+  (drizzle-orm, pg, zod, pino, commander, tsx, vitest, eslint, typescript, prettier) support Node 24.
+- **Rollback path:** Change the version in `.nvmrc` + engines + CI; no code coupling to a specific version.
+- **Status:** Accepted (Phase 1). Local + CI pinned to Node 24.
+
+---
+
 ## D-0001 — ORM: Drizzle over Prisma
 
 - **Date:** 2026-07-11
@@ -62,7 +81,9 @@ Every significant decision is recorded here in the required format. Newest first
 - **Tradeoffs:** `corepack enable` may require an elevated shell on this Windows setup (observed EPERM writing to
   `C:\Program Files\nodejs`). Resolved at Phase 1 start.
 - **Rollback path:** Fall back to npm; lockfile/scripts are the only coupling.
-- **Status:** Accepted (Phase 0). Enable step deferred to Phase 1 setup.
+- **Status:** Accepted. Resolved in Phase 1: pnpm 11.11.0 enabled via a Corepack shim in the user-writable
+  `%LOCALAPPDATA%\Microsoft\WindowsApps` directory (already on PATH), avoiding the elevated-shell requirement.
+  Version pinned via `packageManager` in `package.json`.
 
 ---
 

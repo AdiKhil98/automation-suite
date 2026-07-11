@@ -1,0 +1,4 @@
+# pnpm settings. esbuild (used by tsx and vitest) ships a prebuilt platform binary
+# and needs its install script approved to run.
+allowBuilds:
+  esbuild: true

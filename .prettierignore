@@ -1,0 +1,6 @@
+dist
+node_modules
+migrations
+coverage
+.postgres-data
+pnpm-lock.yaml
