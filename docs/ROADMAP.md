@@ -9,8 +9,8 @@ No phase begins before the previous one is approved with `APPROVE PHASE X`.
 | Phase | Name | Tag | Approved? |
 |---|---|---|---|
 | 0 | Discovery & system specification | `phase-0-specification` | ✅ approved |
-| 1 | Local foundation & deterministic core | `phase-1-foundation` | ⏳ in progress |
-| 2 | Lead collection & deduplication | `phase-2-lead-collection` | ☐ |
+| 1 | Local foundation & deterministic core | `phase-1-foundation` | ✅ approved |
+| 2 | Lead collection & deduplication | `phase-2-lead-collection` | ⏳ in progress |
 | 3 | Deterministic qualification | `phase-3-qualification` | ☐ |
 | 4 | Website capture & evidence extraction | `phase-4-website-capture` | ☐ |
 | 5 | AI website audit & opportunity analysis | `phase-5-ai-audit` | ☐ |

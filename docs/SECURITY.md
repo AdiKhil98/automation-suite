@@ -15,6 +15,21 @@
 - Store only business data needed for the workflow. Do not collect unnecessary personal data.
 - Research only publicly accessible business information (see respectful-research rules in PRODUCT_SPEC.md §6).
 
+## Google Places data handling (Phase 2)
+
+Google Maps Platform terms restrict caching of Places content, so the system persists **no Google Places
+content**. See docs/integrations/google-places.md and DECISIONS D-0008.
+
+- **Persisted permanently:** Place ID, internal IDs, provider, campaign/run metadata, our request/query
+  parameters, field mask, timestamps, processing outcome, match decision, cost/usage metadata.
+- **Never persisted:** display name, formatted address, business status, primary type, website URI, phone,
+  rating, review count, and any normalized derivative of these — processed in memory only, then discarded.
+- **Coordinates:** cacheable ≤30 days in an isolated purge-on-expiry structure only; Phase 2 persists none.
+- **Durable facts** come from independent public sources (official website) with `facts_source`,
+  `facts_source_url`, `facts_captured_at`. `facts_source` is never `google_places`.
+- Discovery is ID-only (`places.id,nextPageToken`). Real calls require the feature flag
+  (`LEAD_SOURCE=google_places`), a key, and `DRY_RUN=false`.
+
 ## Outbound safety
 
 - Global kill switch `OUTBOUND_ACTIONS_ENABLED=false` blocks every sending integration regardless of state.

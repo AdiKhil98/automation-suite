@@ -4,6 +4,12 @@ import * as schema from './schema.js';
 
 export type Database = NodePgDatabase<typeof schema>;
 
+/** The transaction handle Drizzle passes to `db.transaction(cb)`. */
+export type Transaction = Parameters<Parameters<Database['transaction']>[0]>[0];
+
+/** Anything that can run queries: the base connection or an open transaction. */
+export type DbExecutor = Database | Transaction;
+
 export interface DbHandle {
   db: Database;
   pool: pg.Pool;

@@ -10,7 +10,8 @@ export async function listLeads(ctx: CliContext): Promise<void> {
   console.log(`${leads.length} lead(s):\n`);
   for (const lead of leads) {
     const city = lead.city ?? '-';
+    const name = lead.businessName ?? `(candidate: place ${lead.placeId ?? '?'})`;
 
-    console.log(`${lead.id}  ${lead.status.padEnd(24)}  ${city.padEnd(12)}  ${lead.businessName}`);
+    console.log(`${lead.id}  ${lead.status.padEnd(24)}  ${city.padEnd(12)}  ${name}`);
   }
 }

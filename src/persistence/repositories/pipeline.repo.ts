@@ -3,7 +3,8 @@ import { asc, eq } from 'drizzle-orm';
 import { type EventRecorder } from '../../domain/leads/lead-service.js';
 import { type NewPipelineEvent, type PipelineEvent } from '../../domain/pipeline/pipeline-event.js';
 import { type LeadStatus } from '../../domain/leads/status.js';
-import { type Database } from '../db.js';
+import { type TxEventRecorder } from '../../pipeline/ports.js';
+import { type DbExecutor } from '../db.js';
 import { pipelineEvents } from '../schema.js';
 
 type EventRow = typeof pipelineEvents.$inferSelect;
@@ -22,8 +23,8 @@ function toDomain(row: EventRow): PipelineEvent {
   };
 }
 
-export class PipelineRepository implements EventRecorder {
-  constructor(private readonly db: Database) {}
+export class PipelineRepository implements EventRecorder, TxEventRecorder {
+  constructor(private readonly db: DbExecutor) {}
 
   async record(event: NewPipelineEvent): Promise<void> {
     await this.db.insert(pipelineEvents).values({

@@ -22,16 +22,28 @@ describe('lead schemas', () => {
       normalizedName: 'acme dental',
       domain: null,
       normalizedDomain: null,
+      phone: null,
+      normalizedPhone: null,
+      formattedAddress: null,
+      normalizedAddress: null,
+      latitude: null,
+      longitude: null,
       placeId: null,
       city: 'Manchester',
       country: 'GB',
       status: 'NEW',
       priority: null,
       source: 'fixture',
+      factsSource: 'mock',
+      factsSourceUrl: null,
+      factsCapturedAt: now,
+      dedupStatus: 'UNIQUE',
+      duplicateOf: null,
       createdAt: now,
       updatedAt: now,
     });
     expect(lead.status).toBe('NEW');
+    expect(lead.dedupStatus).toBe('UNIQUE');
   });
 
   it('leadSchema rejects an unknown status', () => {

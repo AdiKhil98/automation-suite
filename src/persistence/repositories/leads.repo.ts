@@ -1,8 +1,10 @@
-import { desc, eq } from 'drizzle-orm';
-import { type Lead, type LeadPriority } from '../../domain/leads/lead.js';
+import { and, desc, eq, or, type SQL } from 'drizzle-orm';
+import { type DedupCandidate, type DedupInput } from '../../domain/leads/dedup.js';
+import { type DedupStatus, type Lead, type LeadPriority } from '../../domain/leads/lead.js';
+import { type TxLeadStore } from '../../pipeline/ports.js';
 import { type LeadStore } from '../../domain/leads/lead-service.js';
 import { type LeadStatus } from '../../domain/leads/status.js';
-import { type Database } from '../db.js';
+import { type DbExecutor } from '../db.js';
 import { leads } from '../schema.js';
 
 type LeadRow = typeof leads.$inferSelect;
@@ -14,36 +16,33 @@ function toDomain(row: LeadRow): Lead {
     normalizedName: row.normalizedName,
     domain: row.domain,
     normalizedDomain: row.normalizedDomain,
+    phone: row.phone,
+    normalizedPhone: row.normalizedPhone,
+    formattedAddress: row.formattedAddress,
+    normalizedAddress: row.normalizedAddress,
+    latitude: row.latitude,
+    longitude: row.longitude,
     placeId: row.placeId,
     city: row.city,
     country: row.country,
     status: row.status as LeadStatus,
     priority: (row.priority as LeadPriority | null) ?? null,
     source: row.source,
+    factsSource: row.factsSource,
+    factsSourceUrl: row.factsSourceUrl,
+    factsCapturedAt: row.factsCapturedAt,
+    dedupStatus: row.dedupStatus as DedupStatus,
+    duplicateOf: row.duplicateOf,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
 }
 
-export class LeadsRepository implements LeadStore {
-  constructor(private readonly db: Database) {}
+export class LeadsRepository implements LeadStore, TxLeadStore {
+  constructor(private readonly db: DbExecutor) {}
 
   async create(lead: Lead): Promise<void> {
-    await this.db.insert(leads).values({
-      id: lead.id,
-      businessName: lead.businessName,
-      normalizedName: lead.normalizedName,
-      domain: lead.domain,
-      normalizedDomain: lead.normalizedDomain,
-      placeId: lead.placeId,
-      city: lead.city,
-      country: lead.country,
-      status: lead.status,
-      priority: lead.priority,
-      source: lead.source,
-      createdAt: lead.createdAt,
-      updatedAt: lead.updatedAt,
-    });
+    await this.db.insert(leads).values(lead);
   }
 
   async getById(id: string): Promise<Lead | null> {
@@ -56,8 +55,41 @@ export class LeadsRepository implements LeadStore {
     await this.db.update(leads).set({ status, updatedAt }).where(eq(leads.id, id));
   }
 
+  async setDedupStatus(id: string, status: DedupStatus, duplicateOf: string | null): Promise<void> {
+    await this.db.update(leads).set({ dedupStatus: status, duplicateOf }).where(eq(leads.id, id));
+  }
+
   async list(limit = 100): Promise<Lead[]> {
     const rows = await this.db.select().from(leads).orderBy(desc(leads.createdAt)).limit(limit);
     return rows.map(toDomain);
+  }
+
+  /**
+   * Candidate leads that share a strong identifier (domain / phone / name) with the
+   * input. The dedup engine then applies address-anchored precedence to decide.
+   */
+  async findDedupCandidates(input: DedupInput): Promise<DedupCandidate[]> {
+    const conditions: SQL[] = [];
+    if (input.normalizedDomain) conditions.push(eq(leads.normalizedDomain, input.normalizedDomain));
+    if (input.normalizedPhone) conditions.push(eq(leads.normalizedPhone, input.normalizedPhone));
+    if (input.normalizedName) conditions.push(eq(leads.normalizedName, input.normalizedName));
+    if (conditions.length === 0) return [];
+
+    const rows = await this.db
+      .select()
+      .from(leads)
+      .where(and(eq(leads.dedupStatus, 'UNIQUE'), or(...conditions)))
+      .limit(50);
+
+    return rows.map((row) => ({
+      leadId: row.id,
+      normalizedName: row.normalizedName,
+      normalizedDomain: row.normalizedDomain,
+      normalizedPhone: row.normalizedPhone,
+      normalizedAddress: row.normalizedAddress,
+      latitude: row.latitude,
+      longitude: row.longitude,
+      city: row.city,
+    }));
   }
 }

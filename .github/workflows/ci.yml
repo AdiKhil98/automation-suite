@@ -48,5 +48,8 @@ jobs:
       - name: Apply migrations
         run: pnpm db:migrate
 
+      - name: Integration tests (PostgreSQL)
+        run: pnpm test:integration
+
       - name: Build
         run: pnpm build

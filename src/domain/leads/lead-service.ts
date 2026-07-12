@@ -1,8 +1,7 @@
-import { randomUUID } from 'node:crypto';
 import { AppError, InvalidStateTransitionError } from '../../utils/errors.js';
 import { type NewPipelineEvent } from '../pipeline/pipeline-event.js';
+import { buildLeadFromFacts } from './lead-factory.js';
 import { type Lead, type NewLead, newLeadSchema } from './lead.js';
-import { normalizeDomain, normalizeName } from './normalize.js';
 import { canTransition } from './state-machine.js';
 import { type LeadStatus } from './status.js';
 
@@ -31,22 +30,19 @@ export class LeadService {
 
   async createLead(input: NewLead): Promise<Lead> {
     const parsed = newLeadSchema.parse(input);
-    const now = new Date();
-    const lead: Lead = {
-      id: randomUUID(),
-      businessName: parsed.businessName,
-      normalizedName: normalizeName(parsed.businessName),
-      domain: parsed.domain,
-      normalizedDomain: normalizeDomain(parsed.domain),
-      placeId: parsed.placeId,
-      city: parsed.city,
-      country: parsed.country,
-      status: 'NEW',
-      priority: parsed.priority,
-      source: parsed.source,
-      createdAt: now,
-      updatedAt: now,
-    };
+    const lead = buildLeadFromFacts(
+      {
+        businessName: parsed.businessName,
+        domain: parsed.domain,
+        phone: parsed.phone,
+        city: parsed.city,
+        country: parsed.country,
+        formattedAddress: parsed.formattedAddress,
+        latitude: parsed.latitude,
+        longitude: parsed.longitude,
+      },
+      { factsSource: 'mock', source: parsed.source ?? 'mock', placeId: parsed.placeId },
+    );
 
     await this.store.create(lead);
     await this.events.record({

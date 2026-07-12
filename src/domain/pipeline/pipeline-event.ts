@@ -11,6 +11,13 @@ export const pipelineEventTypeSchema = z.enum([
   'STATE_TRANSITION',
   'INVALID_TRANSITION',
   'NOTE',
+  // Collection (Phase 2)
+  'LEAD_COLLECTED',
+  'LEAD_DUPLICATE',
+  'LEAD_BRANCH',
+  'LEAD_AMBIGUOUS',
+  'LEAD_REJECTED',
+  'SOURCE_REFRESHED',
 ]);
 export type PipelineEventType = z.infer<typeof pipelineEventTypeSchema>;
 

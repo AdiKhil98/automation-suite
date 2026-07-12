@@ -4,6 +4,45 @@ Every significant decision is recorded here in the required format. Newest first
 
 ---
 
+## D-0008 — No storage of Google Places content; Place ID only
+
+- **Date:** 2026-07-11
+- **Problem:** Google Maps Platform terms restrict caching of Places content. Persisting display name,
+  address, phone, website, rating, etc. (or normalized derivatives) would be non-compliant.
+- **Options considered:** Store full raw payload; store selected fields for 30 days with purge; store nothing
+  but Place ID.
+- **Chosen option:** Persist **only** Place ID + our own metadata (request params, field mask, outcome, match
+  decision, cost/usage, timestamps). Google display content is processed **in memory only** and discarded.
+  Coordinates may be cached ≤30 days in an isolated purge-on-expiry structure — but Phase 2 persists no
+  coordinates, so no retention obligation arises. Durable facts come later from independent public sources
+  (official website) with `facts_source` / `facts_source_url` / `facts_captured_at` (never `google_places`).
+- **Reason:** Compliance with current Places terms; keeps the durable store defensible. `response_hash` and a
+  general `transient_fields` cache were removed as they derive from restricted content.
+- **Tradeoffs:** Google-sourced leads are Place-ID-only candidates until enrichment; cross-run dedup for Google
+  reduces to Place ID (documented limitation).
+- **Rollback path:** Isolated to the collection layer + schema; no destructive change.
+- **Status:** Accepted (Phase 2).
+
+---
+
+## D-0007 — Google Places API (New) + ID-only discovery mask
+
+- **Date:** 2026-07-11
+- **Problem:** Which Places API/endpoint and which fields to request for Phase 2 lead discovery.
+- **Options considered:** Legacy Places API; Places API (New) `searchText` with a rich mask; Places API (New)
+  with an IDs-only mask.
+- **Chosen option:** Places API (New) `POST places:searchText`, field mask **`places.id,nextPageToken` only**
+  (two-stage strategy: enrichment deferred).
+- **Reason:** Verified against current official docs (2026-07-11). Field mask sets the billed SKU tier;
+  IDs-only stays in the cheapest Essentials tier and needs no content storage. Enough to create Place-ID
+  candidates and dedup by Place ID.
+- **Tradeoffs:** No name/address/coords from discovery, so rich dedup relies on later enrichment or
+  mock/manual data. Pricing figures are local estimates pending official reconciliation.
+- **Rollback path:** Provider is behind `LeadSourceProvider`; mask/endpoint changes are localized.
+- **Status:** Accepted (Phase 2). See docs/integrations/google-places.md.
+
+---
+
 ## D-0006 — Runtime: pin Node.js 24 (Krypton) Active LTS
 
 - **Date:** 2026-07-11

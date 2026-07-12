@@ -8,7 +8,7 @@ export async function leadState(ctx: CliContext, id: string): Promise<void> {
     return;
   }
 
-  console.log(`Lead:     ${lead.businessName}`);
+  console.log(`Lead:     ${lead.businessName ?? `(candidate: place ${lead.placeId ?? '?'})`}`);
 
   console.log(`Id:       ${lead.id}`);
 

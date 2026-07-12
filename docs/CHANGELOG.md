@@ -2,6 +2,38 @@
 
 All notable changes per phase. Format loosely follows Keep a Changelog.
 
+## [phase-2-lead-collection] — 2026-07-11
+
+### Added
+
+- Deterministic dedup engine (`src/domain/leads/dedup.ts`): address-anchored precedence
+  (Place ID → domain+addr → phone+addr → name+addr → branch → ambiguous → unique); name never merges alone.
+- Normalization for phone (national significant number) + address + haversine proximity; configurable
+  near-address threshold (`DEDUP_NEAR_ADDRESS_METERS`, default 40 m).
+- Lead facts made nullable + provenance (`facts_source`/`facts_source_url`/`facts_captured_at`), `dedup_status`,
+  `duplicate_of`; lead factory (`buildLeadFromFacts` / `buildCandidateLead`).
+- Source model: `source_entities` (stable provider+Place ID identity, idempotency anchor), `source_requests`
+  (one row per API request/page; cost accounted here), `source_observations` (one per candidate; refs entity
+  + request). Migration `0001`.
+- Provider abstraction: `LeadSourceProvider`; `MockLeadSource` (default, full facts) and `GooglePlacesProvider`
+  (Places API New, **ID-only field mask** `places.id,nextPageToken`, pagination, rate limit, timeout, retries).
+- Collection pipeline (`collect-leads`): per-candidate transactions, idempotent reruns, ambiguous flagging
+  (no merge), caps, conservative restart (rerun from page 1), rejection of malformed records.
+- HTTP (timeout/retry/backoff), rate limiter, geo utilities. `collect-leads` CLI command.
+- Compliance: **no Google Places content persisted** (Place ID only; content in-memory only). Docs in
+  SECURITY, DECISIONS (D-0007/D-0008) and docs/integrations/google-places.md.
+- Tests: unit (normalize, dedup matrix, pipeline with in-memory fakes) + **PostgreSQL integration**
+  (source uniqueness, idempotent rerun, append-only observation history, ambiguous matching, transaction
+  rollback). CI now runs the integration suite against a Postgres service.
+
+### Decisions
+
+- D-0007 Places API (New) + ID-only discovery mask. D-0008 no storage of Google Places content.
+
+### Notes
+
+- No AI, qualification, audit, demos or emails. Mock default; Google requires flag + key + DRY_RUN=false.
+
 ## [phase-1-foundation] — 2026-07-11
 
 ### Added

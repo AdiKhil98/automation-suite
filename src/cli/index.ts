@@ -1,4 +1,5 @@
 import { Command } from 'commander';
+import { collectLeadsCommand } from './commands/collect-leads.js';
 import { createSampleLeads } from './commands/create-sample-leads.js';
 import { leadState } from './commands/lead-state.js';
 import { listLeads } from './commands/list-leads.js';
@@ -27,6 +28,24 @@ program
   .description('Show a lead current state and full event history')
   .argument('<id>', 'lead id')
   .action((id: string) => withContext((ctx) => leadState(ctx, id)));
+
+program
+  .command('collect-leads')
+  .description('Collect and deduplicate leads for a campaign (mock by default)')
+  .requiredOption('--campaign <name>', 'campaign name (see src/config/campaigns.ts)')
+  .option('--source <provider>', 'override provider: mock | google_places')
+  .option('--dry-run', 'force dry-run (no paid API calls)')
+  .option('--limit <n>', 'max new leads this run (overrides MAX_LEADS_PER_RUN)')
+  .action((opts: { campaign: string; source?: string; dryRun?: boolean; limit?: string }) =>
+    withContext((ctx) =>
+      collectLeadsCommand(ctx, {
+        campaign: opts.campaign,
+        source: opts.source === 'google_places' ? 'google_places' : opts.source === 'mock' ? 'mock' : undefined,
+        dryRun: opts.dryRun,
+        limit: opts.limit,
+      }),
+    ),
+  );
 
 program
   .command('reset-test-data')
