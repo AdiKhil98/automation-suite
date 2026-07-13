@@ -4,6 +4,55 @@ Every significant decision is recorded here in the required format. Newest first
 
 ---
 
+## D-0017 — Hardened container is the browser SSRF boundary (not URL checks alone)
+
+- **Date:** 2026-07-11
+- **Problem:** URL/IP validation cannot fully prevent browser-level SSRF (subresources,
+  page `fetch`, browser-internal DNS/QUIC).
+- **Chosen option:** Defense in depth — app-level request interception + SSRF guard + disabling page-script
+  WebSocket/WebRTC, PLUS a hardened, network-isolated container as the authoritative boundary for real
+  captures (non-root, sandbox on, seccomp, `--init`, read-only fs + tmpfs, cap-drop, resource limits, egress
+  firewall denying private/metadata ranges). Local Windows Chromium is for controlled fixtures/dev only.
+- **Reason:** Honest security posture; the standard Playwright image is a runtime dependency, not a complete
+  boundary. We never claim browser SSRF is solved by URL checks alone.
+- **Tradeoffs:** Production captures require container infrastructure (documented, not auto-run here).
+- **Rollback path:** Deploy config only (`deploy/`).
+- **Status:** Accepted (Phase 5). See docs/deploy/hardened-browser.md.
+
+---
+
+## D-0016 — Do not persist full HTML; store bounded evidence + screenshots + hashes
+
+- **Date:** 2026-07-11
+- **Problem:** How much captured content to persist for the Phase 6 audit.
+- **Chosen option:** Persist bounded visible text, element-level structured evidence, screenshots
+  (content-addressed blobs), a raw-DOM hash (forensic), and a normalized evidence fingerprint. **No full HTML**;
+  no cookies/storage/profiles/secrets.
+- **Reason:** Privacy + size; hashes give change detection/dedup; screenshots are the visual evidence. Any
+  future HTML retention must be justified separately.
+- **Tradeoffs:** Post-hydration DOM mutations after settle aren't captured beyond the rendered snapshot used
+  for extraction.
+- **Rollback path:** Evidence extraction isolated in `src/domain/capture/`.
+- **Status:** Accepted (Phase 5).
+
+---
+
+## D-0015 — Playwright 1.61.1 pinned; local dev install, Docker for production
+
+- **Date:** 2026-07-11
+- **Problem:** Choose an exact Playwright version + browser-install strategy; the npm package, browser
+  binaries, and Docker image tag must match.
+- **Chosen option:** Pin `playwright@1.61.1` (verified current stable via `npm view`). Dev installs Chromium
+  with `npx playwright install chromium`; production/scheduled runs use `mcr.microsoft.com/playwright:v1.61.1-noble`
+  (tag = package version). Each capture run records `playwright_package_version`, `browser_version`, and image
+  tag where available.
+- **Reason:** Reproducibility; the official docs require the Docker and project versions to match.
+- **Tradeoffs:** Version bumps require updating the pin, image tag, and re-installing browsers together.
+- **Rollback path:** Version pin + provider are isolated; mock provider needs no browser.
+- **Status:** Accepted (Phase 5).
+
+---
+
 ## D-0014 — Google context is in-memory only; paid reads separated from outbound
 
 - **Date:** 2026-07-11

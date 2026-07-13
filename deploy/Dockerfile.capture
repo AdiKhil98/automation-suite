@@ -1,0 +1,22 @@
+# Hardened website-capture runtime. Base image tag MUST match the pinned
+# `playwright` package version (see docs/DECISIONS.md D-0015).
+FROM mcr.microsoft.com/playwright:v1.61.1-noble
+
+# The base image already installs Chromium + OS deps and provides a non-root
+# `pwuser`. Keep the Chromium sandbox enabled — never pass --no-sandbox.
+WORKDIR /app
+
+# Install exact dependencies as root, then drop privileges to run.
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+RUN corepack enable && corepack prepare pnpm@11.11.0 --activate \
+ && pnpm install --frozen-lockfile --prod=false
+COPY . .
+
+ENV NODE_ENV=production \
+    CAPTURE_PROVIDER=playwright \
+    PLAYWRIGHT_BROWSER=chromium
+
+USER pwuser
+
+# Run a capture batch (campaign passed at runtime).
+ENTRYPOINT ["node", "--env-file-if-exists=.env", "--import", "tsx", "src/cli/index.ts", "capture-websites"]

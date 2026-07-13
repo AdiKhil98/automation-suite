@@ -55,6 +55,26 @@ content**. See docs/integrations/google-places.md and DECISIONS D-0008.
   and is independent of the outbound kill switch. Google-derived context is in-memory only and never
   persisted (see docs/integrations/google-places-details.md; verified by an integration test).
 
+## Website capture (Phase 5)
+
+- **Browser isolation:** a fresh non-persistent context per lead **and per profile** (desktop/mobile) — no
+  shared cookies, localStorage, sessionStorage, cache, permissions, or service workers. `serviceWorkers:'block'`,
+  `permissions:[]`, `acceptDownloads:false`, downloads canceled+deleted, dialogs dismissed, popups closed and
+  not followed. Page-script WebSocket and WebRTC are neutralized via an init script. No form submission, no
+  auth, no CAPTCHA bypass. No browser profile or storage state is persisted.
+- **Network policy on navigation:** request interception applies the SSRF guard to every request and validates
+  the main-frame target + redirects against a Public-Suffix-List-aware `VerifiedOriginPolicy`; a cross-domain
+  main-frame change is refused (never replaces the verified official domain).
+- **Browser SSRF is not fully solvable by URL checks** (subresources, page `fetch`, browser DNS). Production
+  captures run in a hardened, network-isolated container with an egress firewall — see
+  docs/deploy/hardened-browser.md and DECISIONS D-0017. The local Windows browser is for controlled fixtures /
+  dev only.
+- **Artifacts:** screenshots are private internal evidence (content-addressed blobs under `.artifacts/`,
+  git-ignored) — never served, never a Netlify asset. No full HTML, cookies, storage, or secrets persisted; no
+  sensitive values in artifact paths.
+- **Provider-data boundary:** capture targets only URLs already independently verified in Phase 4. No ephemeral
+  Google context enters capture records, screenshots, logs, fingerprints, or events.
+
 ## Outbound safety
 
 - Global kill switch `OUTBOUND_ACTIONS_ENABLED=false` blocks every sending integration regardless of state.

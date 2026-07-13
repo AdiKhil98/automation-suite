@@ -27,9 +27,10 @@ outbound-outreach pipeline for a web-design / AI-automation services business:
 
 ## Current approved phase
 
-**Phases 0–3 approved. Phase 4 — Independent enrichment & website discovery — complete, awaiting `APPROVE PHASE 4`.**
-Do not begin Phase 5 (Website capture & evidence extraction) until the user replies `APPROVE PHASE 4`.
+**Phases 0–4 approved. Phase 5 — Website capture & evidence extraction — complete, awaiting `APPROVE PHASE 5`.**
+Do not begin Phase 6 (AI website audit & opportunity analysis) until the user replies `APPROVE PHASE 5`.
 Note: an enrichment phase was inserted at position 4; former phases 4–13 are now 5–14 (see docs/ROADMAP.md).
+Capture uses Playwright (mock by default). Standard tests use mock; the real browser suite is `pnpm test:browser`.
 
 ## Operating protocol (mandatory)
 

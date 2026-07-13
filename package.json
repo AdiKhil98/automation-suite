@@ -13,6 +13,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration --passWithNoTests --no-file-parallelism",
+    "test:browser": "vitest run tests/browser --passWithNoTests --no-file-parallelism --test-timeout=60000",
     "test:e2e": "vitest run tests/e2e --passWithNoTests",
     "build": "tsc -p tsconfig.build.json",
     "check": "pnpm lint && pnpm typecheck && pnpm test",
@@ -26,6 +27,8 @@
     "drizzle-orm": "^0.45.2",
     "pg": "^8.22.0",
     "pino": "^10.3.1",
+    "playwright": "1.61.1",
+    "tldts": "^7.4.8",
     "zod": "^4.4.3"
   },
   "devDependencies": {

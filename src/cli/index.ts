@@ -1,4 +1,5 @@
 import { Command } from 'commander';
+import { captureWebsitesCommand } from './commands/capture-websites.js';
 import { collectLeadsCommand } from './commands/collect-leads.js';
 import { enrichLeadCommand } from './commands/enrich-lead.js';
 import { enrichLeadsCommand } from './commands/enrich-leads.js';
@@ -76,6 +77,16 @@ program
   .option('--csv <path>', 'CSV of leadId,candidateUrl rows')
   .action((opts: { lead?: string; candidate?: string; csv?: string }) =>
     withContext((ctx) => enrichLeadCommand(ctx, opts)),
+  );
+
+program
+  .command('capture-websites')
+  .description('Playwright capture of verified official websites (mock by default)')
+  .requiredOption('--campaign <name>', 'campaign name (see src/config/campaigns.ts)')
+  .option('--purpose <p>', 'audit | verification', 'audit')
+  .option('--limit <n>', 'max leads to capture this run')
+  .action((opts: { campaign: string; purpose?: string; limit?: string }) =>
+    withContext((ctx) => captureWebsitesCommand(ctx, opts)),
   );
 
 program

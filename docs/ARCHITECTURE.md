@@ -86,9 +86,11 @@ Proposed allowed transitions (finalized in Phase 1):
 NEW → NORMALIZED
 NORMALIZED → DUPLICATE | REJECTED_AUTOMATICALLY | READY_FOR_QUALIFICATION
 READY_FOR_QUALIFICATION → QUALIFIED | READY_FOR_ENRICHMENT | REJECTED | NEEDS_MANUAL_REVIEW
-QUALIFIED → READY_FOR_AUDIT
+QUALIFIED → READY_FOR_CAPTURE                                   # capture precedes audit (Phase 5)
 READY_FOR_ENRICHMENT → ENRICHED | NEEDS_MANUAL_REVIEW | FAILED   # Phase 4 enrichment
 ENRICHED → READY_FOR_QUALIFICATION                              # re-qualify with enriched facts
+READY_FOR_CAPTURE → CAPTURED | NEEDS_MANUAL_REVIEW | FAILED      # Phase 5 capture
+CAPTURED → READY_FOR_AUDIT
 READY_FOR_AUDIT → AUDITED | NEEDS_MANUAL_REVIEW | FAILED
 AUDITED → OPPORTUNITY_READY | NEEDS_MANUAL_REVIEW
 OPPORTUNITY_READY → COMPETITOR_RESEARCH_READY | DEMO_DECIDED
@@ -251,3 +253,16 @@ transaction then writes attempt + candidates + signals + facts (idempotent, prov
 state transition + event. Facts: `official_domain` / `official_website_url` / `official_location_page_url` are
 distinct (branches share a domain). Per-fact provenance strength website > manual > mock; manual conflicts are
 preserved and routed to review, never auto-superseded.
+
+## 13. Website capture (Phase 5)
+
+Playwright renders Phase-4-verified official websites (mock provider by default; no LLM). Two purposes:
+`AUDIT_CAPTURE` (normal, for leads with verified official facts → `CAPTURED` → `READY_FOR_AUDIT`) and
+`VERIFICATION_CAPTURE` (re-render a Phase-4 `BROWSER_REQUIRED` candidate and re-run the deterministic verifier
+on the rendered DOM — only a verified official association writes facts; it never becomes audit-ready merely by
+rendering). A nine-outcome taxonomy maps to lead states; lead-level `FAILED` is reserved for internal errors.
+A fresh isolated context per lead **and per profile** (desktop 1440×900, mobile 390×844), SSRF-hardened
+navigation, and a PSL-aware `VerifiedOriginPolicy`. Browser/network runs outside the DB transaction; a single
+per-lead transaction writes run + pages + artifact metadata + evidence + errors + fact writes + state + event,
+with content-addressed screenshot blobs committed after commit / discarded on rollback. No full HTML persisted.
+Real captures require a hardened, network-isolated container (docs/deploy/hardened-browser.md).

@@ -67,6 +67,15 @@ a stubbed fetcher yields identical outcomes every run. Track: official-site veri
 rate, browser-required rate, no-verified-candidate rate, and (when the Google context provider is enabled)
 reads + estimated cost per accepted lead. No model, so there is no output variance to average out.
 
+## Website capture (Phase 5)
+
+Capture is deterministic and non-subjective (no quality judgements — those are Phase 6). Versioned inputs
+(emulation profile, page-selection policy, extractor, browser/Playwright version) are stored per run, and a
+normalized evidence fingerprint (timestamps/nonces excluded) enables semantic unchanged-page detection.
+Track: capture success rate, partial-capture rate, browser-blocked / bot-challenge / auth-required rates,
+mobile-overflow incidence, and artifact dedup ratio. The mock provider gives fully reproducible fixtures; the
+real browser is exercised by `pnpm test:browser` against local fixtures.
+
 ## Quality gates
 
 - Phase 5 (audit) and Phase 8 (email) each define a documented minimum quality threshold on the fixture set

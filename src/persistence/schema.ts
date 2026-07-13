@@ -400,3 +400,126 @@ export const enrichmentSignals = pgTable(
     ),
   }),
 );
+
+// --- Phase 5: website capture & evidence extraction ---
+
+const CAPTURE_PURPOSES = "'AUDIT_CAPTURE','VERIFICATION_CAPTURE'";
+const CAPTURE_OUTCOMES =
+  "'CAPTURED','PARTIAL_CAPTURE','BROWSER_BLOCKED','BOT_CHALLENGE','AUTH_REQUIRED','NO_RENDERABLE_CONTENT','TRANSIENT_ERROR','POLICY_BLOCKED','INVALID_TARGET'";
+const CAPTURE_EVIDENCE_TYPES =
+  "'title','meta_description','lang','canonical','heading','nav_label','cta','link','mailto','tel','form','image_alt','structured_data','footer_legal','horizontal_overflow'";
+
+export const websiteCaptureRuns = pgTable(
+  'website_capture_runs',
+  {
+    id: text('id').primaryKey(),
+    leadId: text('lead_id').notNull().references(() => leads.id, { onDelete: 'cascade' }),
+    runId: text('run_id').notNull().references(() => pipelineRuns.id, { onDelete: 'cascade' }),
+    purpose: text('purpose').notNull(),
+    outcome: text('outcome').notNull(),
+    primaryUrl: text('primary_url'),
+    sourceEnrichmentCandidateId: text('source_enrichment_candidate_id').references(() => enrichmentCandidates.id, { onDelete: 'set null' }),
+    desktopPrimaryComplete: boolean('desktop_primary_complete').notNull().default(false),
+    mobilePrimaryComplete: boolean('mobile_primary_complete').notNull().default(false),
+    secondaryPagesAttempted: integer('secondary_pages_attempted').notNull().default(0),
+    secondaryPagesCompleted: integer('secondary_pages_completed').notNull().default(0),
+    partialReason: text('partial_reason'),
+    normalizedEvidenceFingerprint: text('normalized_evidence_fingerprint'),
+    playwrightVersion: text('playwright_version'),
+    browser: text('browser'),
+    browserVersion: text('browser_version'),
+    chromiumRevision: text('chromium_revision'),
+    dockerImageTag: text('docker_image_tag'),
+    emulationProfileVersion: text('emulation_profile_version'),
+    pageSelectionPolicyVersion: text('page_selection_policy_version'),
+    extractorVersion: text('extractor_version'),
+    startedAt: timestamp('started_at', { withTimezone: true }).notNull(),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+  },
+  (t) => ({
+    leadIdx: index('website_capture_runs_lead_idx').on(t.leadId),
+    purposeCk: check('capture_purpose_ck', sql.raw(`purpose IN (${CAPTURE_PURPOSES})`)),
+    outcomeCk: check('capture_outcome_ck', sql.raw(`outcome IN (${CAPTURE_OUTCOMES})`)),
+    secAttemptedCk: check('capture_sec_attempted_ck', sql`${t.secondaryPagesAttempted} >= 0`),
+    secCompletedCk: check('capture_sec_completed_ck', sql`${t.secondaryPagesCompleted} >= 0`),
+  }),
+);
+
+export const capturedPages = pgTable(
+  'captured_pages',
+  {
+    id: text('id').primaryKey(),
+    captureRunId: text('capture_run_id').notNull().references(() => websiteCaptureRuns.id, { onDelete: 'cascade' }),
+    requestedUrl: text('requested_url').notNull(),
+    finalUrl: text('final_url'),
+    canonicalUrl: text('canonical_url'),
+    httpStatus: integer('http_status'),
+    role: text('role'),
+    profile: text('profile').notNull(),
+    ok: boolean('ok').notNull(),
+    loadMs: integer('load_ms'),
+    hasHorizontalOverflow: boolean('has_horizontal_overflow').notNull().default(false),
+    rawDomHash: text('raw_dom_hash'),
+  },
+  (t) => ({
+    runIdx: index('captured_pages_run_idx').on(t.captureRunId),
+    profileCk: check('captured_page_profile_ck', sql`${t.profile} IN ('desktop','mobile')`),
+  }),
+);
+
+export const captureArtifacts = pgTable(
+  'capture_artifacts',
+  {
+    id: text('id').primaryKey(),
+    capturedPageId: text('captured_page_id').notNull().references(() => capturedPages.id, { onDelete: 'cascade' }),
+    sha256: text('sha256').notNull(),
+    mime: text('mime').notNull(),
+    bytes: integer('bytes').notNull(),
+    width: integer('width').notNull(),
+    height: integer('height').notNull(),
+    kind: text('kind').notNull(),
+    profile: text('profile').notNull(),
+  },
+  (t) => ({
+    pageIdx: index('capture_artifacts_page_idx').on(t.capturedPageId),
+    shaIdx: index('capture_artifacts_sha_idx').on(t.sha256),
+    kindCk: check('capture_artifact_kind_ck', sql`${t.kind} IN ('viewport','fullpage')`),
+    profileCk: check('capture_artifact_profile_ck', sql`${t.profile} IN ('desktop','mobile')`),
+    sizeCk: check('capture_artifact_size_ck', sql`${t.bytes} >= 0 AND ${t.width} >= 0 AND ${t.height} >= 0`),
+  }),
+);
+
+export const captureEvidence = pgTable(
+  'capture_evidence',
+  {
+    id: text('id').primaryKey(),
+    capturedPageId: text('captured_page_id').notNull().references(() => capturedPages.id, { onDelete: 'cascade' }),
+    evidenceType: text('evidence_type').notNull(),
+    sourceUrl: text('source_url'),
+    profile: text('profile').notNull(),
+    selector: text('selector'),
+    extractedValue: text('extracted_value'),
+    normalizedValue: text('normalized_value'),
+  },
+  (t) => ({
+    pageIdx: index('capture_evidence_page_idx').on(t.capturedPageId),
+    typeCk: check('capture_evidence_type_ck', sql.raw(`evidence_type IN (${CAPTURE_EVIDENCE_TYPES})`)),
+    profileCk: check('capture_evidence_profile_ck', sql`${t.profile} IN ('desktop','mobile')`),
+  }),
+);
+
+export const captureErrors = pgTable(
+  'capture_errors',
+  {
+    id: text('id').primaryKey(),
+    captureRunId: text('capture_run_id').notNull().references(() => websiteCaptureRuns.id, { onDelete: 'cascade' }),
+    capturedPageId: text('captured_page_id').references(() => capturedPages.id, { onDelete: 'set null' }),
+    pageUrl: text('page_url'),
+    profile: text('profile'),
+    kind: text('kind').notNull(),
+    detail: text('detail'),
+  },
+  (t) => ({
+    runIdx: index('capture_errors_run_idx').on(t.captureRunId),
+  }),
+);

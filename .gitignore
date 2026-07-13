@@ -16,11 +16,12 @@ build/
 coverage/
 .vitest/
 
-# Playwright artifacts
+# Playwright / capture artifacts (private screenshots — never committed)
 playwright-report/
 test-results/
 /screenshots/
 /artifacts/
+.artifacts/
 
 # Local database volumes / dumps
 /.postgres-data/

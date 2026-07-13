@@ -41,7 +41,17 @@ pnpm cli qualify-leads --campaign dental-manchester-test   # re-qualify enriched
 # Manual enrichment (no Google/paid API): supply a candidate URL directly or via CSV
 pnpm cli enrich-lead --lead <lead-id> --candidate https://example.com
 pnpm cli enrich-lead --csv leads.csv                       # rows: leadId,candidateUrl
+
+# Phase 5 — Playwright capture of verified official websites (mock by default)
+pnpm cli capture-websites --campaign dental-manchester-test               # AUDIT_CAPTURE
+pnpm cli capture-websites --campaign dental-manchester-test --purpose verification  # BROWSER_REQUIRED leads
 ```
+
+Standard tests use the mock capture provider (no browser). The **real** browser suite runs against local
+fixtures: install Chromium once (`npx playwright install chromium`), then `pnpm test:browser`. For production
+captures of real prospect sites, use the hardened container — see
+[deploy/hardened-browser.md](deploy/hardened-browser.md). Screenshots are private artifacts under
+`.artifacts/` (git-ignored); a GC removes unreferenced blobs.
 
 Enrichment is mock + deterministic by default (no network in tests). The optional Google context provider is
 disabled unless `ENRICHMENT_CONTEXT_PROVIDER=google` and `ALLOW_PAID_READS=true` with a key — see
@@ -55,6 +65,14 @@ step ships a reverse script under `scripts/rollback/`. To roll Phase 4 back:
 ```text
 psql "$DATABASE_URL" -f scripts/rollback/0003_enrichment_down.sql
 git reset --hard phase-3-qualification
+```
+
+Phase 5:
+
+```text
+psql "$DATABASE_URL" -f scripts/rollback/0004_capture_down.sql
+git reset --hard phase-4-enrichment
+rm -rf .artifacts
 ```
 
 Qualification is deterministic and append-only: re-running preserves prior `qualification_results`. Leads

@@ -2,6 +2,48 @@
 
 All notable changes per phase. Format loosely follows Keep a Changelog.
 
+## [phase-5-website-capture] — 2026-07-11
+
+### Added
+
+- Website capture with Playwright 1.61.1 (mock provider by default; no LLM). Interfaces:
+  `BrowserCaptureProvider`, `CaptureStorageProvider`, `PageSelectionPolicy`, `CaptureEvidenceExtractor`.
+- Two capture purposes: `AUDIT_CAPTURE` (verified official facts → CAPTURED → READY_FOR_AUDIT) and
+  `VERIFICATION_CAPTURE` (re-render a Phase-4 BROWSER_REQUIRED candidate, re-run the deterministic verifier;
+  only a verified association writes facts — never audit-ready by rendering alone).
+- New lead states `READY_FOR_CAPTURE`, `CAPTURED`. Nine-outcome taxonomy with exact state routing;
+  lead-level FAILED reserved for internal errors.
+- Separate isolated desktop (1440×900) / mobile (390×844) contexts with distinct emulation profiles + version;
+  no shared cookies/storage/service-workers. Completeness fields (desktop/mobile primary complete, secondary
+  attempted/completed, partial reason).
+- Hardened browser runtime: `serviceWorkers:'block'`, permissions/downloads denied, dialogs dismissed, popups
+  closed, page-script WebSocket/WebRTC neutralized; request-interception SSRF guard (IPv4/IPv6 incl. mapped +
+  metadata + multicast + numeric forms); PSL-aware `VerifiedOriginPolicy` (tldts) refusing cross-domain
+  main-frame changes. Hardened container reference in `deploy/` + docs/deploy/hardened-browser.md (D-0017).
+- Content-addressed screenshot storage (temp → commit/discard, dedup, reference-safe GC); no full HTML — bounded
+  evidence + structured signals + screenshots + raw-DOM hash + normalized (volatile-stripped) evidence
+  fingerprint (D-0016). Versioned append-only capture runs.
+- Per-lead atomic transaction; browser/network outside the tx; artifact temp cleaned on rollback.
+- 5 tables (website_capture_runs, captured_pages, capture_artifacts, capture_evidence, capture_errors) with
+  CHECK constraints. Migration `0004` + reverse script `scripts/rollback/0004_capture_down.sql`.
+- CLI `capture-websites --campaign [--purpose audit|verification]`. New `CAPTURE_*` config. Dependencies:
+  `playwright@1.61.1` (pinned, D-0015), `tldts`.
+- Tests: unit (verified-origin PSL, request-guard SSRF, audit-decision, page-selection, evidence + fingerprints,
+  content-addressed storage GC/dedup); PostgreSQL integration (outcome routing, transactional rollback +
+  artifact cleanup, VERIFICATION path); **real Playwright browser suite `pnpm test:browser`** against local
+  fixtures (desktop/mobile, JS rendering, redirect, tracker block, console errors, mobile overflow). 118 unit +
+  20 integration + 2 browser.
+
+### Decisions
+
+- D-0015 Playwright 1.61.1 pin + install strategy; D-0016 no full-HTML retention; D-0017 hardened container as
+  the browser SSRF boundary.
+
+### Notes
+
+- Standard suite: zero external network, zero real browser, no API key. Client-rendered shells → BROWSER_REQUIRED
+  routing; a browser-required lead is only audit-ready after independent official-site verification.
+
 ## [phase-4-enrichment] — 2026-07-11
 
 ### Added

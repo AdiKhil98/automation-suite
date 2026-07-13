@@ -5,8 +5,9 @@ leads, audits their websites with stored evidence, decides whether to build a de
 evidence-based cold emails for **human review** — reversible, auditable, and human-approved until explicitly
 changed.
 
-> **Status: Phases 0–2 approved; Phase 3 (deterministic PRE_AUDIT qualification) complete, awaiting approval.**
-> Working locally: lead collection + dedup, per-fact provenance, and deterministic qualification via the CLI.
+> **Status: Phases 0–4 approved; Phase 5 (website capture & evidence extraction) complete, awaiting approval.**
+> Working locally end-to-end via the CLI: collect + dedup → qualify (PRE_AUDIT) → enrich (website discovery)
+> → re-qualify → Playwright capture → READY_FOR_AUDIT. Deterministic and mock-default; no LLM yet.
 > See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the phase plan and [`CLAUDE.md`](CLAUDE.md) for the operating contract.
 
 ## What this is (and isn't)

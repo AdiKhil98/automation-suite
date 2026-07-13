@@ -12,8 +12,8 @@ No phase begins before the previous one is approved with `APPROVE PHASE X`.
 | 1 | Local foundation & deterministic core | `phase-1-foundation` | ✅ approved |
 | 2 | Lead collection & deduplication | `phase-2-lead-collection` | ✅ approved |
 | 3 | Deterministic qualification (PRE_AUDIT) | `phase-3-qualification` | ✅ approved |
-| 4 | Independent enrichment & website discovery | `phase-4-enrichment` | ⏳ in progress |
-| 5 | Website capture & evidence extraction | `phase-5-website-capture` | ☐ |
+| 4 | Independent enrichment & website discovery | `phase-4-enrichment` | ✅ approved |
+| 5 | Website capture & evidence extraction | `phase-5-website-capture` | ⏳ in progress |
 | 6 | AI website audit & opportunity analysis | `phase-6-ai-audit` | ☐ |
 | 7 | Competitor research (optional module) | `phase-7-competitor-research` | ☐ |
 | 8 | Demo template & demo decision engine | `phase-8-demo-engine` | ☐ |

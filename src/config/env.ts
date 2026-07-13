@@ -69,6 +69,22 @@ const envSchema = z.object({
   ENRICH_MAX_REDIRECTS: z.coerce.number().int().nonnegative().default(5),
   ENRICH_MAX_BYTES: z.coerce.number().int().positive().default(2_000_000),
   ENRICH_MAX_PAGES: z.coerce.number().int().positive().default(5),
+
+  // --- Phase 5: website capture ---
+  CAPTURE_PROVIDER: z.enum(['mock', 'playwright']).default('mock'),
+  PLAYWRIGHT_BROWSER: z.enum(['chromium']).default('chromium'),
+  CAPTURE_MAX_LEADS_PER_RUN: z.coerce.number().int().positive().default(10),
+  CAPTURE_MAX_PAGES_PER_LEAD: z.coerce.number().int().positive().default(5),
+  CAPTURE_MAX_CONCURRENCY: z.coerce.number().int().positive().default(2),
+  CAPTURE_NAVIGATION_TIMEOUT_MS: z.coerce.number().int().positive().default(15_000),
+  CAPTURE_TOTAL_TIMEOUT_MS: z.coerce.number().int().positive().default(60_000),
+  CAPTURE_MAX_SCREENSHOT_BYTES: z.coerce.number().int().positive().default(5_000_000),
+  CAPTURE_FULLPAGE_MAX_HEIGHT_PX: z.coerce.number().int().positive().default(20_000),
+  CAPTURE_BLOCK_TRACKERS: boolString(true),
+  CAPTURE_BLOCK_MEDIA: boolString(true),
+  CAPTURE_ARTIFACT_DIR: z.string().default('./.artifacts'),
+  // Test-only: allow loopback targets for the local Playwright fixture server.
+  CAPTURE_ALLOW_LOOPBACK: boolString(false),
 });
 
 const refinedEnvSchema = envSchema.superRefine((val, ctx) => {
