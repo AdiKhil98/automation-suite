@@ -4,6 +4,63 @@ Every significant decision is recorded here in the required format. Newest first
 
 ---
 
+## D-0011 — Insert an independent enrichment & website-discovery phase
+
+- **Date:** 2026-07-11
+- **Problem:** Qualification and website capture assumed a website already exists, but Google discovery is
+  Place-ID-only and many leads are phone-only. Website quality was also being conflated into qualification.
+- **Options considered:** Discover websites inside capture; add a dedicated enrichment phase before capture.
+- **Chosen option:** New Phase 4 "Independent enrichment & website discovery" before website capture; former
+  phases 4–13 renumbered 5–14. Enrichment writes durable facts from independent public sources
+  (`source_type='website'`) with source URL + capture time, then re-qualifies.
+- **Reason:** Keeps qualification pre-audit and deterministic; isolates the act of finding/verifying an
+  official website; routes phone-only leads to `WEBSITE_DISCOVERY` → `READY_FOR_ENRICHMENT`.
+- **Tradeoffs:** One more phase; lead lifecycle gains `READY_FOR_ENRICHMENT` and `ENRICHED`.
+- **Rollback path:** Roadmap/doc change; state additions are additive.
+- **Status:** Accepted (Phase 3). Enrichment implemented in Phase 4.
+
+---
+
+## D-0010 — Per-fact provenance via `lead_facts` (not lead-level)
+
+- **Date:** 2026-07-11
+- **Problem:** A single lead-level provenance can't represent facts from mixed sources or their history, and
+  qualification must cite the exact facts it used.
+- **Options considered:** Keep lead-level `facts_source`; full EAV (facts only in `lead_facts`); hybrid
+  (authoritative `lead_facts` + denormalized current-value projection on `leads`).
+- **Chosen option:** Hybrid. `lead_facts` is authoritative (type, value, normalized value, source type/url,
+  captured_at, confidence, supersession, `is_current`); `leads.*` fact columns are a derived current-value
+  projection for dedup/display. A partial unique index enforces one current fact per `(lead_id, fact_type)`;
+  replacement + supersession happen in one transaction. Qualification references facts via the
+  `qualification_result_facts` join table (FKs), not a JSON array.
+- **Reason:** Traceability, history, and DB-enforced integrity. `input_fingerprint` is computed from
+  canonically-sorted rule + fact inputs (timestamps/ids excluded) for stable re-qualification comparison.
+- **Tradeoffs:** More write complexity; retrofitted Phase 2 collection to emit `lead_facts`.
+- **Rollback path:** Legacy `facts_source*` columns kept (deprecated) and backfilled; dropped only in a later
+  migration after verification.
+- **Status:** Accepted (Phase 3).
+
+---
+
+## D-0009 — Qualification is deterministic, PRE_AUDIT, multi-score
+
+- **Date:** 2026-07-11
+- **Problem:** Need a versioned, deterministic qualification that doesn't conflate "worth auditing" with
+  "ready for outreach" and doesn't reject on weak/missing evidence.
+- **Options considered:** Single score; AI-assisted; deterministic multi-score with rejection gates.
+- **Chosen option:** Deterministic only (no AI). Stage `PRE_AUDIT`: `ACCEPT` means worth enriching/auditing.
+  Separate `business_viability`, `auditability`, `contactability`, `opportunity` scores; PRE_AUDIT composite =
+  0.6·viability + 0.4·auditability (opportunity null until audit; contactability tracked for later). Hard
+  rejection only on confidently verified conditions (suppressed, permanently closed, outside niche, verified
+  chain). Rules are versioned and hashed (`rules_config_hash`) into every result; results are append-only.
+  Ownership is a verified fact (`ownership_type`) — a name match only flags a possible chain, never proves it.
+- **Reason:** Meets the "quality over volume", reversible, auditable, no-fabrication constraints.
+- **Tradeoffs:** Website-quality/opportunity assessment deferred to the audit phase.
+- **Rollback path:** Rules/config are isolated; `qualification_results` is additive.
+- **Status:** Accepted (Phase 3).
+
+---
+
 ## D-0008 — No storage of Google Places content; Place ID only
 
 - **Date:** 2026-07-11

@@ -41,7 +41,7 @@ export class LeadService {
         latitude: parsed.latitude,
         longitude: parsed.longitude,
       },
-      { factsSource: 'mock', source: parsed.source ?? 'mock', placeId: parsed.placeId },
+      { source: parsed.source ?? 'mock', placeId: parsed.placeId },
     );
 
     await this.store.create(lead);

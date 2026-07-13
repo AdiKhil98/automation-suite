@@ -8,17 +8,25 @@ import { type MockBusiness } from '../integrations/lead-source/mock-lead-source.
  */
 export const mockBusinesses: MockBusiness[] = [
   {
+    // Strong lead with an official website → ACCEPT / AUDIT.
     sourcePlaceId: 'mock-0001',
     businessName: 'Bright Smile Dental Practice',
     domain: 'https://www.brightsmiledental.example',
+    officialDomain: 'https://www.brightsmiledental.example',
     phone: '0161 496 0001',
     city: 'Manchester',
     country: 'GB',
     formattedAddress: '12 Oxford Road, Manchester, M1 5QA',
     latitude: 53.4739,
     longitude: -2.2352,
+    category: 'dentist',
+    rating: 4.7,
+    reviewCount: 132,
+    businessStatus: 'OPERATIONAL',
+    ownershipType: 'INDEPENDENT',
   },
   {
+    // Viable but no official website → ACCEPT / WEBSITE_DISCOVERY.
     sourcePlaceId: 'mock-0002',
     businessName: 'Riverside Family Dentistry',
     domain: 'riversidefamilydentistry.example',
@@ -28,6 +36,11 @@ export const mockBusinesses: MockBusiness[] = [
     formattedAddress: '5 Deansgate, Manchester, M3 2AA',
     latitude: 53.4795,
     longitude: -2.2506,
+    category: 'dentist',
+    rating: 4.5,
+    reviewCount: 64,
+    businessStatus: 'OPERATIONAL',
+    ownershipType: 'INDEPENDENT',
   },
   {
     sourcePlaceId: 'mock-0003',
@@ -39,6 +52,11 @@ export const mockBusinesses: MockBusiness[] = [
     formattedAddress: '88 Piccadilly, Manchester, M1 2BN',
     latitude: 53.4808,
     longitude: -2.2372,
+    category: 'orthodontist',
+    rating: 4.2,
+    reviewCount: 28,
+    businessStatus: 'OPERATIONAL',
+    ownershipType: 'INDEPENDENT',
   },
   {
     // Duplicate of mock-0001: same domain + same address, different mock id + URL variant.
@@ -51,5 +69,10 @@ export const mockBusinesses: MockBusiness[] = [
     formattedAddress: '12 Oxford Road, Manchester, M1 5QA',
     latitude: 53.4739,
     longitude: -2.2352,
+    category: 'dentist',
+    rating: 4.7,
+    reviewCount: 132,
+    businessStatus: 'OPERATIONAL',
+    ownershipType: 'INDEPENDENT',
   },
 ];

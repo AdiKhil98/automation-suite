@@ -172,7 +172,6 @@ describe('collectLeads', () => {
       expect(lead.normalizedDomain).toBeNull();
       expect(lead.phone).toBeNull();
       expect(lead.latitude).toBeNull();
-      expect(lead.factsSource).toBeNull();
     }
   });
 });

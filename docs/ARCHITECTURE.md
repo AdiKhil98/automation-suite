@@ -85,8 +85,10 @@ Proposed allowed transitions (finalized in Phase 1):
 ```
 NEW → NORMALIZED
 NORMALIZED → DUPLICATE | REJECTED_AUTOMATICALLY | READY_FOR_QUALIFICATION
-READY_FOR_QUALIFICATION → QUALIFIED | REJECTED | NEEDS_MANUAL_REVIEW
+READY_FOR_QUALIFICATION → QUALIFIED | READY_FOR_ENRICHMENT | REJECTED | NEEDS_MANUAL_REVIEW
 QUALIFIED → READY_FOR_AUDIT
+READY_FOR_ENRICHMENT → ENRICHED | NEEDS_MANUAL_REVIEW | FAILED   # Phase 4 enrichment
+ENRICHED → READY_FOR_QUALIFICATION                              # re-qualify with enriched facts
 READY_FOR_AUDIT → AUDITED | NEEDS_MANUAL_REVIEW | FAILED
 AUDITED → OPPORTUNITY_READY | NEEDS_MANUAL_REVIEW
 OPPORTUNITY_READY → COMPETITOR_RESEARCH_READY | DEMO_DECIDED
@@ -94,6 +96,7 @@ COMPETITOR_RESEARCH_READY → DEMO_DECIDED
 DEMO_DECIDED → DEMO_READY | EMAIL_DRAFTED         # DEMO_READY only when demo tier ≠ NONE
 DEMO_READY → EMAIL_DRAFTED
 EMAIL_DRAFTED → EMAIL_APPROVED | EMAIL_REVIEW_FAILED
+NEEDS_MANUAL_REVIEW → READY_FOR_QUALIFICATION | READY_FOR_ENRICHMENT | READY_FOR_AUDIT | REJECTED
 EMAIL_REVIEW_FAILED → EMAIL_DRAFTED | NEEDS_MANUAL_REVIEW    # one rewrite cycle only
 EMAIL_APPROVED → READY_FOR_HUMAN_APPROVAL
 READY_FOR_HUMAN_APPROVAL → HUMAN_APPROVED | REJECTED
@@ -158,12 +161,24 @@ LLM_MODEL_EMAIL_REVIEWER=
 ## 7. Agent output contracts (Zod-enforced)
 
 ```ts
+// PRE_AUDIT qualification (Phase 3). `ACCEPT` = worth enriching/auditing, NOT
+// outreach-ready. Deterministic; no AI. opportunityScore stays null until Phase 6.
 type QualificationResult = {
-  leadId: string; rulesVersion: string; deterministicScore: number;
-  decision: "ACCEPT" | "REVIEW" | "REJECT"; priority: "HIGH" | "MEDIUM" | "LOW";
-  reasons: string[]; missingEvidence: string[];
-  nextStep: "AUDIT" | "MANUAL_REVIEW" | "SKIP";
+  leadId: string; campaign: string; qualificationStage: "PRE_AUDIT";
+  rulesVersion: string; rulesConfigHash: string; evaluatedAt: string;
+  businessViabilityScore: number | null; auditabilityScore: number | null;
+  contactabilityScore: number | null; opportunityScore: number | null;
+  deterministicScore: number | null;                         // composite = 0.6*viability + 0.4*auditability
+  decision: "ACCEPT" | "REVIEW" | "REJECT";
+  priority: "HIGH" | "MEDIUM" | "LOW" | "UNASSIGNED";
+  nextStep: "AUDIT" | "WEBSITE_DISCOVERY" | "NEEDS_ENRICHMENT" | "MANUAL_REVIEW" | "SKIP";
+  triggeredRules: string[]; missingRequiredFacts: string[]; reasons: string[];
+  inputFingerprint: string; inputFactIds: string[];          // via qualification_result_facts join
 };
+
+// Facts carry per-fact provenance in `lead_facts` (authoritative); `leads.*` fact
+// columns are a derived current-value projection. Qualification reads only current
+// facts with source_type in {mock, manual, website} — never Google content.
 
 type AuditFinding = {
   issue: string; evidenceIds: string[]; businessImpact: string;

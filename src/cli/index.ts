@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import { collectLeadsCommand } from './commands/collect-leads.js';
+import { qualifyLeadsCommand } from './commands/qualify-leads.js';
 import { createSampleLeads } from './commands/create-sample-leads.js';
 import { leadState } from './commands/lead-state.js';
 import { listLeads } from './commands/list-leads.js';
@@ -45,6 +46,15 @@ program
         limit: opts.limit,
       }),
     ),
+  );
+
+program
+  .command('qualify-leads')
+  .description('Deterministically qualify (PRE_AUDIT) collected leads for a campaign')
+  .requiredOption('--campaign <name>', 'campaign name (see src/config/campaigns.ts)')
+  .option('--limit <n>', 'max leads to qualify this run')
+  .action((opts: { campaign: string; limit?: string }) =>
+    withContext((ctx) => qualifyLeadsCommand(ctx, { campaign: opts.campaign, limit: opts.limit })),
   );
 
 program

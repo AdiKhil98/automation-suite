@@ -1,5 +1,6 @@
 import { type CollectTxRepos, type UnitOfWork } from '../pipeline/ports.js';
 import { type Database } from './db.js';
+import { LeadFactsRepository } from './repositories/lead-facts.repo.js';
 import { LeadsRepository } from './repositories/leads.repo.js';
 import { PipelineRepository } from './repositories/pipeline.repo.js';
 import { SourceEntitiesRepository, SourceObservationsRepository } from './repositories/source.repo.js';
@@ -19,6 +20,7 @@ export class DrizzleUnitOfWork implements UnitOfWork {
         entities: new SourceEntitiesRepository(tx),
         observations: new SourceObservationsRepository(tx),
         events: new PipelineRepository(tx),
+        facts: new LeadFactsRepository(tx),
       };
       return fn(repos);
     });

@@ -1,5 +1,6 @@
 import { type DedupCandidate, type DedupInput } from '../domain/leads/dedup.js';
 import { type DedupStatus, type Lead } from '../domain/leads/lead.js';
+import { type NewLeadFact } from '../domain/lead-facts/lead-fact.js';
 import { type NewSourceEntity, type SourceEntity } from '../domain/lead-sources/source-entity.js';
 import { type NewSourceObservation } from '../domain/lead-sources/source-observation.js';
 import { type NewSourceRequest } from '../domain/lead-sources/source-request.js';
@@ -31,11 +32,17 @@ export interface TxEventRecorder {
   record(event: NewPipelineEvent): Promise<void>;
 }
 
+/** Writes a current fact, superseding any prior current fact of the same type. */
+export interface TxLeadFactStore {
+  writeCurrentFact(fact: NewLeadFact): Promise<string>;
+}
+
 export interface CollectTxRepos {
   leads: TxLeadStore;
   entities: TxEntityStore;
   observations: TxObservationStore;
   events: TxEventRecorder;
+  facts: TxLeadFactStore;
 }
 
 /**

@@ -15,6 +15,13 @@
       "when": 1783884886164,
       "tag": "0001_sloppy_brother_voodoo",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1783889222398,
+      "tag": "0002_powerful_shockwave",
+      "breakpoints": true
     }
   ]
 }

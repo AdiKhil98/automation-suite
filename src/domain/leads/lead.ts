@@ -34,15 +34,16 @@ export const leadSchema = z.object({
   status: leadStatusSchema,
   priority: leadPrioritySchema.nullable(),
   source: z.string().nullable(),
-  factsSource: z.string().nullable(),
-  factsSourceUrl: z.string().nullable(),
-  factsCapturedAt: z.date().nullable(),
   dedupStatus: dedupStatusSchema,
   duplicateOf: z.string().nullable(),
   createdAt: z.date(),
   updatedAt: z.date(),
 });
 export type Lead = z.infer<typeof leadSchema>;
+
+// NOTE: as of Phase 3, per-fact provenance lives in `lead_facts`. The leads.* fact
+// columns are a derived current-value projection; lead-level provenance columns
+// (facts_source/url/captured_at) are deprecated and no longer read or written.
 
 /**
  * Input for creating a lead with full facts (mock/manual providers and the

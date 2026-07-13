@@ -24,6 +24,21 @@ pnpm cli lead-state <id>
 pnpm cli reset-test-data     # clears local test data only
 ```
 
+## Collection & qualification commands (Phase 2 / Phase 3)
+
+```text
+# Phase 2 — collect + deduplicate (mock by default; Google Places behind a flag)
+pnpm cli collect-leads --campaign dental-manchester-test
+pnpm cli collect-leads --campaign dental-manchester-test --dry-run --limit 25
+
+# Phase 3 — deterministic PRE_AUDIT qualification of collected leads
+pnpm cli qualify-leads --campaign dental-manchester-test
+```
+
+Qualification is deterministic and append-only: re-running preserves prior `qualification_results`. Leads
+without a verified official website are routed to `READY_FOR_ENRICHMENT` (website discovery in Phase 4).
+Integration tests run serially (`pnpm test:integration` uses `--no-file-parallelism`) since they share one DB.
+
 ## Planned quality commands
 
 ```text

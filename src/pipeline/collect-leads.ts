@@ -1,5 +1,6 @@
 import { type Logger } from 'pino';
 import { decideMatch, type DedupInput } from '../domain/leads/dedup.js';
+import { buildLeadFactInputs } from '../domain/lead-facts/build-facts.js';
 import { buildCandidateLead, buildLeadFromFacts } from '../domain/leads/lead-factory.js';
 import {
   normalizeAddress,
@@ -257,7 +258,6 @@ async function processCandidate(
       message = `Duplicate of ${decision.leadId} (${decision.tier})`;
     } else if (decision.kind === 'BRANCH') {
       const lead = buildLeadFromFacts(candidate.facts, {
-        factsSource: opts.factsSource,
         source: provider,
         placeId: sourcePlaceId,
         now,
@@ -270,7 +270,6 @@ async function processCandidate(
       message = `Separate branch; related to ${decision.relatedLeadId} (not merged)`;
     } else if (decision.kind === 'AMBIGUOUS') {
       const base = buildLeadFromFacts(candidate.facts, {
-        factsSource: opts.factsSource,
         source: provider,
         placeId: sourcePlaceId,
         now,
@@ -284,7 +283,6 @@ async function processCandidate(
       message = `Ambiguous vs ${decision.candidateLeadId}; flagged for review (not merged)`;
     } else {
       const lead = buildLeadFromFacts(candidate.facts, {
-        factsSource: opts.factsSource,
         source: provider,
         placeId: sourcePlaceId,
         now,
@@ -295,6 +293,17 @@ async function processCandidate(
       matchTier = 'NONE';
       eventType = 'LEAD_COLLECTED';
       message = `Lead created from ${provider} (${candidate.facts.businessName ?? 'unnamed'})`;
+    }
+  }
+
+  // Emit per-fact provenance for newly created facts-based leads (never for Google
+  // Place-ID-only candidates, and not for duplicates that reuse an existing lead).
+  if (
+    candidate.facts !== null &&
+    (result === 'CREATED' || result === 'BRANCH' || result === 'AMBIGUOUS')
+  ) {
+    for (const fact of buildLeadFactInputs(leadId, candidate.facts, opts.factsSource, null)) {
+      await repos.facts.writeCurrentFact(fact);
     }
   }
 

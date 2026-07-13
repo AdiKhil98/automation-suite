@@ -2,27 +2,37 @@ import { randomUUID } from 'node:crypto';
 import { type Lead } from './lead.js';
 import { normalizeAddress, normalizeDomain, normalizeName, normalizePhone } from './normalize.js';
 
-/** Durable business facts sourced from a non-Google provider (mock/manual/website). */
+/**
+ * Durable business facts sourced from a non-Google provider (mock/manual/website).
+ * The identity subset (name/domain/phone/address/coords/city/country) feeds the
+ * leads projection; the full set is emitted to lead_facts by the caller.
+ */
 export interface LeadFactsInput {
   businessName: string | null;
   domain: string | null;
+  officialDomain?: string | null;
   phone: string | null;
+  contactEmail?: string | null;
+  contactFormUrl?: string | null;
   city: string | null;
   country: string | null;
   formattedAddress: string | null;
   latitude: number | null;
   longitude: number | null;
+  category?: string | null;
+  rating?: number | null;
+  reviewCount?: number | null;
+  businessStatus?: string | null;
+  ownershipType?: string | null;
 }
 
 export interface BuildFactsOptions {
-  factsSource: string; // 'mock' | 'manual' | 'website' — never 'google_places'
-  factsSourceUrl?: string | null;
   placeId?: string | null;
   source: string; // discovering provider
   now?: Date;
 }
 
-/** Build a fully-formed lead from durable facts (mock/manual/enrichment). */
+/** Build the lead projection from durable facts (provenance lives in lead_facts). */
 export function buildLeadFromFacts(facts: LeadFactsInput, opts: BuildFactsOptions): Lead {
   const now = opts.now ?? new Date();
   return {
@@ -43,9 +53,6 @@ export function buildLeadFromFacts(facts: LeadFactsInput, opts: BuildFactsOption
     status: 'NEW',
     priority: null,
     source: opts.source,
-    factsSource: opts.factsSource,
-    factsSourceUrl: opts.factsSourceUrl ?? null,
-    factsCapturedAt: now,
     dedupStatus: 'UNIQUE',
     duplicateOf: null,
     createdAt: now,
@@ -78,9 +85,6 @@ export function buildCandidateLead(opts: { sourcePlaceId: string; source: string
     status: 'NEW',
     priority: null,
     source: opts.source,
-    factsSource: null,
-    factsSourceUrl: null,
-    factsCapturedAt: null,
     dedupStatus: 'UNIQUE',
     duplicateOf: null,
     createdAt: now,

@@ -2,6 +2,38 @@
 
 All notable changes per phase. Format loosely follows Keep a Changelog.
 
+## [phase-3-qualification] — 2026-07-11
+
+### Added
+
+- Deterministic **PRE_AUDIT** qualification (`src/domain/qualification/*`): no AI. `ACCEPT` = worth
+  enriching/auditing, not outreach-ready. Four scores (business_viability, auditability, contactability,
+  opportunity[null]); composite = 0.6·viability + 0.4·auditability; accept ≥ 55.
+- Rejection gates fire only on confident, verified conditions (suppressed, permanently closed, outside niche,
+  verified chain via `ownership_type`). Name match only flags a possible chain — never proves/rejects.
+- Versioned rules (`q-2026.07.1`) hashed into every result (`rules_config_hash`); `input_fingerprint` from
+  canonical rule+fact inputs (timestamps/ids excluded).
+- **Per-fact provenance**: `lead_facts` table (type/value/normalized/source/url/captured_at/confidence/
+  supersession/is_current) with a partial unique index (one current fact per lead+type). `leads.*` fact
+  columns become a derived projection; legacy `facts_source*` deprecated (kept + backfilled, dropped later).
+  Phase 2 collection retrofitted to emit `lead_facts`.
+- `qualification_results` (append-only) + `qualification_result_facts` join (authoritative fact linkage);
+  `suppression_list`. DB CHECK constraints on scores/enums/confidence. Migration `0002`.
+- Lead states `READY_FOR_ENRICHMENT` + `ENRICHED`; phone-only/Place-ID-only leads route to
+  `READY_FOR_ENRICHMENT` (WEBSITE_DISCOVERY / NEEDS_ENRICHMENT).
+- `qualify-leads` CLI command; `QualificationService` + `qualifyLeads` pipeline.
+- Tests: +12 unit (`qualify`), PG integration (append-only history, state transitions, enrichment routing,
+  suppression, partial-unique enforcement). `test:integration` now runs serially (`--no-file-parallelism`).
+
+### Decisions
+
+- D-0009 deterministic PRE_AUDIT multi-score; D-0010 per-fact provenance (`lead_facts`); D-0011 new
+  enrichment phase (roadmap renumbered 4→14).
+
+### Notes
+
+- No AI, capture, enrichment, demos or emails implemented. Website quality/opportunity deferred to Phase 6.
+
 ## [phase-2-lead-collection] — 2026-07-11
 
 ### Added

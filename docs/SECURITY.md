@@ -30,6 +30,16 @@ content**. See docs/integrations/google-places.md and DECISIONS D-0008.
 - Discovery is ID-only (`places.id,nextPageToken`). Real calls require the feature flag
   (`LEAD_SOURCE=google_places`), a key, and `DRY_RUN=false`.
 
+## Fact provenance & suppression (Phase 3)
+
+- Durable facts are stored per-fact in `lead_facts` with a `source_type` restricted (in code and by a DB CHECK)
+  to `mock | manual | website`. Google Places content is never a fact source; a partial unique index keeps
+  exactly one current fact per `(lead, fact_type)`, with superseded history retained.
+- Qualification reads only current, approved facts and records the exact fact IDs used (via the
+  `qualification_result_facts` join), so every decision is traceable to evidence.
+- A `suppression_list` provides a read-only qualification gate now (a suppressed business is rejected). Full
+  sending-time suppression enforcement lands in a later phase; suppression always overrides approval.
+
 ## Outbound safety
 
 - Global kill switch `OUTBOUND_ACTIONS_ENABLED=false` blocks every sending integration regardless of state.

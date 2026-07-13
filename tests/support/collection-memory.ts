@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { type DedupCandidate, type DedupInput } from '../../src/domain/leads/dedup.js';
 import { type DedupStatus, type Lead } from '../../src/domain/leads/lead.js';
+import { type NewLeadFact } from '../../src/domain/lead-facts/lead-fact.js';
 import { type NewSourceEntity, type SourceEntity } from '../../src/domain/lead-sources/source-entity.js';
 import { type NewSourceObservation } from '../../src/domain/lead-sources/source-observation.js';
 import { type NewSourceRequest } from '../../src/domain/lead-sources/source-request.js';
@@ -22,6 +23,7 @@ export class InMemoryCollectionStore implements UnitOfWork, SourceRequestStore {
   observations: NewSourceObservation[] = [];
   events: NewPipelineEvent[] = [];
   requests: NewSourceRequest[] = [];
+  facts: NewLeadFact[] = [];
 
   async record(req: NewSourceRequest): Promise<string> {
     this.requests.push(req);
@@ -93,6 +95,13 @@ export class InMemoryCollectionStore implements UnitOfWork, SourceRequestStore {
           this.events.push(event);
         },
       },
+      facts: {
+        writeCurrentFact: async (fact: NewLeadFact): Promise<string> => {
+          const id = randomUUID();
+          this.facts.push(fact);
+          return id;
+        },
+      },
     };
   }
 
@@ -102,6 +111,7 @@ export class InMemoryCollectionStore implements UnitOfWork, SourceRequestStore {
       entities: new Map(this.entities),
       observations: [...this.observations],
       events: [...this.events],
+      facts: [...this.facts],
     };
     try {
       return await fn(this.repos());
@@ -110,6 +120,7 @@ export class InMemoryCollectionStore implements UnitOfWork, SourceRequestStore {
       this.entities = snapshot.entities;
       this.observations = snapshot.observations;
       this.events = snapshot.events;
+      this.facts = snapshot.facts;
       throw err;
     }
   }

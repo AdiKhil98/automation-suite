@@ -10,18 +10,24 @@ No phase begins before the previous one is approved with `APPROVE PHASE X`.
 |---|---|---|---|
 | 0 | Discovery & system specification | `phase-0-specification` | ✅ approved |
 | 1 | Local foundation & deterministic core | `phase-1-foundation` | ✅ approved |
-| 2 | Lead collection & deduplication | `phase-2-lead-collection` | ⏳ in progress |
-| 3 | Deterministic qualification | `phase-3-qualification` | ☐ |
-| 4 | Website capture & evidence extraction | `phase-4-website-capture` | ☐ |
-| 5 | AI website audit & opportunity analysis | `phase-5-ai-audit` | ☐ |
-| 6 | Competitor research (optional module) | `phase-6-competitor-research` | ☐ |
-| 7 | Demo template & demo decision engine | `phase-7-demo-engine` | ☐ |
-| 8 | Email writer & reviewer | `phase-8-email-generation` | ☐ |
-| 9 | Review dashboard | `phase-9-review-dashboard` | ☐ |
-| 10 | Netlify preview deployment | `phase-10-netlify-previews` | ☐ |
-| 11 | Gmail draft creation (no send) | `phase-11-gmail-drafts` | ☐ |
-| 12 | Scheduling & daily operations | `phase-12-daily-operations` | ☐ |
-| 13 | Controlled sending (only on explicit request) | `phase-13-sending` | ☐ |
+| 2 | Lead collection & deduplication | `phase-2-lead-collection` | ✅ approved |
+| 3 | Deterministic qualification (PRE_AUDIT) | `phase-3-qualification` | ⏳ in progress |
+| 4 | Independent enrichment & website discovery *(NEW)* | `phase-4-enrichment` | ☐ |
+| 5 | Website capture & evidence extraction | `phase-5-website-capture` | ☐ |
+| 6 | AI website audit & opportunity analysis | `phase-6-ai-audit` | ☐ |
+| 7 | Competitor research (optional module) | `phase-7-competitor-research` | ☐ |
+| 8 | Demo template & demo decision engine | `phase-8-demo-engine` | ☐ |
+| 9 | Email writer & reviewer | `phase-9-email-generation` | ☐ |
+| 10 | Review dashboard | `phase-10-review-dashboard` | ☐ |
+| 11 | Netlify preview deployment | `phase-11-netlify-previews` | ☐ |
+| 12 | Gmail draft creation (no send) | `phase-12-gmail-drafts` | ☐ |
+| 13 | Scheduling & daily operations | `phase-13-daily-operations` | ☐ |
+| 14 | Controlled sending (only on explicit request) | `phase-14-sending` | ☐ |
+
+> **Phase renumbering (Phase 3):** an *Independent enrichment & website discovery* phase was inserted at
+> position 4; former phases 4–13 shifted to 5–14. Enrichment discovers/verifies official websites for
+> phone-only leads and writes durable facts (`source_type='website'`) with source URL + capture time, then
+> re-qualifies. See DECISIONS D-0011.
 
 ## Phase 0 — Discovery & system specification (current)
 

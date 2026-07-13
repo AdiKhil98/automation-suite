@@ -5,8 +5,9 @@ leads, audits their websites with stored evidence, decides whether to build a de
 evidence-based cold emails for **human review** — reversible, auditable, and human-approved until explicitly
 changed.
 
-> **Status: Phase 0 — Discovery & System Specification.** No production code yet. See
-> [`docs/ROADMAP.md`](docs/ROADMAP.md) for the phase plan and [`CLAUDE.md`](CLAUDE.md) for the operating contract.
+> **Status: Phases 0–2 approved; Phase 3 (deterministic PRE_AUDIT qualification) complete, awaiting approval.**
+> Working locally: lead collection + dedup, per-fact provenance, and deterministic qualification via the CLI.
+> See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the phase plan and [`CLAUDE.md`](CLAUDE.md) for the operating contract.
 
 ## What this is (and isn't)
 

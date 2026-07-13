@@ -27,19 +27,10 @@ export class MockLeadSource implements LeadSourceProvider {
 
     for (let pageIndex = 0; pageIndex < totalPages; pageIndex += 1) {
       const slice = this.businesses.slice(pageIndex * pageSize, (pageIndex + 1) * pageSize);
-      const candidates: RawCandidate[] = slice.map((b) => ({
-        sourcePlaceId: b.sourcePlaceId,
-        facts: {
-          businessName: b.businessName,
-          domain: b.domain,
-          phone: b.phone,
-          city: b.city,
-          country: b.country,
-          formattedAddress: b.formattedAddress,
-          latitude: b.latitude,
-          longitude: b.longitude,
-        },
-      }));
+      const candidates: RawCandidate[] = slice.map((b) => {
+        const { sourcePlaceId, ...facts } = b;
+        return { sourcePlaceId, facts };
+      });
       const now = new Date();
       yield {
         candidates,

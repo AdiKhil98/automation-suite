@@ -27,8 +27,9 @@ outbound-outreach pipeline for a web-design / AI-automation services business:
 
 ## Current approved phase
 
-**Phase 0 — Discovery & System Specification (in progress).**
-Do not begin Phase 1 until the user replies `APPROVE PHASE 0`.
+**Phases 0–2 approved. Phase 3 — Deterministic qualification (PRE_AUDIT) — complete, awaiting `APPROVE PHASE 3`.**
+Do not begin Phase 4 (Independent enrichment & website discovery) until the user replies `APPROVE PHASE 3`.
+Note: an enrichment phase was inserted at position 4 in Phase 3; former phases 4–13 are now 5–14 (see docs/ROADMAP.md).
 
 ## Operating protocol (mandatory)
 

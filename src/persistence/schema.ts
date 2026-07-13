@@ -1,10 +1,14 @@
+import { sql } from 'drizzle-orm';
 import {
   type AnyPgColumn,
+  boolean,
+  check,
   doublePrecision,
   index,
   integer,
   jsonb,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -156,5 +160,141 @@ export const sourceObservations = pgTable(
   (t) => ({
     entityIdx: index('source_observations_entity_idx').on(t.sourceEntityId),
     requestIdx: index('source_observations_request_idx').on(t.sourceRequestId),
+  }),
+);
+
+// --- Phase 3: per-fact provenance, qualification, suppression ---
+//
+// NOTE: leads.facts_source / facts_source_url / facts_captured_at are DEPRECATED as
+// of Phase 3 (lead-level provenance replaced by lead_facts). They are no longer
+// written and will be dropped in a later migration after verification.
+
+const FACT_TYPES = [
+  'business_name',
+  'official_domain',
+  'domain',
+  'phone',
+  'contact_email',
+  'contact_form_url',
+  'formatted_address',
+  'latitude',
+  'longitude',
+  'city',
+  'country',
+  'category',
+  'rating',
+  'review_count',
+  'business_status',
+  'ownership_type',
+] as const;
+
+const factTypeList = FACT_TYPES.map((t) => `'${t}'`).join(', ');
+
+export const leadFacts = pgTable(
+  'lead_facts',
+  {
+    id: text('id').primaryKey(),
+    leadId: text('lead_id')
+      .notNull()
+      .references(() => leads.id, { onDelete: 'cascade' }),
+    factType: text('fact_type').notNull(),
+    value: text('value').notNull(),
+    normalizedValue: text('normalized_value'),
+    sourceType: text('source_type').notNull(),
+    sourceUrl: text('source_url'),
+    capturedAt: timestamp('captured_at', { withTimezone: true }).notNull().defaultNow(),
+    confidence: doublePrecision('confidence').notNull().default(1),
+    supersededBy: text('superseded_by').references((): AnyPgColumn => leadFacts.id),
+    supersededAt: timestamp('superseded_at', { withTimezone: true }),
+    isCurrent: boolean('is_current').notNull().default(true),
+  },
+  (t) => ({
+    // At most one CURRENT fact per (lead, fact_type).
+    currentUk: uniqueIndex('lead_facts_current_uk')
+      .on(t.leadId, t.factType)
+      .where(sql`${t.isCurrent}`),
+    leadTypeIdx: index('lead_facts_lead_type_idx').on(t.leadId, t.factType),
+    confidenceCk: check('lead_facts_confidence_ck', sql`${t.confidence} >= 0 AND ${t.confidence} <= 1`),
+    sourceTypeCk: check('lead_facts_source_type_ck', sql`${t.sourceType} IN ('mock', 'manual', 'website')`),
+    factTypeCk: check('lead_facts_fact_type_ck', sql.raw(`fact_type IN (${factTypeList})`)),
+  }),
+);
+
+export const qualificationResults = pgTable(
+  'qualification_results',
+  {
+    id: text('id').primaryKey(),
+    leadId: text('lead_id')
+      .notNull()
+      .references(() => leads.id, { onDelete: 'cascade' }),
+    campaign: text('campaign').notNull(),
+    qualificationStage: text('qualification_stage').notNull(),
+    rulesVersion: text('rules_version').notNull(),
+    rulesConfigHash: text('rules_config_hash').notNull(),
+    evaluatedAt: timestamp('evaluated_at', { withTimezone: true }).notNull().defaultNow(),
+    businessViabilityScore: doublePrecision('business_viability_score'),
+    auditabilityScore: doublePrecision('auditability_score'),
+    contactabilityScore: doublePrecision('contactability_score'),
+    opportunityScore: doublePrecision('opportunity_score'),
+    deterministicScore: doublePrecision('deterministic_score'),
+    decision: text('decision').notNull(),
+    priority: text('priority').notNull(),
+    nextStep: text('next_step').notNull(),
+    triggeredRules: jsonb('triggered_rules').notNull(),
+    missingRequiredFacts: jsonb('missing_required_facts').notNull(),
+    reasons: jsonb('reasons').notNull(),
+    inputFingerprint: text('input_fingerprint').notNull(),
+  },
+  (t) => ({
+    leadIdx: index('qualification_results_lead_idx').on(t.leadId),
+    stageCk: check('qr_stage_ck', sql`${t.qualificationStage} IN ('PRE_AUDIT')`),
+    decisionCk: check('qr_decision_ck', sql`${t.decision} IN ('ACCEPT', 'REVIEW', 'REJECT')`),
+    priorityCk: check(
+      'qr_priority_ck',
+      sql`${t.priority} IN ('HIGH', 'MEDIUM', 'LOW', 'UNASSIGNED')`,
+    ),
+    nextStepCk: check(
+      'qr_next_step_ck',
+      sql`${t.nextStep} IN ('AUDIT', 'WEBSITE_DISCOVERY', 'NEEDS_ENRICHMENT', 'MANUAL_REVIEW', 'SKIP')`,
+    ),
+    scoreCk: check(
+      'qr_score_ck',
+      sql`(${t.businessViabilityScore} IS NULL OR (${t.businessViabilityScore} >= 0 AND ${t.businessViabilityScore} <= 100))
+        AND (${t.auditabilityScore} IS NULL OR (${t.auditabilityScore} >= 0 AND ${t.auditabilityScore} <= 100))
+        AND (${t.contactabilityScore} IS NULL OR (${t.contactabilityScore} >= 0 AND ${t.contactabilityScore} <= 100))
+        AND (${t.opportunityScore} IS NULL OR (${t.opportunityScore} >= 0 AND ${t.opportunityScore} <= 100))
+        AND (${t.deterministicScore} IS NULL OR (${t.deterministicScore} >= 0 AND ${t.deterministicScore} <= 100))`,
+    ),
+  }),
+);
+
+// Authoritative relationship: which lead_facts fed a qualification result.
+export const qualificationResultFacts = pgTable(
+  'qualification_result_facts',
+  {
+    qualificationResultId: text('qualification_result_id')
+      .notNull()
+      .references(() => qualificationResults.id, { onDelete: 'cascade' }),
+    leadFactId: text('lead_fact_id')
+      .notNull()
+      .references(() => leadFacts.id, { onDelete: 'cascade' }),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.qualificationResultId, t.leadFactId] }),
+  }),
+);
+
+export const suppressionList = pgTable(
+  'suppression_list',
+  {
+    id: text('id').primaryKey(),
+    scope: text('scope').notNull(),
+    value: text('value').notNull(),
+    reason: text('reason'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    scopeValueUk: uniqueIndex('suppression_list_scope_value_uk').on(t.scope, t.value),
+    scopeCk: check('suppression_scope_ck', sql`${t.scope} IN ('domain', 'phone', 'place_id')`),
   }),
 );

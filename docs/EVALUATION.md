@@ -52,6 +52,14 @@ date activated
 A production prompt is never silently replaced. A new version must be evaluated against the fixtures and
 recorded before activation.
 
+## Deterministic qualification (Phase 3)
+
+Qualification is fully deterministic, so it is exactly reproducible for evaluation: every result stores the
+`rulesVersion` and a `rulesConfigHash`, plus an `inputFingerprint` computed from canonically-sorted rule and
+fact inputs (timestamps and ids excluded). Identical inputs always yield an identical fingerprint and
+decision, making qualification-precision measurable against fixtures without model variance. Results are
+append-only, so rule changes preserve prior qualification history for before/after comparison.
+
 ## Quality gates
 
 - Phase 5 (audit) and Phase 8 (email) each define a documented minimum quality threshold on the fixture set
