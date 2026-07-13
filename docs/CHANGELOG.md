@@ -2,6 +2,45 @@
 
 All notable changes per phase. Format loosely follows Keep a Changelog.
 
+## [phase-4-enrichment] — 2026-07-11
+
+### Added
+
+- Independent enrichment & website discovery: `EnrichmentContextProvider → CandidateProvider →
+  WebsiteVerifier → verified facts`. Context providers: facts (default), manual, mock, and optional Google
+  (Place Details by Place ID, **in-memory only**, gated by `ALLOW_PAID_READS`, capped + cost-logged).
+  Candidate providers: mock, manual (production-usable, no Google/paid API), search interface reserved.
+- Deterministic verification (no LLM): strict acceptance (≥1 strong signal — exact phone, name+address,
+  branch-location, structured data, legal footer; name tokens alone never verify), directory/social denylist,
+  bounded same-origin crawl (≤5 pages), cheerio extraction. Separate facts `official_domain` /
+  `official_website_url` / `official_location_page_url` (branches share a domain).
+- Nine-outcome taxonomy with exact lead-state routing; lead-level `FAILED` reserved for internal errors.
+- SSRF-hardened HTTP (`utils/safe-fetch.ts`, `utils/ip-guard.ts`): manual redirects, per-hop scheme/
+  credential/IP validation (private/reserved v4+v6, IPv4-mapped, metadata, multicast, numeric forms),
+  connect-time DNS re-validation, redirect/byte/time caps, HTML-only.
+- Per-fact provenance conflict rules (website > manual > mock; manual conflicts preserved + routed to review;
+  unchanged facts attach evidence without churn). Structured `enrichment_signals` evidence (no full HTML).
+- New tables `enrichment_attempts` / `enrichment_candidates` / `enrichment_signals` with CHECK constraints
+  (outcome/decision/signal/discovery-source enums, confidence 0..1, `chosen_*` only when VERIFIED, run_id
+  non-null); expanded `lead_facts` fact-type CHECK. Migration `0003` + reverse script
+  `scripts/rollback/0003_enrichment_down.sql`.
+- Per-lead atomic transaction (attempt + candidates + signals + facts + projection + state + event).
+- CLI: `enrich-leads --campaign` (batch) and `enrich-lead --lead/--candidate | --csv` (manual). New config
+  (`ENRICHMENT_*`, `ALLOW_PAID_READS`, Google caps). Dependency: cheerio (D-0012).
+- Tests: unit for ip-guard SSRF matrix, safe-fetch URL validation, extraction, verification, fact-conflict;
+  PostgreSQL integration for the full outcome taxonomy, manual/website conflict, transactional rollback, and
+  **no provider-restricted context persisted**. 92 unit + 16 integration.
+
+### Decisions
+
+- D-0012 cheerio; D-0013 deterministic enrichment + SSRF hardening; D-0014 Google context in-memory + paid-
+  reads separated from outbound.
+
+### Notes
+
+- Zero paid API calls / real network in the standard suite; no key required for install/CI/tests. Google
+  context is disabled unless explicitly enabled. Client-rendered sites defer to Phase 5 (`BROWSER_REQUIRED`).
+
 ## [phase-3-qualification] — 2026-07-11
 
 ### Added

@@ -235,3 +235,19 @@ There are two distinct "browsers" in this project; they must not be conflated:
 
 Claude Code's browsing is never part of the production pipeline, and Playwright is never used merely for
 development convenience. Any website-capture code committed to the pipeline targets Playwright.
+
+**Phase 4 uses HTTP only.** Enrichment (website discovery/verification) uses SSRF-hardened HTTP GET +
+deterministic cheerio parsing — no browser. Client-rendered pages that cheerio cannot read are returned as
+`BROWSER_REQUIRED` and deferred to the Phase 5 Playwright capture.
+
+## 12. Enrichment pipeline (Phase 4)
+
+Layered `EnrichmentContextProvider → CandidateProvider → WebsiteVerifier → verified facts`. Context
+(facts/manual/google/mock) is in-memory only; the official website is the sole authoritative durable source.
+Nine-outcome taxonomy (VERIFIED, AMBIGUOUS, INSUFFICIENT_CONTEXT, NO_CANDIDATE, NO_VERIFIED_CANDIDATE,
+BROWSER_REQUIRED, TRANSIENT_ERROR, POLICY_BLOCKED, INVALID_INPUT) maps to lead states; lead-level `FAILED` is
+reserved for internal unrecoverable errors. Network runs outside the DB transaction; a single per-lead
+transaction then writes attempt + candidates + signals + facts (idempotent, provenance-aware) + projection +
+state transition + event. Facts: `official_domain` / `official_website_url` / `official_location_page_url` are
+distinct (branches share a domain). Per-fact provenance strength website > manual > mock; manual conflicts are
+preserved and routed to review, never auto-superseded.

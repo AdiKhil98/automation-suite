@@ -1,5 +1,7 @@
 import { Command } from 'commander';
 import { collectLeadsCommand } from './commands/collect-leads.js';
+import { enrichLeadCommand } from './commands/enrich-lead.js';
+import { enrichLeadsCommand } from './commands/enrich-leads.js';
 import { qualifyLeadsCommand } from './commands/qualify-leads.js';
 import { createSampleLeads } from './commands/create-sample-leads.js';
 import { leadState } from './commands/lead-state.js';
@@ -55,6 +57,25 @@ program
   .option('--limit <n>', 'max leads to qualify this run')
   .action((opts: { campaign: string; limit?: string }) =>
     withContext((ctx) => qualifyLeadsCommand(ctx, { campaign: opts.campaign, limit: opts.limit })),
+  );
+
+program
+  .command('enrich-leads')
+  .description('Discover & verify official websites for READY_FOR_ENRICHMENT leads (mock by default)')
+  .requiredOption('--campaign <name>', 'campaign name (see src/config/campaigns.ts)')
+  .option('--limit <n>', 'max leads to enrich this run')
+  .action((opts: { campaign: string; limit?: string }) =>
+    withContext((ctx) => enrichLeadsCommand(ctx, { campaign: opts.campaign, limit: opts.limit })),
+  );
+
+program
+  .command('enrich-lead')
+  .description('Manually verify an operator-supplied candidate URL (no Google/paid API)')
+  .option('--lead <id>', 'lead id')
+  .option('--candidate <url>', 'candidate official website URL')
+  .option('--csv <path>', 'CSV of leadId,candidateUrl rows')
+  .action((opts: { lead?: string; candidate?: string; csv?: string }) =>
+    withContext((ctx) => enrichLeadCommand(ctx, opts)),
   );
 
 program

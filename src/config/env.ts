@@ -54,6 +54,21 @@ const envSchema = z.object({
 
   // Deduplication near-address threshold in metres (conservative).
   DEDUP_NEAR_ADDRESS_METERS: z.coerce.number().positive().default(40),
+
+  // --- Phase 4: enrichment ---
+  ENRICHMENT_CONTEXT_PROVIDER: z.enum(['facts', 'manual', 'google', 'mock']).default('facts'),
+  ENRICHMENT_CANDIDATE_PROVIDER: z.enum(['mock', 'manual', 'search']).default('mock'),
+  // Paid read-only research (e.g. Google Place Details). Separate from the outbound kill switch.
+  ALLOW_PAID_READS: boolString(false),
+  MAX_GOOGLE_CONTEXT_REQUESTS_PER_RUN: z.coerce.number().int().nonnegative().default(10),
+  MAX_GOOGLE_CONTEXT_COST_USD_PER_RUN: z.coerce.number().nonnegative().default(1),
+  MAX_ENRICHMENTS_PER_RUN: z.coerce.number().int().positive().default(25),
+  ENRICHMENT_MIN_CONFIDENCE: z.coerce.number().min(0).max(1).default(0.6),
+  ENRICHMENT_AMBIGUOUS_MARGIN: z.coerce.number().min(0).max(1).default(0.1),
+  ENRICH_HTTP_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
+  ENRICH_MAX_REDIRECTS: z.coerce.number().int().nonnegative().default(5),
+  ENRICH_MAX_BYTES: z.coerce.number().int().positive().default(2_000_000),
+  ENRICH_MAX_PAGES: z.coerce.number().int().positive().default(5),
 });
 
 const refinedEnvSchema = envSchema.superRefine((val, ctx) => {
@@ -62,6 +77,14 @@ const refinedEnvSchema = envSchema.superRefine((val, ctx) => {
       code: 'custom',
       path: ['GOOGLE_PLACES_API_KEY'],
       message: 'GOOGLE_PLACES_API_KEY is required when LEAD_SOURCE=google_places',
+    });
+  }
+  // Google context reads only occur when explicitly allowed; only then is a key required.
+  if (val.ENRICHMENT_CONTEXT_PROVIDER === 'google' && val.ALLOW_PAID_READS && !val.GOOGLE_PLACES_API_KEY) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['GOOGLE_PLACES_API_KEY'],
+      message: 'GOOGLE_PLACES_API_KEY is required when ENRICHMENT_CONTEXT_PROVIDER=google and ALLOW_PAID_READS=true',
     });
   }
 });

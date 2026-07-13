@@ -56,6 +56,16 @@ export class LeadsRepository implements LeadStore, TxLeadStore {
     await this.db.update(leads).set({ dedupStatus: status, duplicateOf }).where(eq(leads.id, id));
   }
 
+  /** Refresh denormalized projection columns (derived from current facts). */
+  async updateProjection(
+    id: string,
+    patch: Partial<
+      Pick<Lead, 'domain' | 'normalizedDomain' | 'phone' | 'normalizedPhone' | 'formattedAddress' | 'normalizedAddress'>
+    >,
+  ): Promise<void> {
+    await this.db.update(leads).set({ ...patch, updatedAt: new Date() }).where(eq(leads.id, id));
+  }
+
   async list(limit = 100): Promise<Lead[]> {
     const rows = await this.db.select().from(leads).orderBy(desc(leads.createdAt)).limit(limit);
     return rows.map(toDomain);

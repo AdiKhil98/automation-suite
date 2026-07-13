@@ -33,6 +33,28 @@ pnpm cli collect-leads --campaign dental-manchester-test --dry-run --limit 25
 
 # Phase 3 — deterministic PRE_AUDIT qualification of collected leads
 pnpm cli qualify-leads --campaign dental-manchester-test
+
+# Phase 4 — enrich READY_FOR_ENRICHMENT leads (verify official website), then re-qualify
+pnpm cli enrich-leads --campaign dental-manchester-test
+pnpm cli qualify-leads --campaign dental-manchester-test   # re-qualify enriched leads
+
+# Manual enrichment (no Google/paid API): supply a candidate URL directly or via CSV
+pnpm cli enrich-lead --lead <lead-id> --candidate https://example.com
+pnpm cli enrich-lead --csv leads.csv                       # rows: leadId,candidateUrl
+```
+
+Enrichment is mock + deterministic by default (no network in tests). The optional Google context provider is
+disabled unless `ENRICHMENT_CONTEXT_PROVIDER=google` and `ALLOW_PAID_READS=true` with a key — see
+[integrations/google-places-details.md](integrations/google-places-details.md).
+
+## Reverse migrations
+
+Drizzle migrations are forward-only, so the database is reversed independently of Git. Each destructive schema
+step ships a reverse script under `scripts/rollback/`. To roll Phase 4 back:
+
+```text
+psql "$DATABASE_URL" -f scripts/rollback/0003_enrichment_down.sql
+git reset --hard phase-3-qualification
 ```
 
 Qualification is deterministic and append-only: re-running preserves prior `qualification_results`. Leads

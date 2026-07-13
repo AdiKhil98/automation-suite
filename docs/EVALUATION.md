@@ -60,6 +60,13 @@ fact inputs (timestamps and ids excluded). Identical inputs always yield an iden
 decision, making qualification-precision measurable against fixtures without model variance. Results are
 append-only, so rule changes preserve prior qualification history for before/after comparison.
 
+## Enrichment (Phase 4)
+
+Website verification is deterministic and reproducible: strict signal scoring against fixed HTML fixtures with
+a stubbed fetcher yields identical outcomes every run. Track: official-site verification precision, ambiguous
+rate, browser-required rate, no-verified-candidate rate, and (when the Google context provider is enabled)
+reads + estimated cost per accepted lead. No model, so there is no output variance to average out.
+
 ## Quality gates
 
 - Phase 5 (audit) and Phase 8 (email) each define a documented minimum quality threshold on the fixture set

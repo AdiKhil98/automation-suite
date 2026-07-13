@@ -40,6 +40,21 @@ content**. See docs/integrations/google-places.md and DECISIONS D-0008.
 - A `suppression_list` provides a read-only qualification gate now (a suppressed business is rejected). Full
   sending-time suppression enforcement lands in a later phase; suppression always overrides approval.
 
+## Website enrichment (Phase 4)
+
+- **SSRF-hardened fetching** (`src/utils/safe-fetch.ts` + `ip-guard.ts`): http/https only, no embedded
+  credentials, manual redirects with per-hop validation, rejection of private/loopback/link-local/multicast/
+  metadata/reserved IPv4 & IPv6 (incl. IPv4-mapped and numeric forms), connect-time DNS re-validation
+  (rebinding mitigation), and redirect/byte/time caps; HTML content types only.
+- **Bounded crawl:** homepage + a small allowlist of contact/about/location pages (≤5, same-origin). No
+  arbitrary crawling, form submission, authentication, or CAPTCHA handling. Full HTML is never persisted.
+- **Contacts:** only publicly displayed `mailto:`/visible emails, `tel:`/visible phones, and real contact
+  pages are stored. Guessed/generated email addresses are never stored. Operational status, ownership, and
+  category are only stored with explicit evidence.
+- **Paid reads vs outbound:** `ALLOW_PAID_READS` gates capped read-only research (e.g. Google Place Details)
+  and is independent of the outbound kill switch. Google-derived context is in-memory only and never
+  persisted (see docs/integrations/google-places-details.md; verified by an integration test).
+
 ## Outbound safety
 
 - Global kill switch `OUTBOUND_ACTIONS_ENABLED=false` blocks every sending integration regardless of state.

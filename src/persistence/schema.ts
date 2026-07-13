@@ -172,6 +172,8 @@ export const sourceObservations = pgTable(
 const FACT_TYPES = [
   'business_name',
   'official_domain',
+  'official_website_url',
+  'official_location_page_url',
   'domain',
   'phone',
   'contact_email',
@@ -296,5 +298,105 @@ export const suppressionList = pgTable(
   (t) => ({
     scopeValueUk: uniqueIndex('suppression_list_scope_value_uk').on(t.scope, t.value),
     scopeCk: check('suppression_scope_ck', sql`${t.scope} IN ('domain', 'phone', 'place_id')`),
+  }),
+);
+
+// --- Phase 4: enrichment attempts / candidates / structured signals ---
+
+const ENRICHMENT_OUTCOMES =
+  "'VERIFIED','AMBIGUOUS','INSUFFICIENT_CONTEXT','NO_CANDIDATE','NO_VERIFIED_CANDIDATE','BROWSER_REQUIRED','TRANSIENT_ERROR','POLICY_BLOCKED','INVALID_INPUT'";
+const DISCOVERY_SOURCES =
+  "'website_hint','directory','search','social','google_hint','manual','mock'";
+const SIGNAL_TYPES =
+  "'exact_phone','name_address','branch_location','structured_data','legal_footer','name_tokens','category_text','city_mention','mailto','plaintext_email','contact_form'";
+
+export const enrichmentAttempts = pgTable(
+  'enrichment_attempts',
+  {
+    id: text('id').primaryKey(),
+    leadId: text('lead_id')
+      .notNull()
+      .references(() => leads.id, { onDelete: 'cascade' }),
+    runId: text('run_id')
+      .notNull()
+      .references(() => pipelineRuns.id, { onDelete: 'cascade' }),
+    outcome: text('outcome').notNull(),
+    chosenDomain: text('chosen_domain'),
+    chosenWebsiteUrl: text('chosen_website_url'),
+    chosenLocationPageUrl: text('chosen_location_page_url'),
+    confidence: doublePrecision('confidence'),
+    candidateCount: integer('candidate_count').notNull().default(0),
+    contextProvider: text('context_provider'),
+    candidateProvider: text('candidate_provider'),
+    notes: text('notes'),
+    startedAt: timestamp('started_at', { withTimezone: true }).notNull(),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+  },
+  (t) => ({
+    leadIdx: index('enrichment_attempts_lead_idx').on(t.leadId),
+    outcomeCk: check('enrichment_outcome_ck', sql.raw(`outcome IN (${ENRICHMENT_OUTCOMES})`)),
+    candidateCountCk: check('enrichment_candidate_count_ck', sql`${t.candidateCount} >= 0`),
+    confidenceCk: check(
+      'enrichment_attempt_confidence_ck',
+      sql`${t.confidence} IS NULL OR (${t.confidence} >= 0 AND ${t.confidence} <= 1)`,
+    ),
+    // chosen_* may be populated only for a VERIFIED attempt.
+    chosenCk: check(
+      'enrichment_chosen_only_verified_ck',
+      sql`${t.outcome} = 'VERIFIED' OR (${t.chosenDomain} IS NULL AND ${t.chosenWebsiteUrl} IS NULL AND ${t.chosenLocationPageUrl} IS NULL)`,
+    ),
+  }),
+);
+
+export const enrichmentCandidates = pgTable(
+  'enrichment_candidates',
+  {
+    id: text('id').primaryKey(),
+    attemptId: text('attempt_id')
+      .notNull()
+      .references(() => enrichmentAttempts.id, { onDelete: 'cascade' }),
+    discoveredUrl: text('discovered_url').notNull(),
+    finalUrl: text('final_url'),
+    host: text('host'),
+    httpStatus: integer('http_status'),
+    discoverySource: text('discovery_source'),
+    isDirectory: boolean('is_directory'),
+    decision: text('decision').notNull(),
+    confidence: doublePrecision('confidence'),
+    rejectedReason: text('rejected_reason'),
+  },
+  (t) => ({
+    attemptIdx: index('enrichment_candidates_attempt_idx').on(t.attemptId),
+    decisionCk: check('enrichment_candidate_decision_ck', sql`${t.decision} IN ('VERIFIED','REJECTED','AMBIGUOUS')`),
+    sourceCk: check('enrichment_discovery_source_ck', sql.raw(`discovery_source IS NULL OR discovery_source IN (${DISCOVERY_SOURCES})`)),
+    confidenceCk: check(
+      'enrichment_candidate_confidence_ck',
+      sql`${t.confidence} IS NULL OR (${t.confidence} >= 0 AND ${t.confidence} <= 1)`,
+    ),
+  }),
+);
+
+export const enrichmentSignals = pgTable(
+  'enrichment_signals',
+  {
+    id: text('id').primaryKey(),
+    candidateId: text('candidate_id')
+      .notNull()
+      .references(() => enrichmentCandidates.id, { onDelete: 'cascade' }),
+    matchedFactId: text('matched_fact_id').references(() => leadFacts.id, { onDelete: 'set null' }),
+    signalType: text('signal_type').notNull(),
+    pageUrl: text('page_url').notNull(),
+    extractedValue: text('extracted_value'),
+    normalizedValue: text('normalized_value'),
+    selector: text('selector'),
+    confidence: doublePrecision('confidence'),
+  },
+  (t) => ({
+    candidateIdx: index('enrichment_signals_candidate_idx').on(t.candidateId),
+    signalTypeCk: check('enrichment_signal_type_ck', sql.raw(`signal_type IN (${SIGNAL_TYPES})`)),
+    confidenceCk: check(
+      'enrichment_signal_confidence_ck',
+      sql`${t.confidence} IS NULL OR (${t.confidence} >= 0 AND ${t.confidence} <= 1)`,
+    ),
   }),
 );

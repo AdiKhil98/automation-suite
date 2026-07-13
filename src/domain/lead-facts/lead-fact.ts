@@ -4,6 +4,8 @@ import { z } from 'zod';
 export const FACT_TYPES = [
   'business_name',
   'official_domain',
+  'official_website_url',
+  'official_location_page_url',
   'domain',
   'phone',
   'contact_email',

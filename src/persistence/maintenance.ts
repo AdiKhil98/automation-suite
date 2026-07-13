@@ -9,6 +9,7 @@ import { type Database } from './db.js';
 export async function truncateAll(db: Database): Promise<void> {
   await db.execute(
     sql`TRUNCATE TABLE
+      enrichment_signals, enrichment_candidates, enrichment_attempts,
       qualification_result_facts, qualification_results, lead_facts, suppression_list,
       source_observations, source_requests, source_entities,
       evidence, pipeline_events, pipeline_runs, leads

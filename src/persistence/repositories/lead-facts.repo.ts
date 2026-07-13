@@ -88,4 +88,20 @@ export class LeadFactsRepository implements TxLeadFactStore {
       .where(and(eq(leadFacts.leadId, leadId), eq(leadFacts.isCurrent, true)));
     return rows.map(toDomain);
   }
+
+  async getCurrentFact(leadId: string, factType: FactType): Promise<LeadFact | null> {
+    const rows = await this.db
+      .select()
+      .from(leadFacts)
+      .where(
+        and(
+          eq(leadFacts.leadId, leadId),
+          eq(leadFacts.factType, factType),
+          eq(leadFacts.isCurrent, true),
+        ),
+      )
+      .limit(1);
+    const row = rows[0];
+    return row ? toDomain(row) : null;
+  }
 }

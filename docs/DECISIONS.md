@@ -4,6 +4,52 @@ Every significant decision is recorded here in the required format. Newest first
 
 ---
 
+## D-0014 — Google context is in-memory only; paid reads separated from outbound
+
+- **Date:** 2026-07-11
+- **Problem:** Enrichment needs identification context for Place-ID-only leads, but Places content can't be
+  persisted, and paid reads must not be conflated with prospect-facing outbound actions.
+- **Chosen option:** Optional `GoogleContextProvider` fetches Place Details (New) by Place ID for **in-memory**
+  context only (never persisted; a returned `websiteUri` is only a candidate to verify). Gated by a new
+  `ALLOW_PAID_READS` flag distinct from `OUTBOUND_ACTIONS_ENABLED`/`DRY_RUN`; per-run request + cost caps;
+  logs counts/cost only. Standard tests/installs keep it off and need no key.
+- **Reason:** Compliant, safe, and lets `DRY_RUN=true` still permit capped read-only research.
+- **Tradeoffs:** Recommended production context provider requires a one-time GCP/key setup (documented).
+- **Rollback path:** Config-only; provider disabled by default.
+- **Status:** Accepted (Phase 4). See docs/integrations/google-places-details.md.
+
+---
+
+## D-0013 — Deterministic enrichment (no LLM) + SSRF-hardened fetching
+
+- **Date:** 2026-07-11
+- **Problem:** Verify an official website and extract contacts safely, reproducibly, and without paid models.
+- **Chosen option:** Deterministic verification — strict signals (exact phone, name+address, branch-location,
+  structured data, legal footer), name-tokens-alone never verifies. SSRF-hardened GET: manual redirects,
+  per-hop scheme/credential/IP validation (private/reserved v4+v6, IPv4-mapped, metadata, multicast),
+  connect-time DNS re-validation, redirect/byte/time caps, HTML-only. No LLM.
+- **Reason:** Matching/parsing is deterministic; a model would add cost, nondeterminism, and hallucination
+  risk. SSRF hardening is mandatory when fetching operator/third-party URLs.
+- **Tradeoffs:** JS-only sites can't be parsed by cheerio → returned as `BROWSER_REQUIRED` (Phase 5).
+- **Rollback path:** Isolated to enrichment modules + `utils/safe-fetch.ts`, `utils/ip-guard.ts`.
+- **Status:** Accepted (Phase 4).
+
+---
+
+## D-0012 — HTML parser: cheerio
+
+- **Date:** 2026-07-11
+- **Problem:** Need a maintained, non-browser HTML parser for deterministic extraction.
+- **Options considered:** cheerio, parse5, node-html-parser, jsdom.
+- **Chosen option:** cheerio 1.2.0 (built on the spec-compliant parse5; optional forgiving htmlparser2).
+- **Reason:** Verified current + healthily maintained; robust on malformed real-world HTML; no browser/DOM
+  overhead. node-html-parser is lighter but less spec-compliant.
+- **Tradeoffs:** Slightly heavier than node-html-parser.
+- **Rollback path:** Parsing isolated in `src/domain/enrichment/extract.ts`.
+- **Status:** Accepted (Phase 4).
+
+---
+
 ## D-0011 — Insert an independent enrichment & website-discovery phase
 
 - **Date:** 2026-07-11
