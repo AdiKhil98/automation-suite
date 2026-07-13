@@ -2,9 +2,7 @@ import { getCampaign } from '../../config/campaigns.js';
 import { QUALIFICATION_RULES } from '../../config/qualification-rules.js';
 import { QualificationService } from '../../domain/qualification/qualification-service.js';
 import { qualifyLeads } from '../../pipeline/qualify-leads.js';
-import { LeadFactsRepository } from '../../persistence/repositories/lead-facts.repo.js';
-import { QualificationResultsRepository } from '../../persistence/repositories/qualification.repo.js';
-import { SuppressionRepository } from '../../persistence/repositories/suppression.repo.js';
+import { DrizzleQualificationUnitOfWork } from '../../persistence/qualification-unit-of-work.js';
 import { type CliContext } from '../context.js';
 
 export interface QualifyLeadsCliOptions {
@@ -18,13 +16,7 @@ export async function qualifyLeadsCommand(
 ): Promise<void> {
   const campaign = getCampaign(cliOpts.campaign);
 
-  const service = new QualificationService({
-    leads: ctx.leads,
-    leadService: ctx.service,
-    facts: new LeadFactsRepository(ctx.db),
-    results: new QualificationResultsRepository(ctx.db),
-    suppression: new SuppressionRepository(ctx.db),
-  });
+  const service = new QualificationService(new DrizzleQualificationUnitOfWork(ctx.db));
 
   const all = await ctx.leads.list(1000);
   let leads = all.filter((l) => QualificationService.isQualifiable(l.status));

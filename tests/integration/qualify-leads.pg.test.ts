@@ -1,18 +1,24 @@
-import { sql } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { QUALIFICATION_RULES } from '../../src/config/qualification-rules.js';
 import { buildLeadFactInputs } from '../../src/domain/lead-facts/build-facts.js';
 import { buildCandidateLead, buildLeadFromFacts, type LeadFactsInput } from '../../src/domain/leads/lead-factory.js';
 import { LeadService } from '../../src/domain/leads/lead-service.js';
-import { QualificationService } from '../../src/domain/qualification/qualification-service.js';
+import {
+  QualificationService,
+  type QualificationTxRepos,
+  type QualificationUnitOfWork,
+} from '../../src/domain/qualification/qualification-service.js';
 import { type QualificationNiche } from '../../src/domain/qualification/qualify.js';
 import { createDb, type DbHandle } from '../../src/persistence/db.js';
 import { truncateAll } from '../../src/persistence/maintenance.js';
+import { DrizzleQualificationUnitOfWork } from '../../src/persistence/qualification-unit-of-work.js';
 import { LeadFactsRepository } from '../../src/persistence/repositories/lead-facts.repo.js';
 import { LeadsRepository } from '../../src/persistence/repositories/leads.repo.js';
 import { PipelineRepository } from '../../src/persistence/repositories/pipeline.repo.js';
 import { QualificationResultsRepository } from '../../src/persistence/repositories/qualification.repo.js';
 import { SuppressionRepository } from '../../src/persistence/repositories/suppression.repo.js';
+import { pipelineEvents, qualificationResultFacts } from '../../src/persistence/schema.js';
 
 const DATABASE_URL = process.env.DATABASE_URL;
 const NICHE: QualificationNiche = {
@@ -51,17 +57,12 @@ describe.skipIf(!DATABASE_URL)('qualifyLead (PostgreSQL)', () => {
   });
 
   function service(): { svc: QualificationService; results: QualificationResultsRepository; leads: LeadsRepository } {
-    const leads = new LeadsRepository(handle.db);
-    const events = new PipelineRepository(handle.db);
-    const results = new QualificationResultsRepository(handle.db);
-    const svc = new QualificationService({
-      leads,
-      leadService: new LeadService(leads, events),
-      facts: new LeadFactsRepository(handle.db),
-      results,
-      suppression: new SuppressionRepository(handle.db),
-    });
-    return { svc, results, leads };
+    const svc = new QualificationService(new DrizzleQualificationUnitOfWork(handle.db));
+    return {
+      svc,
+      results: new QualificationResultsRepository(handle.db),
+      leads: new LeadsRepository(handle.db),
+    };
   }
 
   async function seedWithFacts(facts: LeadFactsInput): Promise<string> {
@@ -155,5 +156,51 @@ describe.skipIf(!DATABASE_URL)('qualifyLead (PostgreSQL)', () => {
       (f) => f.factType === 'business_name',
     );
     expect(current).toHaveLength(1);
+  });
+
+  it('rolls back the ENTIRE qualification write when the state transition fails', async () => {
+    const id = await seedWithFacts(STRONG);
+    // Pre-advance so the ONLY transition during qualify is the final state change.
+    const ls = new LeadService(new LeadsRepository(handle.db), new PipelineRepository(handle.db));
+    await ls.transition(id, 'NORMALIZED');
+    await ls.transition(id, 'READY_FOR_QUALIFICATION');
+
+    const eventsBefore = (
+      await handle.db.select().from(pipelineEvents).where(eq(pipelineEvents.leadId, id))
+    ).length;
+
+    // A unit of work whose leadService.transition throws AFTER results.save has run.
+    const failingUow: QualificationUnitOfWork = {
+      transaction: (fn) =>
+        handle.db.transaction(async (tx) => {
+          const leads = new LeadsRepository(tx);
+          const leadService = {
+            transition: async (): Promise<never> => {
+              throw new Error('injected failure after result insert, before state transition');
+            },
+          } as unknown as LeadService;
+          const repos: QualificationTxRepos = {
+            leads,
+            leadService,
+            facts: new LeadFactsRepository(tx),
+            results: new QualificationResultsRepository(tx),
+            suppression: new SuppressionRepository(tx),
+          };
+          return fn(repos);
+        }),
+    };
+
+    const svc = new QualificationService(failingUow);
+    await expect(svc.qualify(id, 'c', NICHE, QUALIFICATION_RULES)).rejects.toThrow(/injected failure/);
+
+    // No partial write survived: no result, no fact links, no state change, no new event.
+    const results = new QualificationResultsRepository(handle.db);
+    expect(await results.countByLead(id)).toBe(0);
+    expect(await handle.db.select().from(qualificationResultFacts)).toHaveLength(0);
+    expect((await new LeadsRepository(handle.db).getById(id))?.status).toBe('READY_FOR_QUALIFICATION');
+    const eventsAfter = (
+      await handle.db.select().from(pipelineEvents).where(eq(pipelineEvents.leadId, id))
+    ).length;
+    expect(eventsAfter).toBe(eventsBefore);
   });
 });

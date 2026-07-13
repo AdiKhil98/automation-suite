@@ -17,12 +17,22 @@ export interface SuppressionChecker {
   isSuppressed(lead: Pick<Lead, 'normalizedDomain' | 'normalizedPhone' | 'placeId'>): Promise<boolean>;
 }
 
-export interface QualificationServiceDeps {
+/** Transaction-scoped repositories for a single atomic qualification. */
+export interface QualificationTxRepos {
   leads: LeadStore;
   leadService: LeadService;
   facts: FactReader;
   results: QualificationResultWriter;
   suppression: SuppressionChecker;
+}
+
+/**
+ * Runs the complete qualification write — result insert, fact-link inserts, lead
+ * state transition, and the state-transition event — inside ONE transaction. If any
+ * step throws, everything rolls back.
+ */
+export interface QualificationUnitOfWork {
+  transaction<T>(fn: (repos: QualificationTxRepos) => Promise<T>): Promise<T>;
 }
 
 const QUALIFIABLE_FROM: LeadStatus[] = [
@@ -47,13 +57,24 @@ function targetState(nextStep: QualificationNextStep): LeadStatus {
   }
 }
 
+async function advanceToReady(leadService: LeadService, lead: Lead): Promise<void> {
+  let status: LeadStatus = lead.status;
+  if (status === 'NEW') {
+    await leadService.transition(lead.id, 'NORMALIZED');
+    status = 'NORMALIZED';
+  }
+  if (status === 'NORMALIZED' || status === 'ENRICHED' || status === 'NEEDS_MANUAL_REVIEW') {
+    await leadService.transition(lead.id, 'READY_FOR_QUALIFICATION');
+  }
+}
+
 /**
- * Orchestrates PRE_AUDIT qualification for one lead: advance to
- * READY_FOR_QUALIFICATION, evaluate deterministically against current facts,
- * append the result, and transition the lead to the mapped state.
+ * Orchestrates PRE_AUDIT qualification for one lead atomically: advance to
+ * READY_FOR_QUALIFICATION, evaluate deterministically against current facts, append
+ * the result (+ fact links), and transition the lead — all in a single transaction.
  */
 export class QualificationService {
-  constructor(private readonly deps: QualificationServiceDeps) {}
+  constructor(private readonly uow: QualificationUnitOfWork) {}
 
   static isQualifiable(status: LeadStatus): boolean {
     return QUALIFIABLE_FROM.includes(status);
@@ -66,31 +87,22 @@ export class QualificationService {
     rules: QualificationRules,
     now: Date = new Date(),
   ): Promise<QualificationResult> {
-    const lead = await this.deps.leads.getById(leadId);
-    if (!lead) throw new AppError('LEAD_NOT_FOUND', `Lead not found: ${leadId}`);
-    if (!QualificationService.isQualifiable(lead.status)) {
-      throw new AppError('NOT_QUALIFIABLE', `Lead ${leadId} not qualifiable from ${lead.status}`);
-    }
+    return this.uow.transaction(async (repos) => {
+      const lead = await repos.leads.getById(leadId);
+      if (!lead) throw new AppError('LEAD_NOT_FOUND', `Lead not found: ${leadId}`);
+      if (!QualificationService.isQualifiable(lead.status)) {
+        throw new AppError('NOT_QUALIFIABLE', `Lead ${leadId} not qualifiable from ${lead.status}`);
+      }
 
-    await this.advanceToReady(lead);
+      await advanceToReady(repos.leadService, lead);
 
-    const suppressed = await this.deps.suppression.isSuppressed(lead);
-    const facts = await this.deps.facts.listCurrentFacts(leadId);
-    const result = evaluateQualification(facts, { leadId, campaign, niche, suppressed, now }, rules);
+      const suppressed = await repos.suppression.isSuppressed(lead);
+      const facts = await repos.facts.listCurrentFacts(leadId);
+      const result = evaluateQualification(facts, { leadId, campaign, niche, suppressed, now }, rules);
 
-    await this.deps.results.save(result);
-    await this.deps.leadService.transition(leadId, targetState(result.nextStep));
-    return result;
-  }
-
-  private async advanceToReady(lead: Lead): Promise<void> {
-    let status: LeadStatus = lead.status;
-    if (status === 'NEW') {
-      await this.deps.leadService.transition(lead.id, 'NORMALIZED');
-      status = 'NORMALIZED';
-    }
-    if (status === 'NORMALIZED' || status === 'ENRICHED' || status === 'NEEDS_MANUAL_REVIEW') {
-      await this.deps.leadService.transition(lead.id, 'READY_FOR_QUALIFICATION');
-    }
+      await repos.results.save(result);
+      await repos.leadService.transition(leadId, targetState(result.nextStep));
+      return result;
+    });
   }
 }

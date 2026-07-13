@@ -22,8 +22,11 @@ All notable changes per phase. Format loosely follows Keep a Changelog.
 - Lead states `READY_FOR_ENRICHMENT` + `ENRICHED`; phone-only/Place-ID-only leads route to
   `READY_FOR_ENRICHMENT` (WEBSITE_DISCOVERY / NEEDS_ENRICHMENT).
 - `qualify-leads` CLI command; `QualificationService` + `qualifyLeads` pipeline.
+- The complete qualification write (result + fact links + lead state + state-transition event) runs in ONE
+  PostgreSQL transaction (`DrizzleQualificationUnitOfWork`); any failure rolls the whole thing back.
 - Tests: +12 unit (`qualify`), PG integration (append-only history, state transitions, enrichment routing,
-  suppression, partial-unique enforcement). `test:integration` now runs serially (`--no-file-parallelism`).
+  suppression, partial-unique enforcement, competing current-fact updates, and full rollback when the state
+  transition fails after the result insert). `test:integration` runs serially (`--no-file-parallelism`).
 
 ### Decisions
 
