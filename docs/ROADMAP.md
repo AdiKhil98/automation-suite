@@ -15,8 +15,8 @@ No phase begins before the previous one is approved with `APPROVE PHASE X`.
 | 4 | Independent enrichment & website discovery | `phase-4-enrichment` | ✅ approved |
 | 5 | Website capture & evidence extraction | `phase-5-website-capture` | ✅ approved |
 | 6 | AI website audit & opportunity analysis | `phase-6-ai-audit` | ✅ complete (Gate A passed; Gate B deferred) |
-| 7 | Competitor research (optional module) | `phase-7-competitor-research` | ☐ |
-| 8 | Demo template & demo decision engine | `phase-8-demo-engine` | ☐ |
+| 7 | Competitor research (optional module) | `phase-7-competitor-research` | ⏸️ DEFERRED (optional, post-MVP) |
+| 8 | Demo template & demo decision engine | `phase-8-demo-engine` | ⏳ planning |
 | 9 | Email writer & reviewer | `phase-9-email-generation` | ☐ |
 | 10 | Review dashboard | `phase-10-review-dashboard` | ☐ |
 | 11 | Netlify preview deployment | `phase-11-netlify-previews` | ☐ |
@@ -85,3 +85,32 @@ phase's start-of-phase report. Highlights of the hard gates:
 - **P12** end-to-end dry run; resumable runs; enforced daily caps; visible failures; no external write when disabled.
 - **P13** only on explicit request; separate sending plan (jurisdiction, SPF/DKIM/DMARC, unsubscribe,
   suppression, bounce handling, volume ramp, caps, provider, reply detection, follow-ups); removable module.
+
+## Phase 7 — Competitor research (DEFERRED — optional, post-MVP)
+
+Deferred by operator on 2026-07-16 to prioritize finishing the usable outreach system. **No code, migrations,
+states, providers, or tests exist for it.** Full plan preserved here for when it resumes.
+
+- **Purpose:** for a *selected* lead (deterministic gate on Phase 6 opportunity score + comparison-relevant
+  finding categories), gather **bounded, evidence-backed** context on how a few verified local competitors
+  handle the *same* weaknesses found on the lead's site. Optional, default-off (`COMPETITOR_RESEARCH_ENABLED`).
+- **Hard exclusions:** no competitor traffic/revenue/ranking/performance claims; no copying competitor
+  content/designs; no SEO/analytics; not every lead; presence/absence facts only.
+- **Discovery:** Google Places ID-only (no content persisted, `ALLOW_PAID_READS`-gated) or operator CSV or mock.
+- **Verification:** reuse Phase 4 deterministic `WebsiteVerifier`; only VERIFIED competitor official sites proceed.
+- **Capture:** reuse Phase 5 hardened container, purpose `COMPETITOR_CAPTURE`, ≤2 pages/competitor, screenshots
+  are internal evidence only (never republished).
+- **Deterministic core:** feature extraction (has-online-booking, contact-in-header, etc.) + a versioned,
+  reproducible comparison matrix with gap flags + evidence citations. **Optional** bounded AI summary reuses
+  Phase 6 validation/injection/cost guards (default off).
+- **Schema:** `CompetitorComparison` (dimension, leadState+evidence, competitors[present|null + evidence], gap,
+  rulesVersion/hash) — no numeric performance fields.
+- **DB (next free migration):** competitor_research_runs, competitors (Place-ID-only, no Google content),
+  competitor_comparisons + evidence links; capture reuses website_capture_runs.
+- **States:** OPPORTUNITY_READY → COMPETITOR_RESEARCH_READY → COMPETITOR_RESEARCHED; not-justified/disabled skip
+  unchanged. Outcome taxonomy incl. NOT_JUSTIFIED, ALL_UNVERIFIED, NO_COMPETITORS_FOUND, BUDGET_BLOCKED.
+- **Limits:** module kill switch, MAX_COMPETITORS_PER_LEAD (~3), MAX_COMPETITOR_RESEARCH_PER_RUN (~5), paid-read
+  + LLM cost caps.
+- **Privacy/legal:** public business info only; no Google content persisted; no copied designs; neutral,
+  evidence-bound observations; noindex on any artifacts; competitor screenshots internal-only.
+- **Rollback:** module flag + migration reverse script + `git reset --hard phase-6-ai-audit`.
