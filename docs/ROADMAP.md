@@ -29,11 +29,15 @@ No phase begins before the previous one is approved with `APPROVE PHASE X`.
 > phone-only leads and writes durable facts (`source_type='website'`) with source URL + capture time, then
 > re-qualifies. See DECISIONS D-0011.
 
-> **Deferred task — Gate B model eval (from Phase 6):** the 4-config × 6-case model evaluation matrix
-> (Sol/Terra generator × reviewer) is deferred until the outreach pipeline is end-to-end functional and there
-> is real audit volume to evaluate against. Tooling, fixtures (incl. 3 multimodal), budgets, and the exact
-> command are retained. Until then the production model config is the PROVISIONAL gpt-5.6-sol/medium baseline
-> (D-0024). Re-run: `pnpm cli eval-audit --cases "missing-cta,good-site,mobile-overflow,desktop-mobile-mismatch,injection-heading,minimal-evidence" --models "gpt-5.6-sol,gpt-5.6-terra" --reviewers "gpt-5.6-sol,gpt-5.6-terra"`.
+> **Deferred tasks — Gate B model eval (from Phase 6):** the first Gate B run (2026-07-16) is marked
+> **INVALID_FOR_MODEL_SELECTION** — it was degraded by transient network errors (only Sol/Sol partially
+> completed; $0.1545 spent). Its cost + diagnostic records are preserved (`eval-reports/`), but its quality
+> metrics MUST NOT be used to choose a production model. Production stays on the PROVISIONAL gpt-5.6-sol/medium
+> baseline (D-0024). Deferred until the pipeline is end-to-end functional and there is real audit volume:
+> 1. **Rerun Gate B under stable network conditions** — `pnpm cli eval-audit --cases "missing-cta,good-site,mobile-overflow,desktop-mobile-mismatch,injection-heading,minimal-evidence" --models "gpt-5.6-sol,gpt-5.6-terra" --reviewers "gpt-5.6-sol,gpt-5.6-terra"`.
+> 2. **Monitor fabricated evidence-reference rates** on real audits (the Gate A repair + the degraded run both showed the generator can cite out-of-package evidence IDs).
+> 3. **Improve evidence-citation prompting** if the fabricated-reference rate is material.
+> 4. **Run future paid evaluations in small foreground batches with explicit stop points** (not a single 48-call background run).
 
 ## Phase 0 — Discovery & system specification (current)
 

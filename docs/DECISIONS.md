@@ -24,7 +24,9 @@ Every significant decision is recorded here in the required format. Newest first
 - **Tradeoffs:** We run on possibly-not-cost-optimal models until Gate B is completed;
   Terra (≈half the cost) remains unvalidated for quality.
 - **Rollback path:** Config only (`.env` model/effort); no schema or code change.
-- **Status:** Accepted (Phase 6). Gate B recorded as a deferred task in ROADMAP.
+- **Status:** Accepted (Phase 6, approved 2026-07-16). The 2026-07-16 Gate B run is marked
+  **INVALID_FOR_MODEL_SELECTION** (network-degraded); cost/diagnostics preserved, quality metrics not used.
+  Gate B + follow-up monitoring recorded as deferred tasks in ROADMAP.
 
 ---
 
