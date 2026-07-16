@@ -107,11 +107,22 @@ content**. See docs/integrations/google-places.md and DECISIONS D-0008.
 - Maintain a `suppression_list`. Unsubscribed leads can never re-enter a sending campaign; suppression
   overrides approval.
 
-## Demos
+## Demos (Phase 8)
 
-- Prospect-specific demo pages must include `<meta name="robots" content="noindex,nofollow" />`.
-- Demos carry a clear concept/demo disclosure and never impersonate the live site.
-- Branded demos are generated locally only until Phase 10 is approved.
+- **Local-only, human-gated:** demos are generated to a git-ignored `./demos/<leadId>/` and are
+  `GENERATED_PENDING_REVIEW`; generation is separate from approval and nothing is published in
+  Phase 8. `preview-demo` serves on **127.0.0.1 only** (never a public interface).
+- **noindex everywhere:** every page has `<meta name="robots" content="noindex,nofollow,noarchive">`;
+  `netlify.toml` carries an `X-Robots-Tag` noindex header for the later deploy phase. A visible
+  concept-demo disclosure is always present; demos never impersonate the live site.
+- **Untrusted facts / output security:** every lead fact is treated as untrusted — HTML-escaped,
+  URLs allow-listed to http(s)/tel/mailto (javascript:/data: rejected), output paths traversal-safe.
+  Generated pages carry a restrictive CSP and contain no scripts, forms, cookies, trackers, or
+  external resource loads. XSS + malicious-fact fixtures cover this.
+- **No fabrication / no copied assets:** content comes only from current verified facts (unknown
+  sections omitted); CTAs never imply online booking without a verified booking URL. The template
+  is our own (text-based name treatment, generic visuals) — no scraped logos/photos, no competitor
+  assets, no cloning of the live site. Relational provenance links every rendered value to a fact.
 
 ## Dashboard (Phase 9+)
 

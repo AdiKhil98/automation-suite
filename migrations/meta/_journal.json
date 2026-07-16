@@ -50,6 +50,13 @@
       "when": 1784151646330,
       "tag": "0006_audit_debug",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1784231265972,
+      "tag": "0007_demo",
+      "breakpoints": true
     }
   ]
 }

@@ -126,6 +126,15 @@ const envSchema = z.object({
   // before making it and stops when EITHER limit would be exceeded.
   MAX_EVAL_COST_USD: z.coerce.number().nonnegative().default(4),
   MAX_EVAL_CALLS: z.coerce.number().int().nonnegative().default(48),
+
+  // --- Phase 8: demo decision & generation (local only; no deploy) ---
+  DEMO_GENERATION_ENABLED: boolString(true),
+  // A demo builds when facts suffice AND (score >= this OR a demonstrable finding exists).
+  // (MAX_BRANDED_DEMOS_PER_RUN is defined above with the other per-run caps.)
+  MIN_OPPORTUNITY_FOR_DEMO: z.coerce.number().min(0).max(100).default(35),
+  DEMO_OUTPUT_DIR: z.string().default('./demos'),
+  // Local preview server port (preview-demo). Never bound to a public interface.
+  DEMO_PREVIEW_PORT: z.coerce.number().int().positive().default(4599),
 });
 
 const refinedEnvSchema = envSchema.superRefine((val, ctx) => {

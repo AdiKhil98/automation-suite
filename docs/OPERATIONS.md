@@ -50,7 +50,14 @@ pnpm cli capture-websites --campaign dental-manchester-test --purpose verificati
 pnpm cli audit-websites --campaign dental-manchester-test [--limit N]
 pnpm cli resume-audit                                     # replay recovery envelopes (never calls the model)
 pnpm cli eval-audit [--models a,b] [--reviewers c] [--max-calls N] [--out dir]
+
+# Phase 8 — local concept-demo generation for OPPORTUNITY_READY leads (deterministic, no deploy)
+pnpm cli generate-demos --campaign dental-manchester-test [--limit N]
+pnpm cli preview-demo --lead <lead-id>   # serves the demo on http://127.0.0.1:<port>/ (loopback only)
 ```
+
+Demos are written to `./demos/<leadId>/` (git-ignored), marked `GENERATED_PENDING_REVIEW`, and are
+never published in Phase 8 — a later phase handles human approval + Netlify deployment.
 
 Standard tests use the mock capture provider (no browser). The **real** browser suite runs against local
 fixtures: install Chromium once (`npx playwright install chromium`), then `pnpm test:browser`. For production
@@ -122,6 +129,14 @@ Phase 6:
 psql "$DATABASE_URL" -f scripts/rollback/0005_audit_down.sql
 git reset --hard phase-5-website-capture
 rm -rf .audit-tmp eval-reports
+```
+
+Phase 8:
+
+```text
+psql "$DATABASE_URL" -f scripts/rollback/0007_demo_down.sql
+git reset --hard phase-6-ai-audit
+rm -rf demos
 ```
 
 Qualification is deterministic and append-only: re-running preserves prior `qualification_results`. Leads

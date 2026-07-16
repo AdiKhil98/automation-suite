@@ -4,6 +4,31 @@ Every significant decision is recorded here in the required format. Newest first
 
 ---
 
+## D-0025 — Demo generation: deterministic, no fake functionality, local-only, provenance-tracked
+
+- **Date:** 2026-07-16
+- **Problem:** Turn approved Phase 6 findings into a persuasive redesign demo without weakening
+  evidence standards, fabricating functionality/content, copying assets, or exposing anything.
+- **Chosen option:** A fully deterministic MVP (no AI copy). Build decision uses the Phase 6
+  score OR a demonstrable outreach-safe finding (a low score alone doesn't veto). Content comes
+  ONLY from current verified facts; unknown sections are omitted. CTAs never imply online booking
+  without a verified booking URL (booking → contact page → tel → scroll fallback). All fact text
+  is HTML-escaped, URLs allow-listed (http/https/tel/mailto), output paths traversal-safe; pages
+  carry a restrictive CSP + `noindex,nofollow,noarchive` and have no scripts/forms/cookies/
+  trackers/external resources. Provenance is RELATIONAL (demo_fact_inputs → lead_facts,
+  demo_finding_inputs → audit_findings), not JSON-only. Generation is separate from approval
+  (GENERATED_PENDING_REVIEW); nothing is published in Phase 8. One original template; no scraped
+  logos/photos, no competitor assets, no cloning.
+- **Reason:** Preserves the Phase 4–6 no-fabrication/evidence-bound standard; fail-closed on
+  anything unverifiable; keeps the human firmly in the loop before exposure.
+- **Tradeoffs:** Thin demos when few facts exist (correct — honesty over fabrication); AI-authored
+  copy and richer templates are deferred.
+- **Rollback path:** `DEMO_GENERATION_ENABLED=false`; migration 0007 reverse script; git reset to
+  phase-6; `demos/` is removable/git-ignored.
+- **Status:** Accepted (Phase 8).
+
+---
+
 ## D-0024 — Gate B deferred; provisional gpt-5.6-sol/medium baseline
 
 - **Date:** 2026-07-16

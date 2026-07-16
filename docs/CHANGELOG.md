@@ -2,6 +2,55 @@
 
 All notable changes per phase. Format loosely follows Keep a Changelog.
 
+## [phase-8-demo-generation] — 2026-07-16
+
+Phase 7 (competitor research) deferred as an optional post-MVP module; Phase 8 is the demo
+decision + local demo-site generation stage. Narrow, MVP, deterministic, local-only.
+
+### Added
+
+- **Deterministic demo decision** (`demo-decision.ts`): builds a demo when facts suffice AND
+  (opportunity score ≥ `MIN_OPPORTUNITY_FOR_DEMO` OR ≥1 accepted outreach-safe finding in a
+  demonstrable category) — a useful demo is not rejected for a low score alone (the Gate A
+  lead scored 10). Per-run cap `MAX_BRANDED_DEMOS_PER_RUN`.
+- **Demo brief** from approved Phase 6 findings → template directives, with relational provenance.
+- **No fake functionality** (`demo-content.ts`): CTA never implies online booking without a
+  verified booking URL — booking URL → "Book an appointment"; contact page → "Contact us";
+  phone → `tel:`; otherwise scroll to the local contact section. No forms; unknown info omits
+  the section (no fabricated services/hours/testimonials/ratings/staff/awards/prices/claims).
+- **Output security** (`sanitize.ts`, `demo-validation.ts`): every fact HTML-escaped; URLs
+  allow-listed to http(s)/tel/mailto (javascript:/data: rejected); path-traversal-safe output
+  dirs; generated pages carry a restrictive CSP, `noindex,nofollow,noarchive`, and have no
+  scripts/forms/cookies/trackers/external resources. XSS + malicious-fact fixtures in tests.
+- One polished **original dental template** (`template.ts`) — self-contained inline CSS, text-
+  based business-name treatment, generic visuals only; no scraped logos/photos, no competitor
+  assets, no cloning.
+- **Relational provenance** (amendment 4): `demo_fact_inputs` (→ lead_facts) and
+  `demo_finding_inputs` (→ audit_findings) FK tables — authoritative, not JSON-only.
+- **Generation ≠ approval** (amendment 5): demo statuses GENERATED_PENDING_REVIEW / APPROVED /
+  REJECTED / SUPERSEDED / BUILD_FAILED; approval metadata columns (approved_at/by/source/notes)
+  reserved for a later human-review phase. `DEMO_READY` = generated + validated, pending review.
+  Nothing is published.
+- 4 tables (demo_decisions, demos, demo_fact_inputs, demo_finding_inputs), migration `0007` +
+  reverse script; `netlify.toml` with an `X-Robots-Tag` noindex header prepared for Phase 11.
+- CLI: `generate-demos --campaign [--limit]`, `preview-demo --lead` (serves on loopback only,
+  never public). New env: `DEMO_GENERATION_ENABLED`, `MIN_OPPORTUNITY_FOR_DEMO`, `DEMO_OUTPUT_DIR`,
+  `DEMO_PREVIEW_PORT`.
+- Tests: 23 demo unit (decision/brief/CTA/sanitize/provenance/template/XSS), 3 PostgreSQL
+  integration (persistence + relational provenance + routing), 3 Playwright browser (desktop +
+  mobile render, no overflow, CTA + destination rules, no external requests, disclosure, noindex,
+  malicious-fact injection blocked). Totals: 246 unit + 26 integration + 5 browser.
+
+### Decisions
+
+- D-0025 demo generation (deterministic, no fake functionality, output sanitization, relational
+  provenance, generation-vs-approval separation, local-only, own template).
+
+### Not in scope
+
+- No competitor research (Phase 7 deferred), no Netlify deploy (Phase 11), no email/dashboard/
+  Gmail/scheduling/sending, no AI copy (deterministic only), no GitHub repo creation.
+
 ## [phase-6-ai-audit] — 2026-07-16
 
 ### Added

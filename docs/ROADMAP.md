@@ -16,7 +16,7 @@ No phase begins before the previous one is approved with `APPROVE PHASE X`.
 | 5 | Website capture & evidence extraction | `phase-5-website-capture` | ✅ approved |
 | 6 | AI website audit & opportunity analysis | `phase-6-ai-audit` | ✅ complete (Gate A passed; Gate B deferred) |
 | 7 | Competitor research (optional module) | `phase-7-competitor-research` | ⏸️ DEFERRED (optional, post-MVP) |
-| 8 | Demo template & demo decision engine | `phase-8-demo-engine` | ⏳ planning |
+| 8 | Demo template & demo decision engine | `phase-8-demo-generation` | ✅ complete (awaiting approval) |
 | 9 | Email writer & reviewer | `phase-9-email-generation` | ☐ |
 | 10 | Review dashboard | `phase-10-review-dashboard` | ☐ |
 | 11 | Netlify preview deployment | `phase-11-netlify-previews` | ☐ |

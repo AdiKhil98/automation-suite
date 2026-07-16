@@ -7,6 +7,8 @@ import { enrichLeadCommand } from './commands/enrich-lead.js';
 import { enrichLeadsCommand } from './commands/enrich-leads.js';
 import { evalAuditCommand } from './commands/eval-audit.js';
 import { gateACheckCommand } from './commands/gate-a-check.js';
+import { generateDemosCommand } from './commands/generate-demos.js';
+import { previewDemoCommand } from './commands/preview-demo.js';
 import { qualifyLeadsCommand } from './commands/qualify-leads.js';
 import { createSampleLeads } from './commands/create-sample-leads.js';
 import { leadState } from './commands/lead-state.js';
@@ -133,6 +135,19 @@ program
   .command('resume-audit')
   .description('Replay paid-result recovery envelopes after a failed DB write (never calls the model)')
   .action(() => withContext(resumeAuditCommand));
+
+program
+  .command('generate-demos')
+  .description('Generate local concept-demo sites for OPPORTUNITY_READY leads (no deploy, human review required)')
+  .requiredOption('--campaign <name>', 'campaign name (see src/config/campaigns.ts)')
+  .option('--limit <n>', 'max leads to generate demos for this run')
+  .action((opts: { campaign: string; limit?: string }) => withContext((ctx) => generateDemosCommand(ctx, opts)));
+
+program
+  .command('preview-demo')
+  .description("Serve a lead's generated demo locally (loopback only; never public)")
+  .requiredOption('--lead <id>', 'lead id')
+  .action((opts: { lead: string }) => withContext((ctx) => previewDemoCommand(ctx, opts)));
 
 program
   .command('reset-test-data')

@@ -691,3 +691,79 @@ export const promptVersions = pgTable('prompt_versions', {
   activatedAt: timestamp('activated_at', { withTimezone: true }).notNull().defaultNow(),
   status: text('status').notNull(),
 });
+
+// --- Phase 8: demo decision & generation ---
+
+export const demoDecisions = pgTable(
+  'demo_decisions',
+  {
+    id: text('id').primaryKey(),
+    leadId: text('lead_id').notNull().references(() => leads.id, { onDelete: 'cascade' }),
+    runId: text('run_id').references(() => pipelineRuns.id, { onDelete: 'set null' }),
+    decision: text('decision').notNull(),
+    outcome: text('outcome').notNull(),
+    reason: text('reason').notNull(),
+    opportunityScore: integer('opportunity_score'),
+    minOpportunity: integer('min_opportunity').notNull(),
+    justifiedByScore: boolean('justified_by_score').notNull(),
+    justifiedByFinding: boolean('justified_by_finding').notNull(),
+    briefRulesVersion: text('brief_rules_version').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    leadIdx: index('demo_decisions_lead_idx').on(t.leadId),
+    decisionCk: check('demo_decision_ck', sql`${t.decision} IN ('BUILD_DEMO','NO_DEMO')`),
+  }),
+);
+
+export const demos = pgTable(
+  'demos',
+  {
+    id: text('id').primaryKey(),
+    leadId: text('lead_id').notNull().references(() => leads.id, { onDelete: 'cascade' }),
+    demoDecisionId: text('demo_decision_id').notNull().references(() => demoDecisions.id, { onDelete: 'cascade' }),
+    templateId: text('template_id').notNull(),
+    templateVersion: text('template_version').notNull(),
+    path: text('path').notNull(),
+    status: text('status').notNull(),
+    noindexVerified: boolean('noindex_verified').notNull().default(false),
+    disclosurePresent: boolean('disclosure_present').notNull().default(false),
+    contentHash: text('content_hash'),
+    ctaKind: text('cta_kind'),
+    factsUsed: jsonb('facts_used'),
+    findingRefs: jsonb('finding_refs'),
+    // Approval metadata (populated by a later human-review phase; never in Phase 8).
+    approvedAt: timestamp('approved_at', { withTimezone: true }),
+    approvedBy: text('approved_by'),
+    approvalSource: text('approval_source'),
+    approvalNotes: text('approval_notes'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    leadIdx: index('demos_lead_idx').on(t.leadId),
+    statusCk: check('demo_status_ck', sql`${t.status} IN ('GENERATED_PENDING_REVIEW','APPROVED','REJECTED','SUPERSEDED','BUILD_FAILED')`),
+  }),
+);
+
+// Relational provenance (amendment 4): authoritative FK links, not JSON-only.
+export const demoFactInputs = pgTable(
+  'demo_fact_inputs',
+  {
+    id: text('id').primaryKey(),
+    demoId: text('demo_id').notNull().references(() => demos.id, { onDelete: 'cascade' }),
+    leadFactId: text('lead_fact_id').notNull().references(() => leadFacts.id, { onDelete: 'cascade' }),
+    field: text('field').notNull(),
+  },
+  (t) => ({ demoIdx: index('demo_fact_inputs_demo_idx').on(t.demoId) }),
+);
+
+export const demoFindingInputs = pgTable(
+  'demo_finding_inputs',
+  {
+    id: text('id').primaryKey(),
+    demoId: text('demo_id').notNull().references(() => demos.id, { onDelete: 'cascade' }),
+    auditFindingId: text('audit_finding_id').notNull().references(() => auditFindings.id, { onDelete: 'cascade' }),
+    directive: text('directive').notNull(),
+  },
+  (t) => ({ demoIdx: index('demo_finding_inputs_demo_idx').on(t.demoId) }),
+);

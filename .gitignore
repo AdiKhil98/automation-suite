@@ -29,6 +29,8 @@ test-results/
 .audit-debug/
 # Eval matrix reports (local)
 eval-reports/
+# Generated prospect-specific demo sites (local, private until human-approved)
+/demos/
 
 # Local database volumes / dumps
 /.postgres-data/
