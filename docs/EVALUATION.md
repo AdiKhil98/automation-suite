@@ -76,6 +76,29 @@ Track: capture success rate, partial-capture rate, browser-blocked / bot-challen
 mobile-overflow incidence, and artifact dedup ratio. The mock provider gives fully reproducible fixtures; the
 real browser is exercised by `pnpm test:browser` against local fixtures.
 
+## AI website audit (Phase 6)
+
+The first model-dependent stage, so evaluation is two-layered:
+
+**Deterministic layer (every call, production + eval):** all acceptance gates are code — schema validity (Zod),
+evidence-ID membership in the sent package, canonical-URL membership, forbidden-claim/placeholder/prompt-leak
+denylists, reviewer-ref mapping, finding caps (≤5, ≤3 outreach-safe). Opportunity scores are computed from
+versioned rules (`opp-rules-1`; config hash + per-finding breakdown rows persisted), so every score is exactly
+reproducible from the DB.
+
+**Eval matrix (Gate B):** `pnpm cli eval-audit` runs a fixed 16-case dataset
+(`src/evaluation/audit/eval-cases.ts`) — good/weak sites, missing CTA/contact/trust, mobile overflow,
+desktop↔mobile mismatch, minimal evidence, Hebrew content, stale info, and **4 prompt-injection attacks**
+(instruction in heading/CTA, prompt-leak request, attacker-URL bait) — across generator×reviewer model combos
+(asymmetric allowed). Graders are deterministic only: schema validity, evidence grounding, injection-marker
+absence, attacker-URL absence, review mapping, finding-count range, expected-category presence. Reports are
+JSON under `eval-reports/` with per-case per-grader results; model selection is made from these numbers.
+
+Reproducibility stamps persisted per audit run: rubric/generator-prompt/reviewer-prompt/schema/rules versions,
+input fingerprint (lead + evidence ids + image hashes + versions), resolved model, reasoning effort, image
+detail, token/cost usage per call. Mock provider passes the full safety layer at 100% and runs free in CI;
+category-judgment graders are expected to be meaningful only for real models.
+
 ## Quality gates
 
 - Phase 5 (audit) and Phase 8 (email) each define a documented minimum quality threshold on the fixture set

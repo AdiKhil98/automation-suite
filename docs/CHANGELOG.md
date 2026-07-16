@@ -2,6 +2,80 @@
 
 All notable changes per phase. Format loosely follows Keep a Changelog.
 
+## [phase-6-ai-audit] — 2026-07-16
+
+### Added
+
+- AI website audit & opportunity analysis (first LLM phase). Provider-agnostic `LlmProvider` port;
+  `MockLlmProvider` default (zero paid calls in tests/CI); `OpenAiResponsesProvider` on the OpenAI Responses
+  API (openai@6.46.0 pinned; `text.format` json_schema strict, `reasoning.context='current_turn'`,
+  `store:false`, no tools, no `previous_response_id`; contract in docs/integrations/openai-responses.md, D-0018).
+- Two independent bounded calls per lead: generator + **adversarial reviewer** (minimized reviewer package of
+  only referenced evidence). Max 2 attempts each, ≤4 calls/lead; per-lead + per-run call and cost caps;
+  repair-hint retries for schema/validation failures (D-0020).
+- Deterministic acceptance in code: evidence-ID membership, canonical-URL checks, forbidden-claim/
+  placeholder/prompt-leak denylists, reviewer-ref mapping, ≤5 findings (≤3 outreach-safe). Model uses
+  temporary `findingRef` ("F1"); code generates DB UUIDs (D-0019).
+- Deterministic opportunity scoring (`opp-rules-1`): severity/confidence/category/profile multipliers,
+  same-category dedup, per-finding cap, dimension scores (conversion/mobile/trust/contactability) + capped
+  overall; per-finding breakdown rows + rules hash persisted for full explainability.
+- 12-outcome audit taxonomy with exact lead routing (AUDITED → OPPORTUNITY_READY; transient/budget stay
+  READY_FOR_AUDIT; the rest → NEEDS_MANUAL_REVIEW).
+- Paid-result recovery envelopes (`.audit-tmp/`, atomic rename, mode 0600, git-ignored) written before the
+  persistence transaction; `resume-audit` + automatic startup scan replay idempotently, never re-calling the
+  model (D-0021).
+- Prompt-injection-hardened prompts (website text = untrusted data; versions `audit-rubric-1`,
+  `audit-generator-1`, `audit-reviewer-1`); prompt-cache keys partitioned by task|model|prompt|rubric|schema,
+  never lead-specific.
+- Evaluation harness (Gate B): 16 fixture cases incl. 4 prompt-injection attacks; deterministic graders;
+  generator×reviewer matrix runner; JSON reports under `eval-reports/`.
+- 8 tables: audit_runs, audit_findings, audit_finding_evidence, audit_reviews, audit_review_findings,
+  opportunity_assessments, model_calls, prompt_versions (CHECK constraints). Migration `0005_audit.sql` +
+  reverse script `scripts/rollback/0005_audit_down.sql`.
+- CLI: `audit-websites --campaign [--limit]`, `resume-audit`, `eval-audit`. New env: `ALLOW_PAID_LLM_CALLS`
+  (separate paid-LLM kill switch), `LLM_*` model/effort/image-detail/cache/timeouts, `MAX_LLM_*` budgets,
+  `AUDIT_ENVELOPE_DIR`.
+- Tests: 61 new unit (scoring, validation, evidence package, call-state machine incl. budget/refusal/envelope
+  paths, eval harness, prompt hardening) + 3 PostgreSQL integration (full persistence + routing, failure
+  accounting, envelope replay idempotency). Totals: 179 unit + 23 integration.
+
+### Gate A preparation (2026-07-15)
+
+- Pricing reconciled with official OpenAI pricing (`PRICE_TABLE_VERSION='llm-prices-2'`,
+  `PRICE_VERIFIED_AT='2026-07-15'`): tiered short/long-context rates for `gpt-5.6-sol`; other models blocked
+  until verified. Context tier derived per call from reported input tokens; undeterminable tier → null cost →
+  hard block (D-0018 pricing section).
+- Per-lead cost cap upgraded to a **pre-call worst-case projection** (D-0023): a call is refused unless its
+  worst-case completion still fits the cap, making `spend ≤ cap` a structural invariant (worst-case Gate A
+  spend proven ≤ $0.50; single-call ceiling $0.419). Prompt caching defaulted OFF for Gate A.
+- Hardened capture container **built and verified** (was documented-only in Phase 5): `.dockerignore` (keeps
+  secrets/node_modules out), `deploy/seccomp/chromium.json` (Playwright v1.61.1 profile),
+  `deploy/verify-container.sh` (15/15 OS-hardening checks pass: non-root, cap-drop ALL, no-new-privileges,
+  seccomp filter, read-only fs, tmpfs, pids/mem/cpu limits, init), `deploy/egress-firewall.sh` +
+  `deploy/verify-capture.mjs` (Chromium renders under full hardening; egress blocks metadata/RFC1918/host-non-DB,
+  allows public 443).
+- **Security fix:** the capture provider silently ran `--no-sandbox` (Playwright defaults `chromiumSandbox` off).
+  Now explicit + configurable (`CAPTURE_CHROMIUM_SANDBOX`, default on; off in the max-hardened container where
+  the in-process sandbox cannot initialize) — see D-0022.
+
+### Gate A — PASSED (2026-07-16)
+
+- Live single-lead smoke test on a real website (Zahnärzte am Ufer, Berlin) captured in the hardened container:
+  generator → one deterministic repair (first pass cited out-of-package evidence) → independent reviewer →
+  `AUDITED`. Reviewer rejected an over-reaching accessibility claim. 2 outreach-safe findings, opportunity
+  score 10. 3 calls, $0.221. Surfaced + fixed a real defect (adapter's hardcoded 60s timeout → wired
+  `LLM_TIMEOUT_MS`; SDK `maxRetries` made explicit, 0). Added validation-debug envelopes
+  (`.audit-debug/`, 0600, git-ignored, archive-on-success) + `model_calls.validation_violations` (migration
+  0006) so failed paid calls stay diagnosable; `clean-audit-debug` command.
+
+### Gate B — DEFERRED (D-0024)
+
+- The 4-config × 6-case model eval matrix is deferred until the pipeline is end-to-end functional (a first run
+  was degraded by transient network errors; $0.1545 spent, unreliable). Production model config is the
+  PROVISIONAL **gpt-5.6-sol / medium** baseline (proven at Gate A). Eval tooling retained: dollar guard
+  (`MAX_EVAL_COST_USD`/`MAX_EVAL_CALLS`, per-call worst-case projection + token recording), 6 fixtures incl. 3
+  with real screenshots, `--cases` filter, verified Terra pricing (`llm-prices-3`). Prompt caching stays off.
+
 ## [phase-5-website-capture] — 2026-07-11
 
 ### Added

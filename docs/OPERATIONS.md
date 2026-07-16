@@ -45,6 +45,11 @@ pnpm cli enrich-lead --csv leads.csv                       # rows: leadId,candid
 # Phase 5 — Playwright capture of verified official websites (mock by default)
 pnpm cli capture-websites --campaign dental-manchester-test               # AUDIT_CAPTURE
 pnpm cli capture-websites --campaign dental-manchester-test --purpose verification  # BROWSER_REQUIRED leads
+
+# Phase 6 — AI website audit of READY_FOR_AUDIT leads (mock by default; paid hard-gated)
+pnpm cli audit-websites --campaign dental-manchester-test [--limit N]
+pnpm cli resume-audit                                     # replay recovery envelopes (never calls the model)
+pnpm cli eval-audit [--models a,b] [--reviewers c] [--max-calls N] [--out dir]
 ```
 
 Standard tests use the mock capture provider (no browser). The **real** browser suite runs against local
@@ -56,6 +61,42 @@ captures of real prospect sites, use the hardened container — see
 Enrichment is mock + deterministic by default (no network in tests). The optional Google context provider is
 disabled unless `ENRICHMENT_CONTEXT_PROVIDER=google` and `ALLOW_PAID_READS=true` with a key — see
 [integrations/google-places-details.md](integrations/google-places-details.md).
+
+## Phase 6 paid gates (Gate A / Gate B)
+
+Real OpenAI calls are OFF by default and can never happen from tests or CI. Both gates require an explicit
+operator approval in chat before running.
+
+**Prerequisites (both gates)** — the CLI refuses (before touching any lead) unless ALL hold:
+
+1. `LLM_PROVIDER=openai`, `OPENAI_API_KEY` set, `ALLOW_PAID_LLM_CALLS=true`.
+2. `src/integrations/llm/pricing.ts` reconciled with official OpenAI pricing (`PRICE_VERIFIED_AT` set); every
+   requested model must have a verified price row.
+3. `LLM_MODEL_AUDIT` set (baseline: `gpt-5.6-sol`).
+
+**Gate A — single-lead smoke test.** One real lead end-to-end with strict budgets
+(`MAX_LLM_CALLS_PER_RUN=4`, `MAX_LLM_CALLS_PER_LEAD=4`, `MAX_LLM_COST_USD_PER_LEAD=0.50`):
+
+```text
+pnpm cli audit-websites --campaign <campaign> --limit 1
+pnpm cli lead-state <lead-id>     # verify outcome, findings, score, model_calls rows
+```
+
+Review persisted findings/review/score/costs before approving any batch use. If the DB write failed after paid
+calls: `pnpm cli resume-audit` (free, idempotent).
+
+**Gate B — model eval matrix.** Runs the 16-case fixture dataset (incl. prompt-injection attacks) across
+generator×reviewer combos with deterministic graders; used to pick the production model pairing:
+
+```text
+pnpm cli eval-audit --models gpt-5.6-sol,gpt-5.6-luna --reviewers gpt-5.6-sol --max-calls 96
+```
+
+Reports land in `eval-reports/` (git-ignored). Grader failures are per-case and reproducible. The commit + tag
+for Phase 6 happen only after these gates are completed and approved.
+
+Recovery envelopes live in `.audit-tmp/` (git-ignored, restrictive perms). `audit-websites` scans and replays
+them automatically at startup and stops if any replay fails.
 
 ## Reverse migrations
 
@@ -73,6 +114,14 @@ Phase 5:
 psql "$DATABASE_URL" -f scripts/rollback/0004_capture_down.sql
 git reset --hard phase-4-enrichment
 rm -rf .artifacts
+```
+
+Phase 6:
+
+```text
+psql "$DATABASE_URL" -f scripts/rollback/0005_audit_down.sql
+git reset --hard phase-5-website-capture
+rm -rf .audit-tmp eval-reports
 ```
 
 Qualification is deterministic and append-only: re-running preserves prior `qualification_results`. Leads

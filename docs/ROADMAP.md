@@ -1,7 +1,7 @@
 # Roadmap
 
-**Status:** Phase 0 (in progress)
-**Last updated:** 2026-07-11
+**Status:** Phase 6 complete (Gate A passed on a real site; Gate B deferred). Awaiting APPROVE PHASE 6.
+**Last updated:** 2026-07-16
 
 One phase at a time. Each phase ends with tests, a commit, an annotated tag, and an explicit approval gate.
 No phase begins before the previous one is approved with `APPROVE PHASE X`.
@@ -13,8 +13,8 @@ No phase begins before the previous one is approved with `APPROVE PHASE X`.
 | 2 | Lead collection & deduplication | `phase-2-lead-collection` | ✅ approved |
 | 3 | Deterministic qualification (PRE_AUDIT) | `phase-3-qualification` | ✅ approved |
 | 4 | Independent enrichment & website discovery | `phase-4-enrichment` | ✅ approved |
-| 5 | Website capture & evidence extraction | `phase-5-website-capture` | ⏳ in progress |
-| 6 | AI website audit & opportunity analysis | `phase-6-ai-audit` | ☐ |
+| 5 | Website capture & evidence extraction | `phase-5-website-capture` | ✅ approved |
+| 6 | AI website audit & opportunity analysis | `phase-6-ai-audit` | ✅ complete (Gate A passed; Gate B deferred) |
 | 7 | Competitor research (optional module) | `phase-7-competitor-research` | ☐ |
 | 8 | Demo template & demo decision engine | `phase-8-demo-engine` | ☐ |
 | 9 | Email writer & reviewer | `phase-9-email-generation` | ☐ |
@@ -28,6 +28,12 @@ No phase begins before the previous one is approved with `APPROVE PHASE X`.
 > position 4; former phases 4–13 shifted to 5–14. Enrichment discovers/verifies official websites for
 > phone-only leads and writes durable facts (`source_type='website'`) with source URL + capture time, then
 > re-qualifies. See DECISIONS D-0011.
+
+> **Deferred task — Gate B model eval (from Phase 6):** the 4-config × 6-case model evaluation matrix
+> (Sol/Terra generator × reviewer) is deferred until the outreach pipeline is end-to-end functional and there
+> is real audit volume to evaluate against. Tooling, fixtures (incl. 3 multimodal), budgets, and the exact
+> command are retained. Until then the production model config is the PROVISIONAL gpt-5.6-sol/medium baseline
+> (D-0024). Re-run: `pnpm cli eval-audit --cases "missing-cta,good-site,mobile-overflow,desktop-mobile-mismatch,injection-heading,minimal-evidence" --models "gpt-5.6-sol,gpt-5.6-terra" --reviewers "gpt-5.6-sol,gpt-5.6-terra"`.
 
 ## Phase 0 — Discovery & system specification (current)
 

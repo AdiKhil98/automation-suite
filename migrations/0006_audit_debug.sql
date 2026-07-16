@@ -1,0 +1,1 @@
+ALTER TABLE "model_calls" ADD COLUMN "validation_violations" jsonb;

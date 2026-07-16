@@ -1,0 +1,24 @@
+# NEVER bake secrets or local state into the image.
+.env
+.env.*
+!.env.example
+
+.git
+node_modules
+.pnpm-store
+dist
+build
+coverage
+.vitest
+playwright-report
+test-results
+.artifacts
+.audit-tmp
+eval-reports
+.postgres-data
+*.log
+logs
+*.sql.bak
+*.dump
+.idea
+.vscode

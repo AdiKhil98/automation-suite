@@ -17,7 +17,7 @@ export function buildCaptureService(ctx: CliContext): BuiltCapture {
   const c = ctx.config;
   const provider: BrowserCaptureProvider =
     c.CAPTURE_PROVIDER === 'playwright'
-      ? new PlaywrightCaptureProvider({ logger: ctx.logger, dockerImageTag: null, allowLoopback: c.CAPTURE_ALLOW_LOOPBACK })
+      ? new PlaywrightCaptureProvider({ logger: ctx.logger, dockerImageTag: null, allowLoopback: c.CAPTURE_ALLOW_LOOPBACK, chromiumSandbox: c.CAPTURE_CHROMIUM_SANDBOX })
       : new MockCaptureProvider(mockCapturePages);
 
   const storage = new LocalFsCaptureStorage(c.CAPTURE_ARTIFACT_DIR);

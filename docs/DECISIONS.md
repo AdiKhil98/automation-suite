@@ -4,6 +4,139 @@ Every significant decision is recorded here in the required format. Newest first
 
 ---
 
+## D-0024 — Gate B deferred; provisional gpt-5.6-sol/medium baseline
+
+- **Date:** 2026-07-16
+- **Problem:** Choosing the production generator/reviewer model + effort ideally comes
+  from the Gate B eval matrix, but a full 4-config × 6-case run before the pipeline is
+  end-to-end functional spends money on synthetic fixtures with little real audit data
+  to validate against. (A first Gate B attempt was additionally degraded by transient
+  network connection errors — only the Sol/Sol config partially completed, $0.1545 —
+  producing unreliable data.)
+- **Chosen option:** Defer Gate B as a post-functional optimization task. Adopt a
+  PROVISIONAL production baseline of **gpt-5.6-sol / medium** for both generator and
+  reviewer — the exact configuration proven end-to-end at Gate A on a real website.
+  Keep all cost guards, the eval runner, the `eval-audit` command, the dollar/call
+  budgets, and the 6 fixtures (incl. the 3 multimodal ones) intact for later use.
+- **Reason:** Gate A already proved Phase 6 works on a real site; model *optimization*
+  is worth more once there is real audit volume to evaluate against. Provisional ≠
+  final: the config is documented as such.
+- **Tradeoffs:** We run on possibly-not-cost-optimal models until Gate B is completed;
+  Terra (≈half the cost) remains unvalidated for quality.
+- **Rollback path:** Config only (`.env` model/effort); no schema or code change.
+- **Status:** Accepted (Phase 6). Gate B recorded as a deferred task in ROADMAP.
+
+---
+
+## D-0023 — Per-lead LLM cost cap enforced by pre-call worst-case projection
+
+- **Date:** 2026-07-15
+- **Problem:** A cost cap checked as "spend-so-far < cap" allows one call to overshoot,
+  so configured token limits alone did not bound Gate A spend to ≤$0.50 (4 calls near
+  their ceiling ≈ $0.84).
+- **Chosen option:** Before each real-provider call, project its worst-case completion
+  cost from the configured limits (evidence items × per-item tokens + proposed findings
+  + images + `max_output_tokens`, priced at the resolved tier) and refuse the call
+  unless `spend_so_far + worst_case ≤ cap`. Invariant: `spend_so_far ≤ cap` always
+  holds, so final spend can never exceed the cap regardless of call count. A null
+  projection (unknown price / undeterminable context tier) blocks the call.
+- **Reason:** Makes the budget a structural guarantee provable from config, not a
+  post-hoc overshoot; satisfies "prove the configured limits cannot exceed the cap."
+- **Tradeoffs:** Conservative token bounds may block a later call in a pathological
+  high-token lead (fails closed — correct for a spend guard). Mock provider is exempt
+  (zero cost).
+- **Rollback path:** Guard is contained in audit-service + token-budget.ts.
+- **Status:** Accepted (Phase 6).
+
+---
+
+## D-0022 — Container is the browser boundary; in-process Chromium sandbox is optional
+
+- **Date:** 2026-07-15
+- **Problem:** Building/verifying the hardened capture container revealed that Chromium's
+  in-process sandbox cannot initialize under `--cap-drop ALL` + `no-new-privileges`
+  (setuid sandbox needs privilege escalation; namespace sandbox also fails) — and that
+  the app silently ran `--no-sandbox` because Playwright defaults `chromiumSandbox` to
+  false, contradicting the Phase-5 doc.
+- **Chosen option:** Keep the strong container as the authoritative boundary (D-0017):
+  non-root, cap-drop ALL, no-new-privileges, default-deny seccomp, read-only fs,
+  resource limits, network egress firewall. Make the in-process sandbox an explicit,
+  configurable defense-in-depth layer (`CAPTURE_CHROMIUM_SANDBOX`, default on; set OFF
+  in the max-hardened container). Verified by `deploy/verify-container.sh` +
+  `deploy/verify-capture.mjs`.
+- **Reason:** Enabling the in-process sandbox would require re-adding broad privileges
+  (e.g. SYS_ADMIN) or dropping no-new-privileges — a net weaker posture than the
+  locked-down container + egress firewall. Correctness over a misleading claim.
+- **Tradeoffs:** A renderer exploit runs as pwuser in-container (no Chromium sandbox),
+  contained by caps/seccomp/read-only/egress rather than by Chromium itself.
+- **Rollback path:** `CAPTURE_CHROMIUM_SANDBOX` + deploy/ assets; no schema impact.
+- **Status:** Accepted (Phase 6; supersedes the Phase-5 "sandbox always on" wording).
+
+---
+
+## D-0021 — Paid-result recovery envelope written before DB persistence
+
+- **Date:** 2026-07-15
+- **Problem:** A DB failure after paid model calls must never force re-paying for the same calls.
+- **Chosen option:** After the audit completes (before the persistence transaction), write a local recovery
+  envelope (`.audit-tmp/`, atomic temp→rename, mode 0600, git-ignored) containing the full persist record +
+  version stamps. On success it is deleted; on failure `resume-audit` (and a startup scan in `audit-websites`)
+  replays persistence idempotently (keyed by audit-run id). Replay NEVER calls the model.
+- **Reason:** Paid results are the expensive artifact; the DB write is retryable. Idempotent replay makes the
+  failure mode "retry a free transaction", never "spend again".
+- **Tradeoffs:** Transient local plaintext copy of findings (no secrets, no keys, no images); restrictive perms.
+- **Rollback path:** scripts/rollback/0005_audit_down.sql, delete src/integrations/audit/.
+- **Status:** Accepted (Phase 6).
+
+---
+
+## D-0020 — Independent adversarial reviewer; deterministic acceptance
+
+- **Date:** 2026-07-15
+- **Problem:** A single model pass over-claims; self-review inherits the same reasoning bias.
+- **Chosen option:** A second, fully independent model call (no shared reasoning, no `previous_response_id`,
+  minimized reviewer package of only referenced evidence) adversarially checks each finding by its temporary
+  `findingRef`. Code — not the model — applies decisions/revisions, caps findings at 5 (≤3 outreach-safe),
+  generates DB UUIDs, and computes the opportunity score from versioned rules (`opp-rules-1`, hash persisted).
+- **Reason:** Model classifies; code decides. Every score is reproducible from persisted breakdown rows.
+- **Tradeoffs:** Doubles per-lead model cost (2 calls normal case; ≤4 with retries).
+- **Rollback path:** Config/prompt versions are pinned; git reset to phase-5 tag.
+- **Status:** Accepted (Phase 6).
+
+---
+
+## D-0019 — Website text is untrusted data; validation is deterministic and code-owned
+
+- **Date:** 2026-07-15
+- **Problem:** Captured website content can carry prompt-injection; model text can over-claim.
+- **Chosen option:** Prompts pin an untrusted-data boundary (no tools, never follow embedded instructions);
+  ALL acceptance gates are deterministic code: evidence IDs must exist in the package, affected URLs must
+  canonicalize into the captured set, forbidden-claim/placeholder/prompt-leak regex denylists, reviewer refs
+  must map 1:1. The eval dataset includes injection attacks graded by marker absence.
+- **Reason:** Injection resistance must not depend on model behavior alone; validators are reproducible.
+- **Tradeoffs:** Regex denylists are conservative and may occasionally reject valid phrasing (retry with hint).
+- **Rollback path:** src/domain/audit/validation.ts is self-contained.
+- **Status:** Accepted (Phase 6).
+
+---
+
+## D-0018 — OpenAI Responses API for the audit phase; provider behind a port; mock-first
+
+- **Date:** 2026-07-15
+- **Problem:** Phase 6 needs a concrete LLM provider without coupling the domain to it or spending in tests.
+- **Chosen option:** OpenAI Responses API (openai@6.46.0 pinned; `text.format` json_schema strict,
+  `reasoning.context='current_turn'`, `store:false`, no tools) behind the `LlmProvider` port.
+  `MockLlmProvider` is the default everywhere; real calls additionally require `ALLOW_PAID_LLM_CALLS=true`
+  + key + verified price table, and happen only at approved Gates A/B. Contract recorded in
+  docs/integrations/openai-responses.md.
+- **Reason:** Structured outputs + multimodal + caching controls fit the audit shape; the port keeps
+  Anthropic/local models swappable; mock-first keeps CI free and deterministic.
+- **Tradeoffs:** Placeholder pricing must be reconciled before Gate A (enforced by a hard block).
+- **Rollback path:** Provider is one adapter file; the domain never imports OpenAI types.
+- **Status:** Accepted (Phase 6).
+
+---
+
 ## D-0017 — Hardened container is the browser SSRF boundary (not URL checks alone)
 
 - **Date:** 2026-07-11

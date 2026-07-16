@@ -23,6 +23,13 @@ test-results/
 /artifacts/
 .artifacts/
 
+# Audit paid-result recovery envelopes (local, private — never committed)
+.audit-tmp/
+# Audit validation debug envelopes (local, private — never committed)
+.audit-debug/
+# Eval matrix reports (local)
+eval-reports/
+
 # Local database volumes / dumps
 /.postgres-data/
 *.sql.bak

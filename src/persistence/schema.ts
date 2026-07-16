@@ -523,3 +523,171 @@ export const captureErrors = pgTable(
     runIdx: index('capture_errors_run_idx').on(t.captureRunId),
   }),
 );
+
+// --- Phase 6: AI website audit & opportunity analysis ---
+
+const AUDIT_OUTCOMES_SQL =
+  "'AUDITED','AUDITED_NO_ACTIONABLE_FINDINGS','INSUFFICIENT_EVIDENCE','CAPTURE_CONFLICT','MODEL_REFUSAL','SCHEMA_INVALID','VALIDATION_FAILED','INPUT_TOO_LARGE','TRANSIENT_PROVIDER_ERROR','RATE_LIMITED','BUDGET_BLOCKED','MANUAL_REVIEW_REQUIRED'";
+const AUDIT_CATEGORIES_SQL =
+  "'CTA_CLARITY','BOOKING_FRICTION','CONTACT_FRICTION','MOBILE_USABILITY','SERVICE_CLARITY','TRUST_SIGNALS','SOCIAL_PROOF','NAVIGATION','READABILITY','LOCAL_INFORMATION','VISUAL_HIERARCHY','TECHNICAL_RENDERING','ACCESSIBILITY_INDICATOR','DESKTOP_MOBILE_CONSISTENCY','OTHER'";
+
+export const auditRuns = pgTable(
+  'audit_runs',
+  {
+    id: text('id').primaryKey(),
+    leadId: text('lead_id').notNull().references(() => leads.id, { onDelete: 'cascade' }),
+    runId: text('run_id').references(() => pipelineRuns.id, { onDelete: 'set null' }),
+    captureRunId: text('capture_run_id').references(() => websiteCaptureRuns.id, { onDelete: 'set null' }),
+    outcome: text('outcome').notNull(),
+    rubricVersion: text('rubric_version').notNull(),
+    generatorPromptVersion: text('generator_prompt_version').notNull(),
+    reviewerPromptVersion: text('reviewer_prompt_version').notNull(),
+    schemaVersion: text('schema_version').notNull(),
+    opportunityRulesVersion: text('opportunity_rules_version').notNull(),
+    opportunityRulesHash: text('opportunity_rules_hash').notNull(),
+    provider: text('provider').notNull(),
+    requestedAuditModel: text('requested_audit_model').notNull(),
+    resolvedAuditModel: text('resolved_audit_model'),
+    reasoningEffort: text('reasoning_effort').notNull(),
+    reasoningMode: text('reasoning_mode').notNull(),
+    imageDetail: text('image_detail').notNull(),
+    responseStore: boolean('response_store').notNull(),
+    inputFingerprint: text('input_fingerprint').notNull(),
+    generatorResponseId: text('generator_response_id'),
+    reviewerResponseId: text('reviewer_response_id'),
+    totalInputTokens: integer('total_input_tokens').notNull().default(0),
+    totalOutputTokens: integer('total_output_tokens').notNull().default(0),
+    totalCostUsd: doublePrecision('total_cost_usd').notNull().default(0),
+    startedAt: timestamp('started_at', { withTimezone: true }).notNull(),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+  },
+  (t) => ({
+    leadIdx: index('audit_runs_lead_idx').on(t.leadId),
+    outcomeCk: check('audit_outcome_ck', sql.raw(`outcome IN (${AUDIT_OUTCOMES_SQL})`)),
+  }),
+);
+
+export const auditFindings = pgTable(
+  'audit_findings',
+  {
+    id: text('id').primaryKey(),
+    auditRunId: text('audit_run_id').notNull().references(() => auditRuns.id, { onDelete: 'cascade' }),
+    findingRef: text('finding_ref').notNull(),
+    category: text('category').notNull(),
+    observation: text('observation').notNull(),
+    affectedUrls: jsonb('affected_urls').notNull(),
+    affectedProfiles: jsonb('affected_profiles').notNull(),
+    severity: text('severity').notNull(),
+    confidence: doublePrecision('confidence').notNull(),
+    businessImpact: text('business_impact').notNull(),
+    recommendation: text('recommendation').notNull(),
+    safeForOutreach: boolean('safe_for_outreach').notNull(),
+    outreachAngle: text('outreach_angle'),
+    uncertainty: text('uncertainty'),
+    reviewDecision: text('review_decision').notNull(),
+  },
+  (t) => ({
+    runIdx: index('audit_findings_run_idx').on(t.auditRunId),
+    categoryCk: check('audit_finding_category_ck', sql.raw(`category IN (${AUDIT_CATEGORIES_SQL})`)),
+    severityCk: check('audit_finding_severity_ck', sql`${t.severity} IN ('LOW','MEDIUM','HIGH')`),
+    confidenceCk: check('audit_finding_confidence_ck', sql`${t.confidence} >= 0 AND ${t.confidence} <= 1`),
+  }),
+);
+
+export const auditFindingEvidence = pgTable(
+  'audit_finding_evidence',
+  {
+    auditFindingId: text('audit_finding_id').notNull().references(() => auditFindings.id, { onDelete: 'cascade' }),
+    captureEvidenceId: text('capture_evidence_id').notNull().references(() => captureEvidence.id, { onDelete: 'cascade' }),
+  },
+  (t) => ({ pk: primaryKey({ columns: [t.auditFindingId, t.captureEvidenceId] }) }),
+);
+
+export const auditReviews = pgTable('audit_reviews', {
+  id: text('id').primaryKey(),
+  auditRunId: text('audit_run_id').notNull().references(() => auditRuns.id, { onDelete: 'cascade' }),
+  overallDecision: text('overall_decision').notNull(),
+});
+
+export const auditReviewFindings = pgTable('audit_review_findings', {
+  id: text('id').primaryKey(),
+  auditReviewId: text('audit_review_id').notNull().references(() => auditReviews.id, { onDelete: 'cascade' }),
+  findingRef: text('finding_ref').notNull(),
+  decision: text('decision').notNull(),
+  evidenceSupported: boolean('evidence_supported').notNull(),
+  impactSupported: boolean('impact_supported').notNull(),
+  safeForOutreach: boolean('safe_for_outreach').notNull(),
+  problems: jsonb('problems').notNull(),
+  revisedObservation: text('revised_observation'),
+  revisedBusinessImpact: text('revised_business_impact'),
+  revisedRecommendation: text('revised_recommendation'),
+  revisedOutreachAngle: text('revised_outreach_angle'),
+});
+
+export const opportunityAssessments = pgTable(
+  'opportunity_assessments',
+  {
+    id: text('id').primaryKey(),
+    auditRunId: text('audit_run_id').notNull().references(() => auditRuns.id, { onDelete: 'cascade' }),
+    leadId: text('lead_id').notNull().references(() => leads.id, { onDelete: 'cascade' }),
+    conversionScore: integer('conversion_score').notNull(),
+    mobileScore: integer('mobile_score').notNull(),
+    trustScore: integer('trust_score').notNull(),
+    contactabilityScore: integer('contactability_score').notNull(),
+    overallScore: integer('overall_score').notNull(),
+    rulesVersion: text('rules_version').notNull(),
+    rulesHash: text('rules_hash').notNull(),
+    breakdown: jsonb('breakdown').notNull(),
+    capsApplied: jsonb('caps_applied').notNull(),
+  },
+  (t) => ({
+    runIdx: index('opportunity_assessments_run_idx').on(t.auditRunId),
+    scoreCk: check(
+      'opportunity_score_ck',
+      sql`${t.conversionScore} >= 0 AND ${t.conversionScore} <= 100 AND ${t.mobileScore} >= 0 AND ${t.mobileScore} <= 100 AND ${t.trustScore} >= 0 AND ${t.trustScore} <= 100 AND ${t.contactabilityScore} >= 0 AND ${t.contactabilityScore} <= 100 AND ${t.overallScore} >= 0 AND ${t.overallScore} <= 100`,
+    ),
+  }),
+);
+
+export const modelCalls = pgTable(
+  'model_calls',
+  {
+    id: text('id').primaryKey(),
+    auditRunId: text('audit_run_id').references(() => auditRuns.id, { onDelete: 'cascade' }),
+    leadId: text('lead_id').references(() => leads.id, { onDelete: 'set null' }),
+    purpose: text('purpose').notNull(),
+    provider: text('provider').notNull(),
+    requestedModel: text('requested_model').notNull(),
+    resolvedModel: text('resolved_model'),
+    promptVersion: text('prompt_version'),
+    schemaVersion: text('schema_version'),
+    requestId: text('request_id'),
+    responseId: text('response_id'),
+    inputTokens: integer('input_tokens'),
+    cachedInputTokens: integer('cached_input_tokens'),
+    cacheWriteTokens: integer('cache_write_tokens'),
+    outputTokens: integer('output_tokens'),
+    reasoningTokens: integer('reasoning_tokens'),
+    estimatedCostUsd: doublePrecision('estimated_cost_usd'),
+    latencyMs: integer('latency_ms'),
+    status: text('status').notNull(),
+    classification: text('classification'),
+    retryNumber: integer('retry_number').notNull().default(0),
+    imageDetail: text('image_detail'),
+    validationViolations: jsonb('validation_violations'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({ runIdx: index('model_calls_run_idx').on(t.auditRunId) }),
+);
+
+export const promptVersions = pgTable('prompt_versions', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  version: text('version').notNull(),
+  role: text('role').notNull(),
+  rubricVersion: text('rubric_version'),
+  schemaVersion: text('schema_version'),
+  modelFamily: text('model_family'),
+  activatedAt: timestamp('activated_at', { withTimezone: true }).notNull().defaultNow(),
+  status: text('status').notNull(),
+});

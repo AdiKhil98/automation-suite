@@ -74,6 +74,31 @@ content**. See docs/integrations/google-places.md and DECISIONS D-0008.
   sensitive values in artifact paths.
 - **Provider-data boundary:** capture targets only URLs already independently verified in Phase 4. No ephemeral
   Google context enters capture records, screenshots, logs, fingerprints, or events.
+- **Chromium in-process sandbox (D-0022):** incompatible with `--cap-drop ALL` + `no-new-privileges`, so in the
+  max-hardened container it is OFF (`CAPTURE_CHROMIUM_SANDBOX=false`) and the container + egress firewall are the
+  boundary; it stays ON where the runtime supports it. Set explicitly in code (Playwright defaults it OFF).
+  Verified by `deploy/verify-container.sh` (15 OS checks) and `deploy/verify-capture.mjs` (render + egress).
+
+## AI website audit (Phase 6)
+
+- **What is sent to OpenAI (and nothing else):** business facts already independently verified (name, category,
+  city, official domain), bounded capture-evidence rows (type, source URL, truncated extracted text), and the
+  primary desktop/mobile **viewport** screenshots. **Never sent:** API keys, env, DB IDs beyond evidence ids,
+  full HTML, cookies/storage, Google-derived context, other leads' data, or full-page screenshots.
+- **Untrusted-data boundary:** captured website text is labeled untrusted data in the prompts; the model has
+  no tools; embedded instructions are never followed. Resistance is *verified deterministically* — the eval
+  dataset plants injection payloads and graders assert the payload marker never appears in output and that no
+  attacker URL is cited (URLs must canonicalize into the captured set).
+- **Deterministic acceptance:** evidence-ID membership, canonical-URL checks, forbidden-claim/placeholder/
+  prompt-leak denylists, reviewer-ref mapping — all enforced in code after every call. The model never sets
+  scores or DB ids (temporary `findingRef` only; code generates UUIDs).
+- **Paid-call gating:** real calls require `LLM_PROVIDER=openai` AND `ALLOW_PAID_LLM_CALLS=true` AND
+  `OPENAI_API_KEY` AND a verified price for every model — otherwise the CLI refuses before touching any lead.
+  Budgets: ≤4 calls/lead (2 generator + 2 reviewer attempts), run-level call+cost caps, per-lead cost cap.
+  Every attempt (including failures) is persisted to `model_calls`. `store:false` — responses are not retained
+  by OpenAI's API storage.
+- **Recovery envelopes:** `.audit-tmp/` (git-ignored, mode 0600) holds paid results between call completion and
+  DB persistence; replay is idempotent and never re-calls the model.
 
 ## Outbound safety
 

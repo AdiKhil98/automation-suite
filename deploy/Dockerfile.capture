@@ -14,7 +14,10 @@ COPY . .
 
 ENV NODE_ENV=production \
     CAPTURE_PROVIDER=playwright \
-    PLAYWRIGHT_BROWSER=chromium
+    PLAYWRIGHT_BROWSER=chromium \
+    # In-process Chromium sandbox cannot initialize under --cap-drop ALL +
+    # no-new-privileges; the container + egress firewall are the boundary (D-0022).
+    CAPTURE_CHROMIUM_SANDBOX=false
 
 USER pwuser
 

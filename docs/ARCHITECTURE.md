@@ -266,3 +266,26 @@ navigation, and a PSL-aware `VerifiedOriginPolicy`. Browser/network runs outside
 per-lead transaction writes run + pages + artifact metadata + evidence + errors + fact writes + state + event,
 with content-addressed screenshot blobs committed after commit / discarded on rollback. No full HTML persisted.
 Real captures require a hardened, network-isolated container (docs/deploy/hardened-browser.md).
+
+## 14. AI website audit & opportunity analysis (Phase 6)
+
+The first LLM stage. Flow per `READY_FOR_AUDIT` lead:
+`EvidencePackageBuilder → generator call → deterministic validation → ReviewerPackageBuilder → independent
+adversarial reviewer call → deterministic acceptance → deterministic opportunity scoring → atomic persistence`.
+
+- **Provider port:** the domain depends only on `LlmProvider` (`src/integrations/llm/provider.ts`).
+  `MockLlmProvider` is the default (tests/CI/mock runs are free); `OpenAiResponsesProvider` adapts the OpenAI
+  Responses API (json_schema strict output, multimodal input of primary viewport screenshots, `store:false`,
+  no tools). Paid calls require the separate `ALLOW_PAID_LLM_CALLS` kill switch + key + verified price table.
+- **Model classifies, code decides:** the model proposes findings with temporary `findingRef`s citing evidence
+  IDs from the package; code validates (evidence membership, canonical-URL checks, forbidden-claim denylists),
+  applies reviewer decisions/revisions, caps to ≤5 findings (≤3 outreach-safe), generates DB UUIDs, and
+  computes all scores from versioned rules with a persisted per-finding breakdown.
+- **Call budget:** ≤2 generator + ≤2 reviewer attempts (≤4 calls/lead), plus run-level call/cost caps; every
+  attempt is recorded in `model_calls` even on failure. 12-outcome taxonomy routes leads
+  (AUDITED → OPPORTUNITY_READY; transient/rate-limit/budget stay READY_FOR_AUDIT; rest → NEEDS_MANUAL_REVIEW).
+- **Crash economics:** model calls happen outside the DB transaction; a local recovery envelope is written
+  (atomic rename) *before* the transaction, deleted on success, and replayed idempotently by `resume-audit` —
+  a DB failure never repeats a paid call.
+- **Injection posture:** website text is pinned as untrusted data; validators + the Gate-B eval dataset
+  (with planted attacks) verify resistance deterministically.

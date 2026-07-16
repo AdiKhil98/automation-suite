@@ -5,9 +5,11 @@ leads, audits their websites with stored evidence, decides whether to build a de
 evidence-based cold emails for **human review** — reversible, auditable, and human-approved until explicitly
 changed.
 
-> **Status: Phases 0–4 approved; Phase 5 (website capture & evidence extraction) complete, awaiting approval.**
+> **Status: Phases 0–5 approved; Phase 6 (AI website audit & opportunity analysis) mock-complete, awaiting
+> the approved live gates (Gate A smoke test, Gate B eval matrix) before commit/tag.**
 > Working locally end-to-end via the CLI: collect + dedup → qualify (PRE_AUDIT) → enrich (website discovery)
-> → re-qualify → Playwright capture → READY_FOR_AUDIT. Deterministic and mock-default; no LLM yet.
+> → re-qualify → Playwright capture → AI audit (mock provider) → OPPORTUNITY_READY. Real OpenAI calls are
+> hard-gated behind `ALLOW_PAID_LLM_CALLS` + verified pricing; tests and CI never spend money.
 > See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the phase plan and [`CLAUDE.md`](CLAUDE.md) for the operating contract.
 
 ## What this is (and isn't)

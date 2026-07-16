@@ -36,6 +36,20 @@
       "when": 1783972739977,
       "tag": "0004_free_blonde_phantom",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1784065101210,
+      "tag": "0005_audit",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1784151646330,
+      "tag": "0006_audit_debug",
+      "breakpoints": true
     }
   ]
 }

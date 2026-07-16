@@ -29,6 +29,7 @@ export interface PlaywrightCaptureOptions {
   logger: Logger;
   dockerImageTag: string | null;
   allowLoopback: boolean; // test-only: permit local fixture server
+  chromiumSandbox: boolean; // in-process sandbox; off in the max-hardened container (D-0022)
 }
 
 /**
@@ -52,7 +53,16 @@ export class PlaywrightCaptureProvider implements BrowserCaptureProvider {
 
   async capture(req: CaptureRequest): Promise<RenderedCapture> {
     const errors: CaptureError[] = [];
-    const browser: Browser = await chromium.launch({ args: ['--disable-dev-shm-usage'] });
+    // Chromium in-process sandbox. Playwright defaults `chromiumSandbox` to false
+    // (i.e. --no-sandbox), so we opt in explicitly and make it configurable: it is
+    // incompatible with the maximally-hardened container profile (--cap-drop ALL +
+    // no-new-privileges), where the CONTAINER + network egress firewall are the
+    // authoritative boundary (D-0017/D-0022) and this is set false. Where the runtime
+    // grants the needed privileges it stays on as defense-in-depth. Default: on.
+    const browser: Browser = await chromium.launch({
+      chromiumSandbox: this.opts.chromiumSandbox,
+      args: ['--disable-dev-shm-usage'],
+    });
     const browserVersion = browser.version();
     const info: BrowserInfo = {
       playwrightVersion: PLAYWRIGHT_VERSION,

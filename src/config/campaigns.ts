@@ -37,6 +37,13 @@ export const campaigns: Record<string, Campaign> = {
     query: { textQuery: 'dentist in Manchester UK' },
     niche: dentalNiche,
   },
+  // Dedicated label for the Phase 6 Gate A single-lead live smoke test.
+  'gate-a-zahnaerzte-berlin': {
+    name: 'gate-a-zahnaerzte-berlin',
+    provider: 'mock',
+    query: { textQuery: 'Zahnärzte am Ufer Berlin' },
+    niche: dentalNiche,
+  },
 };
 
 export function getCampaign(name: string): Campaign {

@@ -27,8 +27,12 @@ outbound-outreach pipeline for a web-design / AI-automation services business:
 
 ## Current approved phase
 
-**Phases 0–4 approved. Phase 5 — Website capture & evidence extraction — complete, awaiting `APPROVE PHASE 5`.**
-Do not begin Phase 6 (AI website audit & opportunity analysis) until the user replies `APPROVE PHASE 5`.
+**Phases 0–5 approved. Phase 6 — AI website audit & opportunity analysis — plan approved with 14 amendments;
+mock implementation, persistence, eval harness, and tests are complete and green.** Two paid gates remain:
+Gate A (single-lead live smoke test) and Gate B (model eval matrix). NO real OpenAI call may be made without
+explicit operator approval of the gate, and the Phase 6 commit + tag (`phase-6-ai-audit`) happen only after
+the approved gates are completed (amendment 14). Price-table reconciliation (`PRICE_VERIFIED_AT` in
+src/integrations/llm/pricing.ts) is a hard precondition enforced in code.
 Note: an enrichment phase was inserted at position 4; former phases 4–13 are now 5–14 (see docs/ROADMAP.md).
 Capture uses Playwright (mock by default). Standard tests use mock; the real browser suite is `pnpm test:browser`.
 

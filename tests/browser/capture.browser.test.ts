@@ -59,7 +59,7 @@ describe.skipIf(skip)('PlaywrightCaptureProvider (real Chromium, local fixtures)
 
   beforeAll(async () => {
     ({ server, base } = await startServer());
-    provider = new PlaywrightCaptureProvider({ logger: pino({ level: 'silent' }), dockerImageTag: null, allowLoopback: true });
+    provider = new PlaywrightCaptureProvider({ logger: pino({ level: 'silent' }), dockerImageTag: null, allowLoopback: true, chromiumSandbox: true });
   });
   afterAll(() => {
     server.close();

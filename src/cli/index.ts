@@ -1,13 +1,18 @@
 import { Command } from 'commander';
+import { auditWebsitesCommand } from './commands/audit-websites.js';
 import { captureWebsitesCommand } from './commands/capture-websites.js';
+import { cleanAuditDebugCommand } from './commands/clean-audit-debug.js';
 import { collectLeadsCommand } from './commands/collect-leads.js';
 import { enrichLeadCommand } from './commands/enrich-lead.js';
 import { enrichLeadsCommand } from './commands/enrich-leads.js';
+import { evalAuditCommand } from './commands/eval-audit.js';
+import { gateACheckCommand } from './commands/gate-a-check.js';
 import { qualifyLeadsCommand } from './commands/qualify-leads.js';
 import { createSampleLeads } from './commands/create-sample-leads.js';
 import { leadState } from './commands/lead-state.js';
 import { listLeads } from './commands/list-leads.js';
 import { resetTestData } from './commands/reset-test-data.js';
+import { resumeAuditCommand } from './commands/resume-audit.js';
 import { withContext } from './context.js';
 
 const program = new Command();
@@ -88,6 +93,46 @@ program
   .action((opts: { campaign: string; purpose?: string; limit?: string }) =>
     withContext((ctx) => captureWebsitesCommand(ctx, opts)),
   );
+
+program
+  .command('audit-websites')
+  .description('AI website audit of READY_FOR_AUDIT leads (mock by default; paid calls hard-gated)')
+  .requiredOption('--campaign <name>', 'campaign name (see src/config/campaigns.ts)')
+  .option('--limit <n>', 'max leads to audit this run')
+  .action((opts: { campaign: string; limit?: string }) =>
+    withContext((ctx) => auditWebsitesCommand(ctx, opts)),
+  );
+
+program
+  .command('eval-audit')
+  .description('Run the audit model eval matrix on the fixture dataset (mock by default; Gate B when paid)')
+  .option('--models <list>', 'comma-separated generator models')
+  .option('--reviewers <list>', 'comma-separated reviewer models (default: same as --models)')
+  .option('--cases <list>', 'comma-separated fixture case names (default: all)')
+  .option('--max-calls <n>', 'hard cap on model calls for the whole matrix')
+  .option('--out <dir>', 'report output directory', './eval-reports')
+  .action((opts: { models?: string; reviewers?: string; cases?: string; maxCalls?: string; out?: string }) =>
+    withContext((ctx) => evalAuditCommand(ctx, opts)),
+  );
+
+program
+  .command('gate-a-check')
+  .description('Print Gate A readiness (projected tokens/cost, caps, safety gates) — no OpenAI call')
+  .option('--limit <n>', 'max READY_FOR_AUDIT leads to report')
+  .action((opts: { limit?: string }) => withContext((ctx) => gateACheckCommand(ctx, opts)))
+  ;
+
+program
+  .command('clean-audit-debug')
+  .description('Remove audit validation-debug envelopes (expired by default; --all purges everything)')
+  .option('--all', 'purge all debug records, not just expired')
+  .action((opts: { all?: boolean }) => withContext((ctx) => cleanAuditDebugCommand(ctx, opts)))
+  ;
+
+program
+  .command('resume-audit')
+  .description('Replay paid-result recovery envelopes after a failed DB write (never calls the model)')
+  .action(() => withContext(resumeAuditCommand));
 
 program
   .command('reset-test-data')

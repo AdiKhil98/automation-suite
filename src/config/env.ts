@@ -85,6 +85,47 @@ const envSchema = z.object({
   CAPTURE_ARTIFACT_DIR: z.string().default('./.artifacts'),
   // Test-only: allow loopback targets for the local Playwright fixture server.
   CAPTURE_ALLOW_LOOPBACK: boolString(false),
+  // Chromium in-process sandbox. Default on (defense-in-depth). MUST be set false in
+  // the maximally-hardened capture container (--cap-drop ALL + no-new-privileges make
+  // the in-process sandbox unable to initialize; the container + egress firewall are
+  // the authoritative boundary — see D-0022 / docs/deploy/hardened-browser.md).
+  CAPTURE_CHROMIUM_SANDBOX: boolString(true),
+
+  // --- Phase 6: AI website audit ---
+  // LLM_PROVIDER (declared above) selects 'mock' (default, free) or 'openai'.
+  OPENAI_API_KEY: z.string().optional(),
+  // Separate paid-LLM kill switch: real OpenAI calls require BOTH LLM_PROVIDER=openai
+  // AND this flag. Default off — tests and CI can never spend money.
+  ALLOW_PAID_LLM_CALLS: boolString(false),
+  LLM_MODEL_REVIEW: z.string().optional(),
+  LLM_REASONING_EFFORT_AUDIT: z.enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']).default('medium'),
+  LLM_REASONING_EFFORT_REVIEW: z.enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']).default('medium'),
+  LLM_IMAGE_DETAIL: z.enum(['low', 'high', 'auto', 'original']).default('high'),
+  LLM_STORE_RESPONSES: boolString(false),
+  MAX_LLM_CALLS_PER_RUN: z.coerce.number().int().nonnegative().default(4),
+  MAX_LLM_CALLS_PER_LEAD: z.coerce.number().int().nonnegative().default(4),
+  // Attempts per stage. Gate A sets both to 1 (exactly one generator + one reviewer
+  // call, NO repair/retry calls). Normal batch runs allow one bounded repair each.
+  LLM_MAX_GENERATOR_ATTEMPTS: z.coerce.number().int().min(1).max(2).default(2),
+  LLM_MAX_REVIEWER_ATTEMPTS: z.coerce.number().int().min(1).max(2).default(2),
+  MAX_LLM_COST_USD_PER_RUN: z.coerce.number().nonnegative().default(2),
+  MAX_LLM_COST_USD_PER_LEAD: z.coerce.number().nonnegative().default(0.5),
+  MAX_LLM_INPUT_IMAGES_PER_CALL: z.coerce.number().int().nonnegative().default(2),
+  MAX_LLM_EVIDENCE_ITEMS: z.coerce.number().int().positive().default(120),
+  MAX_LLM_EVIDENCE_CHARS: z.coerce.number().int().positive().default(500),
+  MAX_LLM_SECONDARY_PAGES: z.coerce.number().int().nonnegative().default(4),
+  LLM_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),
+  // SDK-level automatic retries. Default 0 — our "no retries" rule includes the SDK,
+  // not only the audit-service attempt loop.
+  LLM_MAX_RETRIES: z.coerce.number().int().nonnegative().default(0),
+  LLM_MAX_OUTPUT_TOKENS: z.coerce.number().int().positive().default(8_000),
+  LLM_PROMPT_CACHE_ENABLED: boolString(true),
+  AUDIT_ENVELOPE_DIR: z.string().default('./.audit-tmp'),
+  AUDIT_DEBUG_DIR: z.string().default('./.audit-debug'),
+  // Gate B eval matrix hard budgets. The runner projects each call's worst-case cost
+  // before making it and stops when EITHER limit would be exceeded.
+  MAX_EVAL_COST_USD: z.coerce.number().nonnegative().default(4),
+  MAX_EVAL_CALLS: z.coerce.number().int().nonnegative().default(48),
 });
 
 const refinedEnvSchema = envSchema.superRefine((val, ctx) => {
@@ -101,6 +142,14 @@ const refinedEnvSchema = envSchema.superRefine((val, ctx) => {
       code: 'custom',
       path: ['GOOGLE_PLACES_API_KEY'],
       message: 'GOOGLE_PLACES_API_KEY is required when ENRICHMENT_CONTEXT_PROVIDER=google and ALLOW_PAID_READS=true',
+    });
+  }
+  // Paid LLM calls need a key only when both switches are on.
+  if (val.LLM_PROVIDER === 'openai' && val.ALLOW_PAID_LLM_CALLS && !val.OPENAI_API_KEY) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['OPENAI_API_KEY'],
+      message: 'OPENAI_API_KEY is required when LLM_PROVIDER=openai and ALLOW_PAID_LLM_CALLS=true',
     });
   }
 });
