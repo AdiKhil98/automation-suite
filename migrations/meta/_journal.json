@@ -64,6 +64,13 @@
       "when": 1784240000000,
       "tag": "0008_demo_facts",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1784250000000,
+      "tag": "0009_demo_design_specs",
+      "breakpoints": true
     }
   ]
 }

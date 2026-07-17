@@ -47,3 +47,6 @@ Thumbs.db
 .idea/
 .vscode/*
 !.vscode/extensions.json
+
+# Phase 8B composer diagnostics (spec + reviewer verdict per run)
+.composer-debug/

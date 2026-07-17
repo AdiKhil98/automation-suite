@@ -8,6 +8,7 @@ import { enrichLeadsCommand } from './commands/enrich-leads.js';
 import { evalAuditCommand } from './commands/eval-audit.js';
 import { gateACheckCommand } from './commands/gate-a-check.js';
 import { generateDemosCommand } from './commands/generate-demos.js';
+import { composeDemosCommand } from './commands/compose-demos.js';
 import { previewDemoCommand } from './commands/preview-demo.js';
 import { qualifyLeadsCommand } from './commands/qualify-leads.js';
 import { createSampleLeads } from './commands/create-sample-leads.js';
@@ -142,6 +143,13 @@ program
   .requiredOption('--campaign <name>', 'campaign name (see src/config/campaigns.ts)')
   .option('--limit <n>', 'max leads to generate demos for this run')
   .action((opts: { campaign: string; limit?: string }) => withContext((ctx) => generateDemosCommand(ctx, opts)));
+
+program
+  .command('compose-demos')
+  .description('AI Demo Composer: design + render local concept demos for OPPORTUNITY_READY leads (mock by default; no deploy, human review required)')
+  .requiredOption('--campaign <name>', 'campaign name (see src/config/campaigns.ts)')
+  .option('--limit <n>', 'max leads to compose demos for this run')
+  .action((opts: { campaign: string; limit?: string }) => withContext((ctx) => composeDemosCommand(ctx, opts)));
 
 program
   .command('preview-demo')

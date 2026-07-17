@@ -135,6 +135,23 @@ const envSchema = z.object({
   DEMO_OUTPUT_DIR: z.string().default('./demos'),
   // Local preview server port (preview-demo). Never bound to a public interface.
   DEMO_PREVIEW_PORT: z.coerce.number().int().positive().default(4599),
+
+  // --- Phase 8B: AI Demo Composer (local only; no deploy) ---
+  // Off by default: compose-demos is a distinct, opt-in AI path alongside deterministic
+  // generate-demos. Mock provider by default (LLM_PROVIDER); zero paid calls in tests.
+  DEMO_COMPOSER_ENABLED: boolString(false),
+  DEMO_COMPOSER_MODEL: z.string().default('gpt-5.6-sol'),
+  DEMO_COMPOSER_REVIEWER_MODEL: z.string().default('gpt-5.6-terra'),
+  DEMO_COMPOSER_EFFORT: z.enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']).default('medium'),
+  DEMO_COMPOSER_REVIEWER_EFFORT: z.enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']).default('medium'),
+  DEMO_COMPOSER_MAX_CALLS_PER_DEMO: z.coerce.number().int().min(1).max(2).default(2),
+  DEMO_COMPOSER_MAX_COST_USD_PER_DEMO: z.coerce.number().nonnegative().default(0.35),
+  DEMO_COMPOSER_MAX_OUTPUT_TOKENS: z.coerce.number().int().positive().default(2_500),
+  DEMO_COMPOSER_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),
+  // No generator/reviewer retries for the first live smoke test.
+  DEMO_COMPOSER_MAX_RETRIES: z.coerce.number().int().nonnegative().default(0),
+  // Git-ignored diagnostics dir: every run's spec + reviewer verdict (no secrets/reasoning).
+  COMPOSER_DEBUG_DIR: z.string().default('./.composer-debug'),
 });
 
 const refinedEnvSchema = envSchema.superRefine((val, ctx) => {

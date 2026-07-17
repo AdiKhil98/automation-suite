@@ -2,6 +2,35 @@
 
 All notable changes per phase. Format loosely follows Keep a Changelog.
 
+## [phase-8b-ai-composer] — 2026-07-17
+
+AI Demo Composer: the model emits a structured `DemoDesignSpec` (never markup); a deterministic
+renderer assembles a page from a vetted component library. Built on the Phase 8 deterministic
+foundation. Local-only, human-review-gated, no deploy.
+
+### Added
+
+- **Structured design contract** (`domain/demo/composer/design-spec.ts`, `composer-schema.ts`):
+  closed allow-lists (7 section types × 2 vetted variants, 3 themes, hero strategy, messaging
+  emphasis, CTA intent/label keys, fact keys). Strict Zod + JSON schema, no free-form markup.
+- **Vetted component library + themes** (`components.ts`), **deterministic spec validation**
+  (`spec-validation.ts`) and **renderer** (`compose.ts`): reuses Phase 8 sanitize/security/CSP/
+  noindex/disclosure + relational provenance for every personalized value.
+- **Gen + adversarial reviewer** (`demo-composer-service.ts`, prompts `demo-composer/`): pre-call
+  worst-case budget projection, ≤2 calls, per-demo USD cap; mock provider default.
+- **Diagnostics store** (`integrations/demo/composer-debug-store.ts`, git-ignored `.composer-debug/`):
+  records every run's spec + reviewer verdict.
+- **Persistence** migration `0009_demo_design_specs` (+reverse); `composer.repo`, composer UoW;
+  reuses `model_calls` (nullable `audit_run_id`). CLI `compose-demos` (opt-in, paid hard-gated).
+- **Playwright post-render validation** (`playwright-validate.ts`).
+
+### Notes
+
+- First paid smoke test rejected on an over-strict reviewer gate; fixed (reviewer sees component
+  semantics; narrow `fabricationRisk`; gate rejects only on REJECT/fabrication/deterministic-fail,
+  accepts deterministically-applicable REVISE). Re-run: APPROVE, demo composed, $0.0367. See D-0026.
+- MVP simplification: no FS recovery envelope for composer paid calls (spec regen ≈$0.11, bounded).
+
 ## [phase-8-demo-generation] — 2026-07-16
 
 Phase 7 (competitor research) deferred as an optional post-MVP module; Phase 8 is the demo

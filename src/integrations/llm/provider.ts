@@ -16,7 +16,7 @@ export interface LlmCacheConfig {
 }
 
 export interface LlmRequest {
-  task: 'website_audit' | 'audit_review';
+  task: 'website_audit' | 'audit_review' | 'demo_design' | 'demo_design_review';
   system: string;
   user: string;
   images: LlmImage[];

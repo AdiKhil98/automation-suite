@@ -451,3 +451,22 @@ Every significant decision is recorded here in the required format. Newest first
 - **Tradeoffs:** One concrete implementation still to be written later.
 - **Rollback path:** Any provider swap is confined to `src/integrations/<provider>/` behind `LlmProvider`.
 - **Status:** Accepted (Phase 0). Concrete provider decision pending (Phase 5).
+
+## D-0026 — Phase 8B composer reviewer gate + fabricationRisk scope
+
+- **Date:** 2026-07-17
+- **Problem:** First paid smoke test returned REVIEW_REJECTED. The reviewer only saw the brief + spec
+  JSON (not the vetted component library), so it flagged generic `trust-*`/`cta-*` sections (empty
+  factKeys) as fabrication; the approval gate then vetoed on any adverse honesty flag (4-way AND).
+- **Chosen option:** (1) Give the reviewer the component library semantics (generic non-claim copy;
+  empty factKeys ≠ fabrication). (2) Redefine `fabricationRisk` narrowly (unsupported fact/finding
+  ref; unsupported services/trust/social-proof; invented claim; dishonest CTA). (3) New gate: REJECT
+  iff decision=REJECT OR fabricationRisk OR deterministic-validation-fails; APPROVE if decision=APPROVE
+  OR (REVISE AND no new fact/claim/CTA-change) — `evidenceConsistent`/`ctaHonest` are logged signals,
+  already code-guaranteed. Added 3 revision-classification booleans to the reviewer schema (schema v2,
+  reviewer prompt v2). (4) `LocalComposerDebugStore` records every run's spec + reviewer verdict.
+- **Reason:** The deterministic layer already enforces evidence/CTA honesty; the reviewer's unique value
+  is fabrication + holistic judgment, which was mis-calibrated without component context.
+- **Tradeoffs:** Reviewer no longer independently vetoes on evidence/CTA flags (redundant with code).
+- **Rollback path:** Confined to `domain/demo/composer/` + `prompts/demo-composer/`.
+- **Status:** Accepted (Phase 8B). Re-run: APPROVE, demo composed, $0.0367.

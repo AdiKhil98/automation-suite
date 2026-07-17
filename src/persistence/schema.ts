@@ -767,3 +767,43 @@ export const demoFindingInputs = pgTable(
   },
   (t) => ({ demoIdx: index('demo_finding_inputs_demo_idx').on(t.demoId) }),
 );
+
+// --- Phase 8B: AI Demo Composer — the structured design spec behind a composed demo. ---
+
+export const demoDesignSpecs = pgTable(
+  'demo_design_specs',
+  {
+    id: text('id').primaryKey(),
+    demoId: text('demo_id').notNull().references(() => demos.id, { onDelete: 'cascade' }),
+    leadId: text('lead_id').notNull().references(() => leads.id, { onDelete: 'cascade' }),
+    specVersion: text('spec_version').notNull(),
+    schemaVersion: text('schema_version').notNull(),
+    rubricVersion: text('rubric_version').notNull(),
+    generatorPromptVersion: text('generator_prompt_version').notNull(),
+    reviewerPromptVersion: text('reviewer_prompt_version').notNull(),
+    visualDirection: text('visual_direction').notNull(),
+    heroStrategy: text('hero_strategy').notNull(),
+    headerVariant: text('header_variant').notNull(),
+    footerVariant: text('footer_variant').notNull(),
+    primaryCtaIntent: text('primary_cta_intent').notNull(),
+    primaryCtaLabelKey: text('primary_cta_label_key').notNull(),
+    componentIds: jsonb('component_ids').notNull(),
+    reviewerDecision: text('reviewer_decision').notNull(),
+    fabricationRisk: boolean('fabrication_risk').notNull(),
+    evidenceConsistent: boolean('evidence_consistent').notNull(),
+    ctaHonest: boolean('cta_honest').notNull(),
+    reviewerProblems: jsonb('reviewer_problems').notNull(),
+    spec: jsonb('spec').notNull(),
+    provider: text('provider').notNull(),
+    requestedGeneratorModel: text('requested_generator_model').notNull(),
+    requestedReviewerModel: text('requested_reviewer_model').notNull(),
+    generatorResponseId: text('generator_response_id'),
+    reviewerResponseId: text('reviewer_response_id'),
+    totalCostUsd: doublePrecision('total_cost_usd').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    demoIdx: index('demo_design_specs_demo_idx').on(t.demoId),
+    leadIdx: index('demo_design_specs_lead_idx').on(t.leadId),
+  }),
+);
