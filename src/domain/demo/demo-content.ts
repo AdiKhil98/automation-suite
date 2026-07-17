@@ -29,6 +29,12 @@ export function resolveDemoContent(facts: LeadFact[]): DemoContent {
   const emailMailto = mailtoHref(emailRaw);
   const address = use('formatted_address', 'contact.address');
 
+  // Services + opening hours are single facts holding delimited/verified display text.
+  const servicesRaw = use('services', 'services');
+  const services = servicesRaw ? servicesRaw.split('|').map((s) => s.trim()).filter((s) => s !== '').slice(0, 8) : [];
+  const hoursRaw = use('opening_hours', 'opening_hours');
+  const openingHours = hoursRaw ? hoursRaw.split(';').map((s) => s.trim()).filter((s) => s !== '').slice(0, 7) : [];
+
   const cta = resolveCta(facts, factInputs);
 
   return {
@@ -38,7 +44,8 @@ export function resolveDemoContent(facts: LeadFact[]): DemoContent {
     phoneTel,
     emailMailto,
     address,
-    services: [], // no verified services fact type in MVP → section omitted
+    openingHours,
+    services,
     cta,
     factInputs,
   };

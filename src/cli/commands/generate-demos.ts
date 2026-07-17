@@ -1,9 +1,11 @@
 import { getCampaign } from '../../config/campaigns.js';
 import { DEMO_TEMPLATE_ID, DEMO_TEMPLATE_VERSION } from '../../domain/demo/demo-types.js';
 import { DemoService } from '../../domain/demo/demo-service.js';
+import { extractDemoFacts } from '../../domain/demo/fact-extraction.js';
 import { LocalDemoWriter } from '../../integrations/demo/demo-writer.js';
 import { generateDemos, type DemoItem } from '../../pipeline/generate-demos.js';
 import { DrizzleDemoUnitOfWork } from '../../persistence/demo-unit-of-work.js';
+import { AuditInputRepository } from '../../persistence/repositories/audit-input.repo.js';
 import { DemoInputRepository } from '../../persistence/repositories/demo-input.repo.js';
 import { LeadFactsRepository } from '../../persistence/repositories/lead-facts.repo.js';
 import { PipelineRunsRepository } from '../../persistence/repositories/runs.repo.js';
@@ -35,6 +37,7 @@ export async function generateDemosCommand(ctx: CliContext, cliOpts: GenerateDem
   });
 
   const inputRepo = new DemoInputRepository(ctx.db);
+  const captureRepo = new AuditInputRepository(ctx.db);
   const factsRepo = new LeadFactsRepository(ctx.db);
 
   const all = await ctx.leads.list(1000);
@@ -44,6 +47,7 @@ export async function generateDemosCommand(ctx: CliContext, cliOpts: GenerateDem
 
   const items: DemoItem[] = [];
   let skippedNoAudit = 0;
+  let enrichedFacts = 0;
   for (const lead of leads) {
     const audit = await inputRepo.latestAudit(lead.id);
     if (!audit) {
@@ -51,6 +55,25 @@ export async function generateDemosCommand(ctx: CliContext, cliOpts: GenerateDem
       ctx.logger.warn({ leadId: lead.id }, 'OPPORTUNITY_READY lead has no AUDITED run — skipped');
       continue;
     }
+
+    // Enrich: extract additional demo facts from the verified capture evidence and
+    // persist any that are missing, as sourced 'website' facts (provenance preserved).
+    const capture = await captureRepo.latestAuditCapture(lead.id);
+    if (capture) {
+      const existing = new Set((await factsRepo.listCurrentFacts(lead.id)).map((f) => f.factType));
+      const candidates = extractDemoFacts(capture.evidence).filter((cf) => !existing.has(cf.factType));
+      if (candidates.length > 0) {
+        await ctx.db.transaction(async (tx) => {
+          const fr = new LeadFactsRepository(tx);
+          for (const cf of candidates) {
+            await fr.writeCurrentFact({ leadId: lead.id, factType: cf.factType, value: cf.value, normalizedValue: cf.normalizedValue, sourceType: 'website', sourceUrl: cf.sourceUrl, confidence: 0.9 });
+            enrichedFacts += 1;
+          }
+        });
+        ctx.logger.info({ leadId: lead.id, added: candidates.map((c) => c.factType) }, 'demo facts extracted from capture');
+      }
+    }
+
     const facts = await factsRepo.listCurrentFacts(lead.id);
     items.push({ input: { leadId: lead.id, facts, opportunityScore: audit.opportunityScore, findings: audit.findings } });
   }
@@ -62,6 +85,7 @@ export async function generateDemosCommand(ctx: CliContext, cliOpts: GenerateDem
 
   console.log(`\nDemo run ${runId} (${campaign.name}):`);
   console.log(`  leads:                    ${items.length}${skippedNoAudit > 0 ? ` (+${skippedNoAudit} skipped: no audit)` : ''}`);
+  console.log(`  facts extracted (capture):${enrichedFacts}`);
   console.log(`  DEMO_BUILT:               ${summary.DEMO_BUILT}`);
   console.log(`  NO_DEMO_NOT_JUSTIFIED:    ${summary.NO_DEMO_NOT_JUSTIFIED}`);
   console.log(`  NO_DEMO_INSUFFICIENT:     ${summary.NO_DEMO_INSUFFICIENT_FACTS}`);

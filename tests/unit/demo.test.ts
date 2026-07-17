@@ -168,6 +168,26 @@ describe('template rendering + HTML security (amendment 3)', () => {
     expect(validateRenderedHtml('<html><body><script>x</script></body></html>').ok).toBe(false);
     expect(validateRenderedHtml('<a onclick="x()">y</a>').violations).toContain('contains_inline_event_handler');
   });
+
+  it('renders services + hours sections from verified facts, and omits them when absent', () => {
+    const withFacts = resolveDemoContent([
+      fact('business_name', 'Zahnärzte am Ufer'), fact('city', 'Berlin'),
+      fact('phone', '+49 30 1234567'),
+      fact('services', 'Prophylaxe | Implantologie | Bleaching'),
+      fact('opening_hours', 'Mo-Fr 08:00-18:00; Sa 09:00-12:00'),
+    ]);
+    expect(withFacts.services).toEqual(['Prophylaxe', 'Implantologie', 'Bleaching']);
+    expect(withFacts.openingHours).toHaveLength(2);
+    const html = renderDemoHtml(withFacts);
+    expect(html).toContain('id="services"');
+    expect(html).toContain('Implantologie');
+    expect(html).toMatch(/Opening hours/);
+    expect(html).toContain('Call us'); // secondary CTA from verified phone
+    expect(validateRenderedHtml(html).ok).toBe(true);
+
+    const bare = renderDemoHtml(resolveDemoContent([fact('business_name', 'X'), fact('city', 'Berlin')]));
+    expect(bare).not.toContain('id="services"'); // omitted when no services
+  });
 });
 
 describe('buildDemo (end-to-end, deterministic)', () => {

@@ -20,6 +20,10 @@ export const FACT_TYPES = [
   'review_count',
   'business_status',
   'ownership_type',
+  // Phase 8: additional demo inputs extracted from verified capture evidence.
+  'services',
+  'opening_hours',
+  'booking_url',
 ] as const;
 export const factTypeSchema = z.enum(FACT_TYPES);
 export type FactType = z.infer<typeof factTypeSchema>;

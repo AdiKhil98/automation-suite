@@ -77,6 +77,7 @@ export interface DemoContent {
   phoneTel: string | null;
   emailMailto: string | null;
   address: string | null;
+  openingHours: string[];
   services: string[];
   cta: Cta;
   factInputs: FactInput[];
