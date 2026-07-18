@@ -2,6 +2,33 @@
 
 All notable changes per phase. Format loosely follows Keep a Changelog.
 
+## [phase-10-review-dashboard] — 2026-07-18
+
+Local, loopback-only human review dashboard. Server-rendered HTML, no JS framework, no auth,
+no sending/deploy. Demo and email approvals are independent.
+
+### Added
+
+- **Review server** (`src/dashboard/server.ts`, CLI `review-dashboard`, opt-in
+  `REVIEW_DASHBOARD_ENABLED`): binds 127.0.0.1 only; Host-header allowlist (anti DNS-rebind);
+  same-origin Origin/Referer + per-session CSRF token on every POST; response headers CSP,
+  X-Content-Type-Options nosniff, Referrer-Policy no-referrer, X-Frame-Options SAMEORIGIN;
+  traversal-safe `/demo/:id` serving from `DEMO_OUTPUT_DIR`.
+- **Pages** (`dashboard/pages.ts`): queue + lead detail (verified facts, accepted findings,
+  demo iframe, email body) with **separate** demo and email decision badges + notes forms. All
+  data HTML-escaped.
+- **Review service** (`domain/review/`, `review.repo`, review UoW): `decideDemo` touches only the
+  demo record; `decideEmail` touches only the email human-review fields + lead state. Never infers
+  one from the other. Idempotent state guards. `READY_FOR_HUMAN_APPROVAL` + approve → `HUMAN_APPROVED`;
+  `WAITING_FOR_DEMO_URL` + approve → wording recorded, lead stays waiting (Phase 11), not send-ready;
+  reject → `REJECTED`.
+- **Persistence**: migration `0011_email_human_review` (human_decision/notes/reviewed_at/by, +reverse);
+  demos reuse existing approval columns. New state edge `WAITING_FOR_DEMO_URL → REJECTED`.
+
+### Notes
+
+- No auth, teams, analytics, campaign mgmt, Netlify, Gmail, scheduling, or sending.
+
 ## [phase-9-email-generation] — 2026-07-18
 
 Cold email writer + independent reviewer. One factual email per lead, human-review gated.

@@ -837,11 +837,17 @@ export const emailDrafts = pgTable(
     claimHonest: boolean('claim_honest'),
     reviewerProblems: jsonb('reviewer_problems'),
     totalCostUsd: doublePrecision('total_cost_usd').notNull(),
+    // Phase 10 human review (dashboard). Distinct from the automated reviewer verdict above.
+    humanDecision: text('human_decision'),
+    humanNotes: text('human_notes'),
+    humanReviewedAt: timestamp('human_reviewed_at', { withTimezone: true }),
+    humanReviewedBy: text('human_reviewed_by'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
     leadIdx: index('email_drafts_lead_idx').on(t.leadId),
     statusCk: check('email_draft_status_ck', sql`${t.status} IN ('DRAFTED','APPROVED','REVIEW_FAILED')`),
+    humanDecisionCk: check('email_draft_human_decision_ck', sql`${t.humanDecision} IS NULL OR ${t.humanDecision} IN ('APPROVED','REJECTED')`),
   }),
 );
 

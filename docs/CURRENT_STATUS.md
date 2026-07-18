@@ -1,26 +1,25 @@
 # Current Status
 
 ## Current phase
-Phase 9 (cold email writer + reviewer) — COMPLETE, committing as `phase-9-email-generation`.
+Phase 10 (local review dashboard) — COMPLETE, committing as `phase-10-review-dashboard`.
 
 ## Completed work
-- Phases 0–8B tagged. Phase 9: writer + adversarial reviewer, deterministic validation
-  (honesty + single-language), demo-CTA rules + `WAITING_FOR_DEMO_URL`, provenance, migration
-  0010, CLI `generate-emails`, diagnostics store. See CHANGELOG + D-0027.
-- Paid smoke test passed (APPROVE, reply CTA, German, $0.0238); operator approved.
+- Phases 0–9 tagged. Phase 10: loopback-only review server (`review-dashboard`), server-rendered
+  pages, independent demo/email approvals, security (host allowlist + same-origin + CSRF +
+  headers), migration 0011 (email human-review cols). See CHANGELOG.
 
 ## Uncommitted changes
 None after this commit.
 
 ## Remaining tasks
-- Phase 10+ not started. Phase 11 will substitute the verified deployed demo URL for {{DEMO_URL}}.
+- Phase 11 = Netlify preview deployment (substitutes {{DEMO_URL}} for WAITING_FOR_DEMO_URL leads). Not started.
 
 ## Exact commands to continue
 - Suite: `pnpm lint && pnpm typecheck && pnpm test` ; `DATABASE_URL=postgres://postgres:postgres@localhost:5432/outreach pnpm test:integration` ; `pnpm test:browser`
-- Paid email run (ARMED env only): re-seed a DEMO_READY lead + AUDITED run, then `pnpm cli generate-emails --campaign gate-a-zahnaerzte-berlin --limit 1`
-- `pnpm test:integration` truncates the DB — re-seed after.
+- Dashboard (local): set `REVIEW_DASHBOARD_ENABLED=true`, then `pnpm cli review-dashboard` → http://127.0.0.1:4600/
+- `pnpm test:integration` truncates the DB.
 
 ## Safety restrictions
-- `.env` disarmed: `LLM_PROVIDER=mock`, `ALLOW_PAID_LLM_CALLS=false`, `EMAIL_GENERATION_ENABLED=false`.
-- No sending, no Gmail drafts, no deployment, no dashboard, no scheduling, no sequences/A-B.
-- Do NOT begin Phase 10 without approval.
+- `.env` disarmed (mock/paid off; EMAIL_GENERATION_ENABLED=false; REVIEW_DASHBOARD_ENABLED=false).
+- Dashboard: loopback only, no auth, no sending/Gmail/deploy/scheduling. WAITING_FOR_DEMO_URL approvals are wording-only, not send-ready.
+- Do NOT begin Phase 11 without approval.

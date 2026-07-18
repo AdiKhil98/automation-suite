@@ -10,6 +10,7 @@ import { gateACheckCommand } from './commands/gate-a-check.js';
 import { generateDemosCommand } from './commands/generate-demos.js';
 import { composeDemosCommand } from './commands/compose-demos.js';
 import { generateEmailsCommand } from './commands/generate-emails.js';
+import { reviewDashboardCommand } from './commands/review-dashboard.js';
 import { previewDemoCommand } from './commands/preview-demo.js';
 import { qualifyLeadsCommand } from './commands/qualify-leads.js';
 import { createSampleLeads } from './commands/create-sample-leads.js';
@@ -158,6 +159,11 @@ program
   .requiredOption('--campaign <name>', 'campaign name (see src/config/campaigns.ts)')
   .option('--limit <n>', 'max leads to write emails for this run')
   .action((opts: { campaign: string; limit?: string }) => withContext((ctx) => generateEmailsCommand(ctx, opts)));
+
+program
+  .command('review-dashboard')
+  .description('Start the local review dashboard (loopback only; approve/reject demos + emails; no auth, no sending, no deploy)')
+  .action(() => withContext((ctx) => reviewDashboardCommand(ctx)));
 
 program
   .command('preview-demo')

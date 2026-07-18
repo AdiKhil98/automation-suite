@@ -18,7 +18,7 @@ No phase begins before the previous one is approved with `APPROVE PHASE X`.
 | 7 | Competitor research (optional module) | `phase-7-competitor-research` | ⏸️ DEFERRED (optional, post-MVP) |
 | 8 | Demo template & demo decision engine | `phase-8-demo-generation` | ✅ complete (awaiting approval) |
 | 9 | Email writer & reviewer | `phase-9-email-generation` | ☐ |
-| 10 | Review dashboard | `phase-10-review-dashboard` | ☐ |
+| 10 | Review dashboard | `phase-10-review-dashboard` | ✅ |
 | 11 | Netlify preview deployment | `phase-11-netlify-previews` | ☐ |
 | 12 | Gmail draft creation (no send) | `phase-12-gmail-drafts` | ☐ |
 | 13 | Scheduling & daily operations | `phase-13-daily-operations` | ☐ |

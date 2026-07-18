@@ -165,6 +165,10 @@ const envSchema = z.object({
   EMAIL_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),
   EMAIL_MAX_RETRIES: z.coerce.number().int().nonnegative().default(0),
   EMAIL_DEBUG_DIR: z.string().default('./.email-debug'),
+
+  // --- Phase 10: local review dashboard (loopback only; no auth/deploy/send) ---
+  REVIEW_DASHBOARD_ENABLED: boolString(false),
+  REVIEW_DASHBOARD_PORT: z.coerce.number().int().positive().default(4600),
 });
 
 const refinedEnvSchema = envSchema.superRefine((val, ctx) => {
