@@ -470,3 +470,23 @@ Every significant decision is recorded here in the required format. Newest first
 - **Tradeoffs:** Reviewer no longer independently vetoes on evidence/CTA flags (redundant with code).
 - **Rollback path:** Confined to `domain/demo/composer/` + `prompts/demo-composer/`.
 - **Status:** Accepted (Phase 8B). Re-run: APPROVE, demo composed, $0.0367.
+
+## D-0027 — Phase 9 email gate, demo-CTA rules, and single-language output
+
+- **Date:** 2026-07-18
+- **Problem:** Cold emails are model-authored prose (unlike the deterministic demo). Need honesty
+  guardrails, safe demo referencing, and language consistency (first smoke test produced English
+  greeting/CTA/signoff around a German body).
+- **Chosen option:** (1) Gate: APPROVE or a deterministically-applicable REVISE (no new fact/claim/
+  CTA change), AND reviewer personalizationSupported + claimHonest + !fabricationRisk, AND deterministic
+  validation passes. (2) Deterministic validation rejects model URLs, revenue/traffic/ranking/conversion/
+  metric claims, urgency, fake familiarity, insults, and findings not accepted by Phase 6. (3) demo_link
+  CTA only for a human-APPROVED demo; else reply and no demo mention; {{DEMO_URL}} stays a token →
+  WAITING_FOR_DEMO_URL (Phase 11 substitutes the verified deployed URL). (4) Output language resolved
+  deterministically from country / site TLD; greeting/CTA/signoff rendered in that language; mixed-language
+  drafts rejected via high-signal function-word markers.
+- **Reason:** Prose can't be fully templatized, so a code backstop + informed reviewer + single-language
+  rule keep drafts honest and consistent without another paid call to fix fixed strings.
+- **Tradeoffs:** Language detection is heuristic (country/TLD + function-word markers); extend maps per language.
+- **Rollback path:** Confined to `domain/email/` + `prompts/email/`; run `scripts/rollback/0010_email_down.sql` then reset.
+- **Status:** Accepted (Phase 9). Smoke test APPROVE, $0.0238; German fix applied deterministically.

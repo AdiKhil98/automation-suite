@@ -807,3 +807,62 @@ export const demoDesignSpecs = pgTable(
     leadIdx: index('demo_design_specs_lead_idx').on(t.leadId),
   }),
 );
+
+// --- Phase 9: cold email writer + reviewer ---
+
+export const emailDrafts = pgTable(
+  'email_drafts',
+  {
+    id: text('id').primaryKey(),
+    leadId: text('lead_id').notNull().references(() => leads.id, { onDelete: 'cascade' }),
+    demoId: text('demo_id').references(() => demos.id, { onDelete: 'set null' }),
+    runId: text('run_id').references(() => pipelineRuns.id, { onDelete: 'set null' }),
+    subject: text('subject').notNull(),
+    body: text('body').notNull(),
+    ctaKind: text('cta_kind').notNull(),
+    hasDemoUrlPlaceholder: boolean('has_demo_url_placeholder').notNull().default(false),
+    status: text('status').notNull(),
+    writerPromptVersion: text('writer_prompt_version').notNull(),
+    reviewerPromptVersion: text('reviewer_prompt_version').notNull(),
+    schemaVersion: text('schema_version').notNull(),
+    rulesVersion: text('rules_version').notNull(),
+    provider: text('provider').notNull(),
+    requestedWriterModel: text('requested_writer_model').notNull(),
+    requestedReviewerModel: text('requested_reviewer_model').notNull(),
+    writerResponseId: text('writer_response_id'),
+    reviewerResponseId: text('reviewer_response_id'),
+    reviewerDecision: text('reviewer_decision'),
+    fabricationRisk: boolean('fabrication_risk'),
+    personalizationSupported: boolean('personalization_supported'),
+    claimHonest: boolean('claim_honest'),
+    reviewerProblems: jsonb('reviewer_problems'),
+    totalCostUsd: doublePrecision('total_cost_usd').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    leadIdx: index('email_drafts_lead_idx').on(t.leadId),
+    statusCk: check('email_draft_status_ck', sql`${t.status} IN ('DRAFTED','APPROVED','REVIEW_FAILED')`),
+  }),
+);
+
+export const emailFactInputs = pgTable(
+  'email_fact_inputs',
+  {
+    id: text('id').primaryKey(),
+    emailId: text('email_id').notNull().references(() => emailDrafts.id, { onDelete: 'cascade' }),
+    leadFactId: text('lead_fact_id').notNull().references(() => leadFacts.id, { onDelete: 'cascade' }),
+    field: text('field').notNull(),
+  },
+  (t) => ({ emailIdx: index('email_fact_inputs_email_idx').on(t.emailId) }),
+);
+
+export const emailFindingInputs = pgTable(
+  'email_finding_inputs',
+  {
+    id: text('id').primaryKey(),
+    emailId: text('email_id').notNull().references(() => emailDrafts.id, { onDelete: 'cascade' }),
+    auditFindingId: text('audit_finding_id').notNull().references(() => auditFindings.id, { onDelete: 'cascade' }),
+    directive: text('directive').notNull(),
+  },
+  (t) => ({ emailIdx: index('email_finding_inputs_email_idx').on(t.emailId) }),
+);

@@ -45,7 +45,9 @@ const BASE_TRANSITIONS: Record<LeadStatus, LeadStatus[]> = {
   EMAIL_DRAFTED: ['EMAIL_APPROVED', 'EMAIL_REVIEW_FAILED'],
   // One rewrite cycle only: back to EMAIL_DRAFTED once, else manual review.
   EMAIL_REVIEW_FAILED: ['EMAIL_DRAFTED', 'NEEDS_MANUAL_REVIEW'],
-  EMAIL_APPROVED: ['READY_FOR_HUMAN_APPROVAL'],
+  // demo_link emails wait for the verified deployed URL (Phase 11); reply emails go straight on.
+  EMAIL_APPROVED: ['READY_FOR_HUMAN_APPROVAL', 'WAITING_FOR_DEMO_URL'],
+  WAITING_FOR_DEMO_URL: ['READY_FOR_HUMAN_APPROVAL'],
   READY_FOR_HUMAN_APPROVAL: ['HUMAN_APPROVED', 'REJECTED'],
   HUMAN_APPROVED: ['DRAFT_CREATED'],
   DRAFT_CREATED: ['SENT'],

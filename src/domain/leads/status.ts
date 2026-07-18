@@ -26,6 +26,9 @@ export const LEAD_STATUSES = [
   'EMAIL_DRAFTED',
   'EMAIL_REVIEW_FAILED',
   'EMAIL_APPROVED',
+  // Phase 9/11: an approved email using a demo_link CTA parks here until the {{DEMO_URL}}
+  // placeholder is replaced with a verified deployed URL (Phase 11). Not send-ready.
+  'WAITING_FOR_DEMO_URL',
   'READY_FOR_HUMAN_APPROVAL',
   'HUMAN_APPROVED',
   'DRAFT_CREATED',

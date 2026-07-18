@@ -50,3 +50,6 @@ Thumbs.db
 
 # Phase 8B composer diagnostics (spec + reviewer verdict per run)
 .composer-debug/
+
+# Phase 9 email diagnostics (draft + reviewer verdict per run)
+.email-debug/

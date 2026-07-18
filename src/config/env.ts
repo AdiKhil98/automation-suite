@@ -152,6 +152,19 @@ const envSchema = z.object({
   DEMO_COMPOSER_MAX_RETRIES: z.coerce.number().int().nonnegative().default(0),
   // Git-ignored diagnostics dir: every run's spec + reviewer verdict (no secrets/reasoning).
   COMPOSER_DEBUG_DIR: z.string().default('./.composer-debug'),
+
+  // --- Phase 9: cold email writer (local only; no sending, no Gmail, no deploy) ---
+  EMAIL_GENERATION_ENABLED: boolString(false),
+  EMAIL_WRITER_MODEL: z.string().default('gpt-5.6-sol'),
+  EMAIL_REVIEWER_MODEL: z.string().default('gpt-5.6-terra'),
+  EMAIL_WRITER_EFFORT: z.enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']).default('medium'),
+  EMAIL_REVIEWER_EFFORT: z.enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']).default('medium'),
+  EMAIL_MAX_CALLS_PER_LEAD: z.coerce.number().int().min(1).max(2).default(2),
+  EMAIL_MAX_COST_USD_PER_LEAD: z.coerce.number().nonnegative().default(0.2),
+  EMAIL_MAX_OUTPUT_TOKENS: z.coerce.number().int().positive().default(1_500),
+  EMAIL_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),
+  EMAIL_MAX_RETRIES: z.coerce.number().int().nonnegative().default(0),
+  EMAIL_DEBUG_DIR: z.string().default('./.email-debug'),
 });
 
 const refinedEnvSchema = envSchema.superRefine((val, ctx) => {

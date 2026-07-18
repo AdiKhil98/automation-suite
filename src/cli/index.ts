@@ -9,6 +9,7 @@ import { evalAuditCommand } from './commands/eval-audit.js';
 import { gateACheckCommand } from './commands/gate-a-check.js';
 import { generateDemosCommand } from './commands/generate-demos.js';
 import { composeDemosCommand } from './commands/compose-demos.js';
+import { generateEmailsCommand } from './commands/generate-emails.js';
 import { previewDemoCommand } from './commands/preview-demo.js';
 import { qualifyLeadsCommand } from './commands/qualify-leads.js';
 import { createSampleLeads } from './commands/create-sample-leads.js';
@@ -150,6 +151,13 @@ program
   .requiredOption('--campaign <name>', 'campaign name (see src/config/campaigns.ts)')
   .option('--limit <n>', 'max leads to compose demos for this run')
   .action((opts: { campaign: string; limit?: string }) => withContext((ctx) => composeDemosCommand(ctx, opts)));
+
+program
+  .command('generate-emails')
+  .description('Phase 9: write one factual cold email per DEMO_READY/DEMO_DECIDED lead (mock by default; independent reviewer; no sending, no Gmail, no deploy)')
+  .requiredOption('--campaign <name>', 'campaign name (see src/config/campaigns.ts)')
+  .option('--limit <n>', 'max leads to write emails for this run')
+  .action((opts: { campaign: string; limit?: string }) => withContext((ctx) => generateEmailsCommand(ctx, opts)));
 
 program
   .command('preview-demo')

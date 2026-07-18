@@ -2,6 +2,34 @@
 
 All notable changes per phase. Format loosely follows Keep a Changelog.
 
+## [phase-9-email-generation] — 2026-07-18
+
+Cold email writer + independent reviewer. One factual email per lead, human-review gated.
+No sending, no Gmail drafts, no deployment, no dashboard/sequences/A-B.
+
+### Added
+
+- **Writer + reviewer** (`domain/email/`, prompts `email/`): strict structured writer output
+  (subject + 1-3 paragraphs, ≤120 words, vetted greeting/CTA/signoff selections — the model
+  writes no greeting/CTA/signoff text and no URLs); independent adversarial reviewer; gate
+  approves APPROVE or a deterministically-applicable REVISE, and requires personalizationSupported
+  + claimHonest + !fabricationRisk. ≤2 calls, per-lead USD cap, pre-call worst-case projection,
+  mock default, diagnostics store (`.email-debug/`).
+- **Deterministic validation** (`email-validation.ts`): rejects model URLs, revenue/traffic/
+  ranking/conversion/metric claims, invented urgency/familiarity, insults, findings not accepted
+  by Phase 6, and (D-0027) mixed-language drafts.
+- **Demo CTA rules** (amendment): `demo_link` only for a human-APPROVED demo; else `reply`, and no
+  demo may be mentioned. The `{{DEMO_URL}}` token stays unresolved (Phase 11 substitutes the
+  verified deployed URL) → such emails park at new state `WAITING_FOR_DEMO_URL`, not send-ready.
+- **Language consistency** (`email-language.ts`, D-0027): output language resolved from country /
+  site TLD; greeting/CTA/signoff rendered in that language; entire email must be single-language.
+- **Provenance + persistence**: relational `email_fact_inputs` / `email_finding_inputs`; migration
+  `0010_email_drafts` (+reverse); reuses `model_calls`. CLI `generate-emails` (opt-in, paid hard-gated).
+
+### Notes
+
+- Paid smoke test: APPROVE, reply CTA, $0.0238. Language fix applied deterministically (no extra call).
+
 ## [phase-8b-ai-composer] — 2026-07-17
 
 AI Demo Composer: the model emits a structured `DemoDesignSpec` (never markup); a deterministic
