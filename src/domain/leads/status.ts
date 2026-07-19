@@ -35,6 +35,9 @@ export const LEAD_STATUSES = [
   'READY_FOR_HUMAN_APPROVAL',
   'HUMAN_APPROVED',
   'DRAFT_CREATED',
+  // Phase 13: a deterministic send time is recorded for the created Gmail draft. NOT sent —
+  // the schedule is an inert plan; Phase 14 (explicit) would act on it.
+  'SCHEDULED',
   'SENT',
   'REPLIED',
   'UNSUBSCRIBED',

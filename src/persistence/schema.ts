@@ -962,3 +962,37 @@ export const gmailDrafts = pgTable(
     providerDraftUk: uniqueIndex('gmail_drafts_provider_draft_uk').on(t.provider, t.providerDraftId).where(sql`${t.providerDraftId} IS NOT NULL`),
   }),
 );
+
+// --- Phase 13: scheduling (records intended send times only; never sends) ---
+
+export const sendSchedules = pgTable(
+  'send_schedules',
+  {
+    id: text('id').primaryKey(),
+    leadId: text('lead_id').notNull().references(() => leads.id, { onDelete: 'cascade' }),
+    gmailDraftId: text('gmail_draft_id').notNull().references(() => gmailDrafts.id, { onDelete: 'cascade' }),
+    // Integrity binding (amendment 4): the schedule is invalid if any of these change.
+    providerDraftId: text('provider_draft_id').notNull(),
+    finalizedContentHash: text('finalized_content_hash').notNull(),
+    recipientEmail: text('recipient_email').notNull(),
+    scheduledAtUtc: timestamp('scheduled_at_utc', { withTimezone: true }).notNull(),
+    timezone: text('timezone').notNull(),
+    rulesVersion: text('rules_version').notNull(),
+    computedFrom: jsonb('computed_from').notNull(),
+    integrityFingerprint: text('integrity_fingerprint').notNull(),
+    origin: text('origin').notNull(), // 'auto' | 'manual'
+    status: text('status').notNull(), // 'SCHEDULED' | 'CANCELLED' | 'SUPERSEDED'
+    supersededById: text('superseded_by_id'),
+    cancelReason: text('cancel_reason'),
+    rescheduleCount: integer('reschedule_count').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
+  },
+  (t) => ({
+    leadIdx: index('send_schedules_lead_idx').on(t.leadId),
+    // Exactly one ACTIVE schedule per Gmail draft; cancelled/superseded rows are retained (history).
+    activeUk: uniqueIndex('send_schedules_active_uk').on(t.gmailDraftId).where(sql`${t.status} = 'SCHEDULED'`),
+    statusCk: check('send_schedule_status_ck', sql`${t.status} IN ('SCHEDULED','CANCELLED','SUPERSEDED')`),
+  }),
+);

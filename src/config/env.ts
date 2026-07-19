@@ -204,6 +204,24 @@ const envSchema = z.object({
   GMAIL_MAX_DRAFTS_PER_DAY: z.coerce.number().int().positive().default(20),
   GMAIL_MIN_DRAFT_INTERVAL_MS: z.coerce.number().int().nonnegative().default(2_000),
   GMAIL_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
+
+  // --- Phase 13: scheduling (records intended send times only; NEVER sends) ---
+  // Off by default. Scheduling performs no external action, so it may run with
+  // OUTBOUND_ACTIONS_ENABLED=false; Phase 14 sending still requires the sending gates.
+  SCHEDULING_ENABLED: boolString(false),
+  // Deterministic, CONFIGURABLE defaults (operator policy — not a universal best practice).
+  // Recipient-local business window (hours, 0–23) in the recipient's verified IANA timezone.
+  SCHEDULING_WINDOW_START_HOUR: z.coerce.number().int().min(0).max(23).default(9),
+  SCHEDULING_WINDOW_END_HOUR: z.coerce.number().int().min(1).max(24).default(17),
+  // Allowed weekdays as ISO numbers 1=Mon … 7=Sun (comma-separated). Default Mon–Fri.
+  SCHEDULING_ALLOWED_WEEKDAYS: z.string().default('1,2,3,4,5'),
+  // Minimum spacing between two scheduled sends (same account), and per-day cap.
+  SCHEDULING_MIN_SPACING_MINUTES: z.coerce.number().int().positive().default(30),
+  SCHEDULING_DAILY_CAP: z.coerce.number().int().positive().default(20),
+  // Do not schedule before now + this many minutes; search at most this many days ahead.
+  SCHEDULING_EARLIEST_OFFSET_MINUTES: z.coerce.number().int().nonnegative().default(60),
+  SCHEDULING_HORIZON_DAYS: z.coerce.number().int().positive().default(14),
+  SCHEDULING_RULES_VERSION: z.string().default('sched-rules-1'),
 });
 
 const refinedEnvSchema = envSchema.superRefine((val, ctx) => {

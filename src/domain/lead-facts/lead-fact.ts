@@ -24,6 +24,8 @@ export const FACT_TYPES = [
   'services',
   'opening_hours',
   'booking_url',
+  // Phase 13: recipient's verified IANA timezone (e.g. "Europe/Berlin") for scheduling.
+  'contact_timezone',
 ] as const;
 export const factTypeSchema = z.enum(FACT_TYPES);
 export type FactType = z.infer<typeof factTypeSchema>;

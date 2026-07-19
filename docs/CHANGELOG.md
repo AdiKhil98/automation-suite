@@ -2,6 +2,41 @@
 
 All notable changes per phase. Format loosely follows Keep a Changelog.
 
+## [phase-13-daily-operations] — 2026-07-19
+
+Record deterministic intended send times for created Gmail drafts. Scheduling is local/database-only:
+it never calls Gmail, mutates a draft, sends email, or creates a provider-side schedule.
+
+### Added
+
+- **Deterministic scheduler** (`domain/schedule/`): verified recipient IANA timezone is mandatory;
+  UTC/local conversion is DST-aware; configurable recipient-local weekday and business-hour windows,
+  earliest offset, search horizon, minimum account-wide spacing, and local-day cap select the first
+  eligible slot. Missing or invalid timezone fails closed to manual review.
+- **Integrity and idempotency**: each active schedule is bound to the lead, Gmail draft/provider id,
+  approved finalized-content hash, verified recipient, scheduled instant, and rules version. A partial
+  unique index permits exactly one active schedule per Gmail draft; duplicates reuse it.
+- **Operations**: `schedule-drafts` (including write-free `--dry-run` and `--not-before`), read-only
+  `schedule-status`, `cancel-schedule`, and `reschedule`. Cancellation retains history and returns the
+  lead to `DRAFT_CREATED`; rescheduling supersedes the prior row before inserting the replacement.
+- **Persistence**: migration `0014` adds the verified `contact_timezone` fact type, `send_schedules`,
+  `SCHEDULED` lead state, constraints, indexes, repositories, unit of work, and reverse migration.
+- **Configuration**: scheduling is disabled by default and its policy values are explicit operator
+  configuration, not universal delivery recommendations.
+
+### Verification
+
+- Lint and typecheck passed; 372 unit, 36 PostgreSQL integration, and 9 browser tests passed.
+- Migration 0014 apply/reverse/reapply passed. Secret/private-data scan passed.
+- No live schedule was created. No Gmail call, draft mutation, email sending, or Phase 14 work occurred.
+- Integration tests truncated the configured local database, including the restored Phase 12 lead data;
+  the real Gmail draft remained untouched.
+
+### Not in scope
+
+- No provider-side scheduling, Gmail access, sending, inbox operations, reply detection, follow-ups,
+  suppression processing at send time, bounce handling, or Phase 14 controlled sending.
+
 ## [phase-12-gmail-drafts] — 2026-07-19
 
 Create Gmail drafts only for fully approved, URL-resolved emails. Never send, schedule,

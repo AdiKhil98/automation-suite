@@ -14,6 +14,8 @@ import { reviewDashboardCommand } from './commands/review-dashboard.js';
 import { deployDemosCommand } from './commands/deploy-demos.js';
 import { gmailAuthCommand } from './commands/gmail-auth.js';
 import { createGmailDraftsCommand } from './commands/create-gmail-drafts.js';
+import { scheduleDraftsCommand } from './commands/schedule-drafts.js';
+import { cancelScheduleCommand, rescheduleCommand, scheduleStatusCommand } from './commands/schedule-ops.js';
 import { previewDemoCommand } from './commands/preview-demo.js';
 import { qualifyLeadsCommand } from './commands/qualify-leads.js';
 import { createSampleLeads } from './commands/create-sample-leads.js';
@@ -179,6 +181,33 @@ program
   .description('Phase 12: create a Gmail DRAFT (never send) for HUMAN_APPROVED leads with an approved finalized email (mock by default)')
   .option('--limit <n>', 'max leads to draft this run')
   .action((opts: { limit?: string }) => withContext((ctx) => createGmailDraftsCommand(ctx, opts)));
+
+program
+  .command('schedule-drafts')
+  .description('Phase 13: record deterministic, timezone-aware send times for DRAFT_CREATED leads (never sends). --dry-run previews with no changes.')
+  .option('--limit <n>', 'max leads to schedule this run')
+  .option('--dry-run', 'compute + display proposed slots without any database or external changes')
+  .option('--not-before <iso>', 'do not schedule before this ISO instant')
+  .action((opts: { limit?: string; dryRun?: boolean; notBefore?: string }) => withContext((ctx) => scheduleDraftsCommand(ctx, opts)));
+
+program
+  .command('schedule-status')
+  .description('Phase 13: list active schedules (read-only; UTC + recipient-local; no sending)')
+  .action(() => withContext((ctx) => scheduleStatusCommand(ctx)));
+
+program
+  .command('cancel-schedule')
+  .description('Phase 13: cancel a lead\'s active schedule (SCHEDULED → DRAFT_CREATED; history preserved)')
+  .requiredOption('--lead <id>', 'lead id')
+  .option('--reason <text>', 'cancellation reason')
+  .action((opts: { lead: string; reason?: string }) => withContext((ctx) => cancelScheduleCommand(ctx, opts)));
+
+program
+  .command('reschedule')
+  .description('Phase 13: reschedule a lead (supersede-and-insert; history preserved)')
+  .requiredOption('--lead <id>', 'lead id')
+  .requiredOption('--at <iso>', 'new send time (ISO 8601)')
+  .action((opts: { lead: string; at: string }) => withContext((ctx) => rescheduleCommand(ctx, opts)));
 
 program
   .command('review-dashboard')

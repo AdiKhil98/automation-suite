@@ -535,3 +535,33 @@ Every significant decision is recorded here in the required format. Newest first
 - **Status:** Accepted (Phase 12). Live smoke created exactly one draft, confirmed it remained a draft,
   advanced the lead to `DRAFT_CREATED`, persisted the unique fingerprint, and restored the feature flag
   to false. Private recipient and Gmail identifiers are intentionally not recorded here.
+
+---
+
+## D-0030 — Phase 13 uses deterministic inert schedules with verified local time and integrity binding
+
+- **Date:** 2026-07-19
+- **Problem:** Plan daily outreach timing without accidentally sending, scheduling through Gmail, using an
+  inferred timezone, exceeding operator caps, duplicating active schedules, or allowing a schedule to remain
+  valid after its draft, finalized content, recipient, time, or rules change.
+- **Options considered:** Use Gmail/provider scheduling; store only a timestamp; persist a local deterministic
+  schedule with verified recipient-local time, policy constraints, immutable binding, and retained history.
+- **Chosen option:** Phase 13 records inert PostgreSQL `send_schedules` rows only and exposes no Gmail provider.
+  Eligibility requires `DRAFT_CREATED`, a created provider draft id, approved finalized-content hash, verified
+  `contact_email`, and verified IANA `contact_timezone`. A deterministic DST-aware scheduler applies configurable
+  local weekdays/window, earliest offset, horizon, minimum account-wide spacing, and per-local-day cap. One
+  active row per Gmail draft is enforced in PostgreSQL. The integrity fingerprint binds lead, local Gmail row,
+  provider draft id, finalized content hash, recipient, UTC instant, and rules version. Cancel retains the row;
+  reschedule supersedes it before inserting a replacement; `--dry-run` performs no writes.
+- **Reason:** Timing becomes reproducible, reviewable, reversible, and safe while remaining completely separate
+  from the controlled-sending authority reserved for Phase 14. Verified timezones avoid silent geographic
+  guesses, while database constraints and fingerprints prevent stale or duplicate plans from becoming sendable.
+- **Tradeoffs:** A verified timezone fact is required even when a likely timezone could be inferred. The default
+  weekday/window/spacing/cap values are operator policy, not universal best practice. Intl-based wall-clock
+  conversion depends on the runtime timezone database; ambiguous/nonexistent DST edge times remain conservative
+  inputs for future validation hardening before any sending phase.
+- **Rollback path:** Keep `SCHEDULING_ENABLED=false`; run
+  `scripts/rollback/0014_send_schedules_down.sql` before reverting to `phase-12-gmail-drafts`. The reverse removes
+  schedule history and `contact_timezone` facts, so it is intentionally explicit and must be reviewed first.
+- **Status:** Accepted for Phase 13 implementation review. Tests and migration apply/reverse passed; no live
+  schedule, Gmail call, draft mutation, sending, or Phase 14 work occurred.

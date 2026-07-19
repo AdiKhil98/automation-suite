@@ -55,7 +55,10 @@ const BASE_TRANSITIONS: Record<LeadStatus, LeadStatus[]> = {
   READY_FOR_HUMAN_APPROVAL: ['HUMAN_APPROVED', 'REJECTED'],
   // Phase 12: Gmail draft creation; auth/invalid conditions park for manual review.
   HUMAN_APPROVED: ['DRAFT_CREATED', 'NEEDS_MANUAL_REVIEW'],
-  DRAFT_CREATED: ['SENT'],
+  // Phase 13: schedule the created draft (no send). Cancel returns to DRAFT_CREATED; an invalid
+  // timezone or integrity problem parks for manual review.
+  DRAFT_CREATED: ['SCHEDULED', 'SENT', 'NEEDS_MANUAL_REVIEW'],
+  SCHEDULED: ['DRAFT_CREATED', 'SENT', 'NEEDS_MANUAL_REVIEW'],
   SENT: ['REPLIED', 'BOUNCED', 'FAILED'],
   // A lead parked for manual review can be re-accepted or rejected.
   NEEDS_MANUAL_REVIEW: [

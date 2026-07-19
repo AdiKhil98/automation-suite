@@ -1,6 +1,6 @@
 # Roadmap
 
-**Status:** Phase 12 complete and live-verified; awaiting commit approval.
+**Status:** Phase 13 complete; uncommitted and awaiting commit approval. Phase 14 not started.
 **Last updated:** 2026-07-19
 
 One phase at a time. Each phase ends with tests, a commit, an annotated tag, and an explicit approval gate.
@@ -20,9 +20,15 @@ No phase begins before the previous one is approved with `APPROVE PHASE X`.
 | 9 | Email writer & reviewer | `phase-9-email-generation` | approved |
 | 10 | Review dashboard | `phase-10-review-dashboard` | approved |
 | 11 | Netlify preview deployment | `phase-11-netlify-previews` | approved |
-| 12 | Gmail draft creation (no send) | `phase-12-gmail-drafts` | complete + live-verified; awaiting commit approval |
-| 13 | Scheduling & daily operations | `phase-13-daily-operations` | not started |
+| 12 | Gmail draft creation (no send) | `phase-12-gmail-drafts` | approved + committed + live-verified |
+| 13 | Scheduling & daily operations | `phase-13-daily-operations` | complete; awaiting commit approval |
 | 14 | Controlled sending (only on explicit request) | `phase-14-sending` | not started |
+
+> **Phase 13 implementation:** deterministic, timezone-aware scheduling records intended send times in
+> PostgreSQL only. It requires a verified recipient IANA timezone, enforces configurable local windows,
+> weekdays, spacing and daily caps, preserves cancel/reschedule history, and binds each schedule to the
+> exact Gmail draft, finalized content and recipient. `--dry-run` is write-free. Phase 13 has no Gmail
+> call or sending implementation; see D-0030.
 
 > **Phase renumbering (Phase 3):** an *Independent enrichment & website discovery* phase was inserted at
 > position 4; former phases 4–13 shifted to 5–14. Enrichment discovers/verifies official websites for
