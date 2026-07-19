@@ -2,6 +2,38 @@
 
 All notable changes per phase. Format loosely follows Keep a Changelog.
 
+## [phase-11-netlify-previews] — 2026-07-18
+
+Deploy approved demos to Netlify DRAFT deploys, verify the URL, finalize the email by
+replacing {{DEMO_URL}}, and require a SECOND human approval of the finalized email. Draft
+deploys only — production is never touched. No sending, no Gmail.
+
+### Added
+
+- **Netlify provider** (`integrations/netlify/`): interface + mock + HTTP adapter (fixed
+  official API origin, DRAFT deploys via the digest file API, token used only as a Bearer
+  header — never logged/persisted).
+- **Deploy domain** (`domain/deploy/`): fail-closed eligibility gate (lead WAITING_FOR_DEMO_URL,
+  demo human-APPROVED, email wording human-approved, demo_link CTA, exactly one {{DEMO_URL}},
+  artifact present + hash match, feature+creds, no existing verified for site+artifact);
+  allowlist package builder (index.html + netlify.toml only; rejects symlinks/traversal/hidden/
+  source-maps/oversize/file-count and non-vetted content); immutable email finalize; hardened
+  headers verifier (https/host/200/artifact-hash/CSP/robots/X-Robots-Tag/no-external/no-placeholder)
+  over an SSRF-guarded fetch; DeploymentService (eligibility → package → idempotent reconcile →
+  draft deploy → bounded poll → verify → finalize → persist) with all outcomes + routing and
+  per-day/min-interval throttles that gate only genuine creates.
+- **Second human approval**: new lead state `FINALIZED_EMAIL_PENDING`; `decideFinalizedEmail`
+  (never inferred from the tokenized-draft approval) → HUMAN_APPROVED / REJECTED. Dashboard shows
+  deployment status, verified URL, finalized email, and the second-approval control — three
+  distinct gates (draft approval, deployment verification, finalized-email approval).
+- **Persistence**: migration `0012` (`demo_deployment_runs` + `email_draft_finalizations`; unique
+  on provider deploy-id, site+artifact-verified, draft+deployment; +reverse). CLI `deploy-demos`.
+
+### Notes
+
+- Preview URLs are PUBLIC (link-accessible); noindex + X-Robots-Tag enforced (search guidance, not access control).
+- Live smoke test: one draft deploy, fully verified, finalized email created, production untouched (D-0028).
+
 ## [phase-10-review-dashboard] — 2026-07-18
 
 Local, loopback-only human review dashboard. Server-rendered HTML, no JS framework, no auth,

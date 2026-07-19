@@ -490,3 +490,22 @@ Every significant decision is recorded here in the required format. Newest first
 - **Tradeoffs:** Language detection is heuristic (country/TLD + function-word markers); extend maps per language.
 - **Rollback path:** Confined to `domain/email/` + `prompts/email/`; run `scripts/rollback/0010_email_down.sql` then reset.
 - **Status:** Accepted (Phase 9). Smoke test APPROVE, $0.0238; German fix applied deterministically.
+
+## D-0028 — Phase 11 deploy idempotency, verify-fetch autoSelectFamily, draft-only
+
+- **Date:** 2026-07-18
+- **Problem:** Live smoke test: (1) verify-fetch's custom DNS lookup returned a single address, but
+  Node 24 autoSelectFamily calls lookup with { all: true } and expects an array → "Invalid IP address:
+  undefined" on a dual-stack host → the deploy succeeded but verification failed transiently. (2) A retry
+  must not create a second deploy.
+- **Chosen option:** (1) verify-fetch lookup now returns an array of { address, family } when the option
+  `all` is set (single otherwise), keeping the SSRF block on every resolved address. (2) findReservedByFingerprint
+  resumes the latest NON-SUCCEEDED run for the (site|artifact) fingerprint, reusing its deploy id; the per-day
+  + min-interval throttles gate ONLY a genuine new create. So a retry reconciles the existing deploy (via the
+  reserved run, or provider deploy lookup by fingerprint title) and never POSTs a second deploy. Deploy-id and
+  site+artifact-verified unique constraints back-stop duplicates.
+- **Reason:** Fail-closed verification + at-most-one deploy per approved artifact are core Phase 11 guarantees.
+- **Tradeoffs:** verify-fetch and safe-fetch share the original single-address lookup; only verify-fetch is fixed
+  (safe-fetch untouched — Phase 4/5 code, out of scope).
+- **Rollback path:** Confined to `domain/deploy/` + `integrations/netlify/`; run scripts/rollback/0012_netlify_deploy_down.sql then reset.
+- **Status:** Accepted (Phase 11). Live smoke: 1 draft deploy `6a5bef3b…`, verified, finalized email created, production untouched.

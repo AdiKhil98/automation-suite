@@ -7,9 +7,20 @@ import {
   type ReviewWriteRepo,
 } from '../../domain/review/review-service.js';
 import { type DbExecutor } from '../db.js';
-import { auditFindings, auditRuns, demos, emailDrafts, leadFacts, leads } from '../schema.js';
+import { auditFindings, auditRuns, demoDeploymentRuns, demos, emailDraftFinalizations, emailDrafts, leadFacts, leads } from '../schema.js';
 
-const AWAITING = ['READY_FOR_HUMAN_APPROVAL', 'WAITING_FOR_DEMO_URL'];
+const AWAITING = ['READY_FOR_HUMAN_APPROVAL', 'WAITING_FOR_DEMO_URL', 'FINALIZED_EMAIL_PENDING'];
+
+async function latestDeployRow(db: DbExecutor, leadId: string) {
+  return (await db.select().from(demoDeploymentRuns).where(eq(demoDeploymentRuns.leadId, leadId)).orderBy(desc(demoDeploymentRuns.startedAt)).limit(1))[0];
+}
+async function latestFinalizationRow(db: DbExecutor, leadId: string) {
+  return (await db.select({ f: emailDraftFinalizations })
+    .from(emailDraftFinalizations)
+    .innerJoin(emailDrafts, eq(emailDrafts.id, emailDraftFinalizations.originalDraftId))
+    .where(eq(emailDrafts.leadId, leadId))
+    .orderBy(desc(emailDraftFinalizations.finalizedAt)).limit(1))[0]?.f;
+}
 
 async function latestDemoRow(db: DbExecutor, leadId: string) {
   return (await db.select().from(demos).where(eq(demos.leadId, leadId)).orderBy(desc(demos.createdAt)).limit(1))[0];
@@ -53,10 +64,14 @@ export class ReviewReadRepository implements ReviewReadRepo {
 
     const d = await latestDemoRow(this.db, leadId);
     const e = await latestEmailRow(this.db, leadId);
+    const dep = await latestDeployRow(this.db, leadId);
+    const fin = await latestFinalizationRow(this.db, leadId);
     return {
       leadId, businessName: l.businessName, city: l.city, leadStatus: l.status, facts, findings,
       demo: d ? { id: d.id, status: d.status, path: d.path, approvedAt: d.approvedAt, approvedBy: d.approvedBy, approvalNotes: d.approvalNotes } : null,
       email: e ? { id: e.id, subject: e.subject, body: e.body, ctaKind: e.ctaKind, hasDemoUrlPlaceholder: e.hasDemoUrlPlaceholder, reviewerDecision: e.reviewerDecision, humanDecision: e.humanDecision, humanNotes: e.humanNotes } : null,
+      deployment: dep ? { outcome: dep.outcome, verifiedUrl: dep.verifiedUrl } : null,
+      finalizedEmail: fin ? { id: fin.id, resolvedBody: fin.resolvedBody, verifiedUrl: fin.verifiedDeploymentUrl, finalDecision: fin.finalHumanDecision, finalNotes: fin.finalHumanNotes } : null,
     };
   }
 }
@@ -78,5 +93,14 @@ export class ReviewWriteRepository implements ReviewWriteRepo {
   }
   async setEmailHumanDecision(emailId: string, decision: HumanDecision, notes: string | null, actor: string, now: Date): Promise<void> {
     await this.db.update(emailDrafts).set({ humanDecision: decision, humanNotes: notes, humanReviewedAt: now, humanReviewedBy: actor }).where(eq(emailDrafts.id, emailId));
+  }
+  async latestFinalization(leadId: string): Promise<{ id: string; finalHumanDecision: string | null } | null> {
+    const f = await latestFinalizationRow(this.db, leadId);
+    return f ? { id: f.id, finalHumanDecision: f.finalHumanDecision } : null;
+  }
+  async setFinalizationDecision(finalizationId: string, decision: HumanDecision, notes: string | null, actor: string, now: Date): Promise<void> {
+    await this.db.update(emailDraftFinalizations)
+      .set({ finalHumanDecision: decision, finalHumanNotes: notes, finalReviewedAt: now, finalReviewedBy: actor, finalReviewedSource: 'dashboard' })
+      .where(eq(emailDraftFinalizations.id, finalizationId));
   }
 }

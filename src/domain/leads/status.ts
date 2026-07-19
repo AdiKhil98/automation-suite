@@ -29,6 +29,9 @@ export const LEAD_STATUSES = [
   // Phase 9/11: an approved email using a demo_link CTA parks here until the {{DEMO_URL}}
   // placeholder is replaced with a verified deployed URL (Phase 11). Not send-ready.
   'WAITING_FOR_DEMO_URL',
+  // Phase 11: a verified Netlify deploy exists and a URL-resolved finalized email was created;
+  // it needs a SECOND human approval (distinct from the tokenized-draft approval).
+  'FINALIZED_EMAIL_PENDING',
   'READY_FOR_HUMAN_APPROVAL',
   'HUMAN_APPROVED',
   'DRAFT_CREATED',

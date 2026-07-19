@@ -11,6 +11,7 @@ import { generateDemosCommand } from './commands/generate-demos.js';
 import { composeDemosCommand } from './commands/compose-demos.js';
 import { generateEmailsCommand } from './commands/generate-emails.js';
 import { reviewDashboardCommand } from './commands/review-dashboard.js';
+import { deployDemosCommand } from './commands/deploy-demos.js';
 import { previewDemoCommand } from './commands/preview-demo.js';
 import { qualifyLeadsCommand } from './commands/qualify-leads.js';
 import { createSampleLeads } from './commands/create-sample-leads.js';
@@ -159,6 +160,12 @@ program
   .requiredOption('--campaign <name>', 'campaign name (see src/config/campaigns.ts)')
   .option('--limit <n>', 'max leads to write emails for this run')
   .action((opts: { campaign: string; limit?: string }) => withContext((ctx) => generateEmailsCommand(ctx, opts)));
+
+program
+  .command('deploy-demos')
+  .description('Phase 11: deploy approved demos to Netlify DRAFT deploys, verify, and finalize the email (mock by default; no send/Gmail)')
+  .option('--limit <n>', 'max leads to deploy this run')
+  .action((opts: { limit?: string }) => withContext((ctx) => deployDemosCommand(ctx, opts)));
 
 program
   .command('review-dashboard')

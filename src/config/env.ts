@@ -169,6 +169,22 @@ const envSchema = z.object({
   // --- Phase 10: local review dashboard (loopback only; no auth/deploy/send) ---
   REVIEW_DASHBOARD_ENABLED: boolString(false),
   REVIEW_DASHBOARD_PORT: z.coerce.number().int().positive().default(4600),
+
+  // --- Phase 11: Netlify preview deployment (draft deploys only; opt-in) ---
+  // The API origin is FIXED in the adapter (not configurable). Token is never logged/persisted.
+  NETLIFY_DEPLOYMENT_ENABLED: boolString(false),
+  NETLIFY_AUTH_TOKEN: z.string().optional(),
+  NETLIFY_SITE_ID: z.string().optional(),
+  NETLIFY_EXPECTED_HOSTNAME: z.string().optional(),
+  NETLIFY_MAX_DEPLOYMENTS_PER_RUN: z.coerce.number().int().positive().default(5),
+  NETLIFY_MAX_DEPLOYMENTS_PER_DAY: z.coerce.number().int().positive().default(10),
+  NETLIFY_MIN_DEPLOY_INTERVAL_MS: z.coerce.number().int().nonnegative().default(60_000),
+  NETLIFY_MAX_UPLOAD_BYTES: z.coerce.number().int().positive().default(2_000_000),
+  NETLIFY_MAX_UPLOAD_FILES: z.coerce.number().int().positive().default(10),
+  NETLIFY_DEPLOY_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
+  NETLIFY_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(2_000),
+  NETLIFY_MAX_POLL_ATTEMPTS: z.coerce.number().int().positive().default(30),
+  NETLIFY_STAGING_DIR: z.string().default('./.netlify-staging'),
 });
 
 const refinedEnvSchema = envSchema.superRefine((val, ctx) => {

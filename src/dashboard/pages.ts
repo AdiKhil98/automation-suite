@@ -95,12 +95,29 @@ export function renderLeadDetail(d: LeadReviewDetail, csrf: string): string {
       </div>`
     : '<div class="card"><h2>Email</h2><p class="muted">No email draft for this lead.</p></div>';
 
+  const deployBlock = d.deployment
+    ? `<div class="card"><h2>Deployment &nbsp; <span class="badge${d.deployment.outcome === 'DEPLOYED_AND_VERIFIED' ? ' ok' : d.deployment.outcome.includes('FAIL') || d.deployment.outcome.includes('INVALID') ? ' no' : ''}">${escapeHtml(d.deployment.outcome)}</span></h2>
+        ${d.deployment.verifiedUrl ? `<p class="muted">Verified preview URL (PUBLIC — anyone with the link can open it):</p><pre>${escapeHtml(d.deployment.verifiedUrl)}</pre>` : '<p class="muted">No verified preview URL yet.</p>'}
+      </div>`
+    : '';
+
+  const finalizedBlock = d.finalizedEmail
+    ? `<div class="card"><h2>Finalized email (URL-resolved) &nbsp; ${decisionBadge(d.finalizedEmail.finalDecision, 'email')}</h2>
+        <div class="note">This is the SECOND approval — of the finalized email with the verified URL substituted. It is separate from the tokenized-draft approval and from the demo approval.</div>
+        ${d.finalizedEmail.finalNotes ? `<div class="muted">Notes: ${escapeHtml(d.finalizedEmail.finalNotes)}</div>` : ''}
+        <pre>${escapeHtml(d.finalizedEmail.resolvedBody)}</pre>
+        ${d.leadStatus === 'FINALIZED_EMAIL_PENDING' ? actionForms('finalized', d.leadId, csrf, false) : '<p class="muted">Not awaiting finalized-email approval.</p>'}
+      </div>`
+    : '';
+
   return layout(`Review — ${d.businessName ?? d.leadId}`, `
     <p><a href="/">← queue</a></p>
     <h1>${escapeHtml(d.businessName ?? '(unnamed)')} <span class="badge${waiting ? ' wait' : ''}">${escapeHtml(d.leadStatus)}</span></h1>
-    <p class="muted">Demo and email decisions are independent.</p>
+    <p class="muted">Three independent gates: (1) tokenized draft approval, (2) deployment verification, (3) finalized-email approval.</p>
     <h2>Verified facts</h2>${factsTable(d.facts)}
     <h2>Accepted findings</h2>${findingsList(d.findings)}
     <div class="row"><div class="col">${demoBlock}</div><div class="col">${emailBlock}</div></div>
+    ${deployBlock}
+    ${finalizedBlock}
   `);
 }

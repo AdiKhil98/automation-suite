@@ -40,6 +40,8 @@ const detail = (over: Partial<LeadReviewDetail> = {}): LeadReviewDetail => ({
   findings: [{ findingRef: 'F1', category: 'CTA_CLARITY', severity: 'MEDIUM', observation: 'o', recommendation: 'r' }],
   demo: { id: 'd1', status: 'GENERATED_PENDING_REVIEW', path: '/demos/l1', approvedAt: null, approvedBy: null, approvalNotes: null },
   email: { id: 'e1', subject: 'Hi', body: 'Hello,\n\nbody', ctaKind: 'reply', hasDemoUrlPlaceholder: false, reviewerDecision: 'APPROVE', humanDecision: null, humanNotes: null },
+  deployment: null,
+  finalizedEmail: null,
   ...over,
 });
 
@@ -75,6 +77,8 @@ function fakeStack(m: Model): { uow: ReviewUnitOfWork; read: ReviewReadRepo } {
     async latestEmail() { return m.email; },
     async setDemoDecision(_id, dec) { if (m.demo) m.demo.status = dec; m.demoWrites.push(dec); },
     async setEmailHumanDecision(_id, dec) { if (m.email) m.email.humanDecision = dec; m.emailWrites.push(dec); },
+    async latestFinalization() { return null; },
+    async setFinalizationDecision() { /* noop */ },
   };
   const leadService = { async transition(_id: string, to: string) { m.leadStatus = to; m.transitions.push(to); } } as unknown as LeadService;
   const uow: ReviewUnitOfWork = {

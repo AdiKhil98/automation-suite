@@ -73,7 +73,7 @@ export function createReviewServer(deps: ReviewServerDeps): { server: Server; cs
     }
 
     if (method === 'POST') {
-      const m = /^\/lead\/([^/]+)\/(demo|email)\/(approve|reject)$/.exec(path);
+      const m = /^\/lead\/([^/]+)\/(demo|email|finalized)\/(approve|reject)$/.exec(path);
       if (!m) { send(res, 404, 'Not found'); return; }
       // Same-origin + CSRF gate for all mutations.
       if (!isSameOrigin({ origin: req.headers.origin, referer: req.headers.referer, host: req.headers.host })) { send(res, 403, 'Forbidden (origin)'); return; }
@@ -81,12 +81,14 @@ export function createReviewServer(deps: ReviewServerDeps): { server: Server; cs
       if (!csrfMatches(csrfToken, body.csrf)) { send(res, 403, 'Forbidden (csrf)'); return; }
 
       const leadId = decodeURIComponent(m[1] as string);
-      const target = m[2] as 'demo' | 'email';
+      const target = m[2] as 'demo' | 'email' | 'finalized';
       const decision = m[3] === 'approve' ? 'APPROVED' : 'REJECTED';
       const notes = (body.notes ?? '').trim() || null;
       const result = target === 'demo'
         ? await deps.service.decideDemo(leadId, decision, notes)
-        : await deps.service.decideEmail(leadId, decision, notes);
+        : target === 'finalized'
+          ? await deps.service.decideFinalizedEmail(leadId, decision, notes)
+          : await deps.service.decideEmail(leadId, decision, notes);
       deps.logger.info({ leadId, target, decision, result }, 'review action');
       res.writeHead(303, { Location: `/lead/${encodeURIComponent(leadId)}`, ...SECURITY_HEADERS });
       res.end();

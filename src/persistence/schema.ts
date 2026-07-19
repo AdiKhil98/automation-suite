@@ -872,3 +872,62 @@ export const emailFindingInputs = pgTable(
   },
   (t) => ({ emailIdx: index('email_finding_inputs_email_idx').on(t.emailId) }),
 );
+
+// --- Phase 11: Netlify preview deployment + email finalization ---
+
+export const demoDeploymentRuns = pgTable(
+  'demo_deployment_runs',
+  {
+    id: text('id').primaryKey(),
+    leadId: text('lead_id').notNull().references(() => leads.id, { onDelete: 'cascade' }),
+    demoId: text('demo_id').notNull().references(() => demos.id, { onDelete: 'cascade' }),
+    originalEmailDraftId: text('original_email_draft_id').references(() => emailDrafts.id, { onDelete: 'set null' }),
+    provider: text('provider').notNull(),
+    siteId: text('site_id').notNull(),
+    deployId: text('deploy_id'),
+    artifactHash: text('artifact_hash').notNull(),
+    // Persisted BEFORE the external call so a timeout/uncertain response can be reconciled.
+    attemptFingerprint: text('attempt_fingerprint').notNull(),
+    outcome: text('outcome').notNull(),
+    draftUrl: text('draft_url'),
+    permalinkUrl: text('permalink_url'),
+    verifiedUrl: text('verified_url'),
+    verificationResult: jsonb('verification_result'),
+    errorClass: text('error_class'),
+    callsMade: integer('calls_made').notNull().default(0),
+    startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+  },
+  (t) => ({
+    leadIdx: index('demo_deployment_runs_lead_idx').on(t.leadId),
+    // Idempotency: a provider deploy id is unique; a site+artifact may have only ONE verified deploy.
+    deployIdUk: uniqueIndex('demo_deployment_runs_deploy_uk').on(t.provider, t.deployId).where(sql`${t.deployId} IS NOT NULL`),
+    verifiedArtifactUk: uniqueIndex('demo_deployment_runs_verified_artifact_uk').on(t.siteId, t.artifactHash).where(sql`${t.outcome} = 'DEPLOYED_AND_VERIFIED'`),
+  }),
+);
+
+export const emailDraftFinalizations = pgTable(
+  'email_draft_finalizations',
+  {
+    id: text('id').primaryKey(),
+    originalDraftId: text('original_draft_id').notNull().references(() => emailDrafts.id, { onDelete: 'cascade' }),
+    deploymentRunId: text('deployment_run_id').notNull().references(() => demoDeploymentRuns.id, { onDelete: 'cascade' }),
+    verifiedDeploymentUrl: text('verified_deployment_url').notNull(),
+    originalBodyHash: text('original_body_hash').notNull(),
+    resolvedBody: text('resolved_body').notNull(),
+    resolvedBodyHash: text('resolved_body_hash').notNull(),
+    finalizedAt: timestamp('finalized_at', { withTimezone: true }).notNull().defaultNow(),
+    // Second human approval of the URL-resolved email (distinct from the tokenized-draft approval).
+    finalHumanDecision: text('final_human_decision'),
+    finalHumanNotes: text('final_human_notes'),
+    finalReviewedAt: timestamp('final_reviewed_at', { withTimezone: true }),
+    finalReviewedBy: text('final_reviewed_by'),
+    finalReviewedSource: text('final_reviewed_source'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    draftIdx: index('email_draft_finalizations_draft_idx').on(t.originalDraftId),
+    draftDeployUk: uniqueIndex('email_draft_finalizations_draft_deploy_uk').on(t.originalDraftId, t.deploymentRunId),
+    finalDecisionCk: check('email_finalization_decision_ck', sql`${t.finalHumanDecision} IS NULL OR ${t.finalHumanDecision} IN ('APPROVED','REJECTED')`),
+  }),
+);

@@ -47,8 +47,11 @@ const BASE_TRANSITIONS: Record<LeadStatus, LeadStatus[]> = {
   EMAIL_REVIEW_FAILED: ['EMAIL_DRAFTED', 'NEEDS_MANUAL_REVIEW'],
   // demo_link emails wait for the verified deployed URL (Phase 11); reply emails go straight on.
   EMAIL_APPROVED: ['READY_FOR_HUMAN_APPROVAL', 'WAITING_FOR_DEMO_URL'],
-  // A reviewer may reject the wording while waiting for the URL; approval of wording keeps it here.
-  WAITING_FOR_DEMO_URL: ['READY_FOR_HUMAN_APPROVAL', 'REJECTED'],
+  // Wording approval keeps it here; Phase 11 deploy+verify+finalize advances to FINALIZED_EMAIL_PENDING;
+  // rejection or an invalid artifact/verification routes to REJECTED / NEEDS_MANUAL_REVIEW.
+  WAITING_FOR_DEMO_URL: ['READY_FOR_HUMAN_APPROVAL', 'FINALIZED_EMAIL_PENDING', 'REJECTED', 'NEEDS_MANUAL_REVIEW'],
+  // Second human approval of the URL-resolved finalized email.
+  FINALIZED_EMAIL_PENDING: ['HUMAN_APPROVED', 'REJECTED', 'NEEDS_MANUAL_REVIEW'],
   READY_FOR_HUMAN_APPROVAL: ['HUMAN_APPROVED', 'REJECTED'],
   HUMAN_APPROVED: ['DRAFT_CREATED'],
   DRAFT_CREATED: ['SENT'],

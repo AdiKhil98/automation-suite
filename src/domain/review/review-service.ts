@@ -29,6 +29,10 @@ export interface LeadReviewDetail {
     id: string; subject: string; body: string; ctaKind: string; hasDemoUrlPlaceholder: boolean;
     reviewerDecision: string | null; humanDecision: string | null; humanNotes: string | null;
   } | null;
+  /** Phase 11: latest deployment run outcome + verified URL, if any. */
+  deployment: { outcome: string; verifiedUrl: string | null } | null;
+  /** Phase 11: URL-resolved finalized email awaiting a SECOND human approval, if any. */
+  finalizedEmail: { id: string; resolvedBody: string; verifiedUrl: string; finalDecision: string | null; finalNotes: string | null } | null;
 }
 
 /** Reads (outside the write transaction). */
@@ -43,6 +47,8 @@ export interface ReviewWriteRepo {
   latestEmail(leadId: string): Promise<{ id: string; humanDecision: string | null } | null>;
   setDemoDecision(demoId: string, decision: HumanDecision, notes: string | null, actor: string, now: Date): Promise<void>;
   setEmailHumanDecision(emailId: string, decision: HumanDecision, notes: string | null, actor: string, now: Date): Promise<void>;
+  latestFinalization(leadId: string): Promise<{ id: string; finalHumanDecision: string | null } | null>;
+  setFinalizationDecision(finalizationId: string, decision: HumanDecision, notes: string | null, actor: string, now: Date): Promise<void>;
 }
 
 export interface ReviewTxRepos {
@@ -120,6 +126,28 @@ export class ReviewService {
       // WAITING_FOR_DEMO_URL + APPROVED: wording approved, but the lead stays waiting for the
       // deployed URL (Phase 11). Not send-ready; no transition.
       await repos.events.record({ leadId, runId: null, type: 'NOTE', fromStatus: null, toStatus: null, message: `email ${decision.toLowerCase()} (human review${lead.status === 'WAITING_FOR_DEMO_URL' && decision === 'APPROVED' ? ', wording only — awaiting demo URL' : ''})`, data: { emailId: email.id, decision } });
+      return 'DONE';
+    });
+  }
+
+  /**
+   * SECOND human approval — of the URL-resolved FINALIZED email (Phase 11). Distinct from the
+   * tokenized-draft approval: it is never inferred from it, and only advances the lead to
+   * HUMAN_APPROVED here. Only valid while the lead is FINALIZED_EMAIL_PENDING.
+   */
+  decideFinalizedEmail(leadId: string, decision: HumanDecision, notes: string | null): Promise<ReviewActionResult> {
+    return this.deps.uow.transaction(async (repos) => {
+      const lead = await repos.leads.getById(leadId);
+      if (!lead) return 'NOT_FOUND';
+      if (lead.status !== 'FINALIZED_EMAIL_PENDING') return 'INVALID_STATE';
+      const fin = await repos.write.latestFinalization(leadId);
+      if (!fin) return 'NOT_FOUND';
+      if (fin.finalHumanDecision === decision) return 'NOOP_ALREADY';
+
+      const now = new Date();
+      await repos.write.setFinalizationDecision(fin.id, decision, notes, this.actor, now);
+      await repos.leadService.transition(leadId, decision === 'APPROVED' ? 'HUMAN_APPROVED' : 'REJECTED');
+      await repos.events.record({ leadId, runId: null, type: 'NOTE', fromStatus: null, toStatus: null, message: `finalized email ${decision.toLowerCase()} (2nd human review)`, data: { finalizationId: fin.id, decision } });
       return 'DONE';
     });
   }

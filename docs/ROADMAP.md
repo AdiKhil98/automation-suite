@@ -19,7 +19,7 @@ No phase begins before the previous one is approved with `APPROVE PHASE X`.
 | 8 | Demo template & demo decision engine | `phase-8-demo-generation` | ✅ complete (awaiting approval) |
 | 9 | Email writer & reviewer | `phase-9-email-generation` | ☐ |
 | 10 | Review dashboard | `phase-10-review-dashboard` | ✅ |
-| 11 | Netlify preview deployment | `phase-11-netlify-previews` | ☐ |
+| 11 | Netlify preview deployment | `phase-11-netlify-previews` | ✅ |
 | 12 | Gmail draft creation (no send) | `phase-12-gmail-drafts` | ☐ |
 | 13 | Scheduling & daily operations | `phase-13-daily-operations` | ☐ |
 | 14 | Controlled sending (only on explicit request) | `phase-14-sending` | ☐ |
