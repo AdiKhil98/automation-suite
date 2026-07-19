@@ -2,6 +2,39 @@
 
 All notable changes per phase. Format loosely follows Keep a Changelog.
 
+## [phase-12-gmail-drafts] — 2026-07-19
+
+Create Gmail drafts only for fully approved, URL-resolved emails. Never send, schedule,
+read/modify the inbox, discover contacts, or create follow-up sequences.
+
+### Added
+
+- **OAuth + token storage** (`integrations/gmail/`): `gmail.compose` scope only; loopback
+  authorization; refresh token stored in git-ignored `.gmail-credentials.json`; access tokens
+  remain in memory and are never logged or persisted.
+- **Fail-closed draft gate** (`domain/gmail/`): requires `GMAIL_DRAFTS_ENABLED=true`,
+  `OUTBOUND_ACTIONS_ENABLED=true`, an explicitly matching authenticated account, a
+  `HUMAN_APPROVED` lead, an approved finalized email, a verified `contact_email` fact,
+  deterministic `{{SENDER_NAME}}` substitution, and no unresolved tokens.
+- **Draft-only provider**: fixed Gmail API origin; read-only account verification plus
+  `users.drafts.create` as the sole mutation. No send endpoint exists.
+- **Idempotency + persistence**: migration `0013` adds `gmail_drafts`; unique account/finalized-
+  email/recipient fingerprint and provider draft ID prevent duplicates; uncertain prior attempts
+  stop for manual reconciliation rather than retrying blindly. Daily/run/interval caps apply.
+- **CLI + tests**: `gmail-auth`, `create-gmail-drafts`, mock-first unit coverage, PostgreSQL
+  integration coverage, MIME/base64url validation, state routing, account mismatch, caps, and
+  duplicate reuse.
+
+### Live verification
+
+- Exactly one Gmail draft was created for one approved lead, confirmed by a read-only draft
+  lookup, and left unsent. The lead is `DRAFT_CREATED`, the unique fingerprint record exists,
+  and `GMAIL_DRAFTS_ENABLED=false` again. Private recipient and Gmail identifiers are omitted.
+
+### Not in scope
+
+- No sending, scheduling, inbox operations, reply detection, follow-ups, or Phase 13 work.
+
 ## [phase-11-netlify-previews] — 2026-07-18
 
 Deploy approved demos to Netlify DRAFT deploys, verify the URL, finalize the email by

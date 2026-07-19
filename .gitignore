@@ -56,3 +56,9 @@ Thumbs.db
 
 # Phase 11 Netlify deploy staging (generated packages)
 .netlify-staging/
+
+# Phase 12 Gmail OAuth credentials (refresh token) — never commit
+.gmail-credentials.json
+
+# Phase 12 Google OAuth client JSON (Desktop app credentials) — never commit
+.gmail-oauth-client.json

@@ -1,7 +1,7 @@
 # Roadmap
 
-**Status:** Phase 6 complete (Gate A passed on a real site; Gate B deferred). Awaiting APPROVE PHASE 6.
-**Last updated:** 2026-07-16
+**Status:** Phase 12 complete and live-verified; awaiting commit approval.
+**Last updated:** 2026-07-19
 
 One phase at a time. Each phase ends with tests, a commit, an annotated tag, and an explicit approval gate.
 No phase begins before the previous one is approved with `APPROVE PHASE X`.
@@ -14,15 +14,15 @@ No phase begins before the previous one is approved with `APPROVE PHASE X`.
 | 3 | Deterministic qualification (PRE_AUDIT) | `phase-3-qualification` | ✅ approved |
 | 4 | Independent enrichment & website discovery | `phase-4-enrichment` | ✅ approved |
 | 5 | Website capture & evidence extraction | `phase-5-website-capture` | ✅ approved |
-| 6 | AI website audit & opportunity analysis | `phase-6-ai-audit` | ✅ complete (Gate A passed; Gate B deferred) |
-| 7 | Competitor research (optional module) | `phase-7-competitor-research` | ⏸️ DEFERRED (optional, post-MVP) |
-| 8 | Demo template & demo decision engine | `phase-8-demo-generation` | ✅ complete (awaiting approval) |
-| 9 | Email writer & reviewer | `phase-9-email-generation` | ☐ |
-| 10 | Review dashboard | `phase-10-review-dashboard` | ✅ |
-| 11 | Netlify preview deployment | `phase-11-netlify-previews` | ✅ |
-| 12 | Gmail draft creation (no send) | `phase-12-gmail-drafts` | ☐ |
-| 13 | Scheduling & daily operations | `phase-13-daily-operations` | ☐ |
-| 14 | Controlled sending (only on explicit request) | `phase-14-sending` | ☐ |
+| 6 | AI website audit & opportunity analysis | `phase-6-ai-audit` | approved; Gate B deferred |
+| 7 | Competitor research (optional module) | `phase-7-competitor-research` | DEFERRED (optional, post-MVP) |
+| 8 | Demo template & demo decision engine | `phase-8-demo-generation` | approved |
+| 9 | Email writer & reviewer | `phase-9-email-generation` | approved |
+| 10 | Review dashboard | `phase-10-review-dashboard` | approved |
+| 11 | Netlify preview deployment | `phase-11-netlify-previews` | approved |
+| 12 | Gmail draft creation (no send) | `phase-12-gmail-drafts` | complete + live-verified; awaiting commit approval |
+| 13 | Scheduling & daily operations | `phase-13-daily-operations` | not started |
+| 14 | Controlled sending (only on explicit request) | `phase-14-sending` | not started |
 
 > **Phase renumbering (Phase 3):** an *Independent enrichment & website discovery* phase was inserted at
 > position 4; former phases 4–13 shifted to 5–14. Enrichment discovers/verifies official websites for
@@ -39,7 +39,7 @@ No phase begins before the previous one is approved with `APPROVE PHASE X`.
 > 3. **Improve evidence-citation prompting** if the fabricated-reference rate is material.
 > 4. **Run future paid evaluations in small foreground batches with explicit stop points** (not a single 48-call background run).
 
-## Phase 0 — Discovery & system specification (current)
+## Phase 0 — Discovery & system specification
 
 Docs-only, no production code. Deliverables: all `docs/*` files, `CLAUDE.md`, `README.md`, `.gitignore`,
 `.env.example`, domain model, state machine, provider boundary, roadmap, risk register, Phase 1 acceptance
@@ -80,10 +80,10 @@ phase's start-of-phase report. Highlights of the hard gates:
 - **P8** every factual point maps to evidence; placeholders/wrong names/unsupported claims → failure; one rewrite cycle.
 - **P9** inspect-why for every statement; edit/approve/reject; every action logged; auth before remote deploy.
 - **P10** deploy only approved demos; globally disableable; URLs recorded; noindex verified.
-- **P11** Gmail drafts only, never send; requires `HUMAN_APPROVED` + passed review + verified recipient + not
+- **P12** Gmail drafts only, never send; requires `HUMAN_APPROVED` + passed review + verified recipient + not
   suppressed + `OUTBOUND_ACTIONS_ENABLED=true`; reruns never duplicate drafts; suppression overrides approval.
-- **P12** end-to-end dry run; resumable runs; enforced daily caps; visible failures; no external write when disabled.
-- **P13** only on explicit request; separate sending plan (jurisdiction, SPF/DKIM/DMARC, unsubscribe,
+- **P13** end-to-end dry run; resumable runs; enforced daily caps; visible failures; no external write when disabled.
+- **P14** only on explicit request; separate sending plan (jurisdiction, SPF/DKIM/DMARC, unsubscribe,
   suppression, bounce handling, volume ramp, caps, provider, reply detection, follow-ups); removable module.
 
 ## Phase 7 — Competitor research (DEFERRED — optional, post-MVP)

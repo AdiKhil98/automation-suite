@@ -931,3 +931,34 @@ export const emailDraftFinalizations = pgTable(
     finalDecisionCk: check('email_finalization_decision_ck', sql`${t.finalHumanDecision} IS NULL OR ${t.finalHumanDecision} IN ('APPROVED','REJECTED')`),
   }),
 );
+
+// --- Phase 12: Gmail draft creation (drafts only; never send) ---
+
+export const gmailDrafts = pgTable(
+  'gmail_drafts',
+  {
+    id: text('id').primaryKey(),
+    leadId: text('lead_id').notNull().references(() => leads.id, { onDelete: 'cascade' }),
+    finalizedEmailId: text('finalized_email_id').references(() => emailDraftFinalizations.id, { onDelete: 'set null' }),
+    recipientEmail: text('recipient_email').notNull(),
+    senderEmail: text('sender_email').notNull(),
+    gmailAccount: text('gmail_account').notNull(),
+    provider: text('provider').notNull(),
+    providerDraftId: text('provider_draft_id'),
+    threadId: text('thread_id'),
+    messageId: text('message_id'),
+    idempotencyFingerprint: text('idempotency_fingerprint').notNull(),
+    sourceEmailVersion: text('source_email_version').notNull(),
+    outcome: text('outcome').notNull(),
+    errorClass: text('error_class'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+  },
+  (t) => ({
+    leadIdx: index('gmail_drafts_lead_idx').on(t.leadId),
+    // Duplicate prevention: one draft per (account + finalized-email + recipient) fingerprint,
+    // and a provider draft id is globally unique.
+    fingerprintUk: uniqueIndex('gmail_drafts_fingerprint_uk').on(t.gmailAccount, t.idempotencyFingerprint),
+    providerDraftUk: uniqueIndex('gmail_drafts_provider_draft_uk').on(t.provider, t.providerDraftId).where(sql`${t.providerDraftId} IS NOT NULL`),
+  }),
+);

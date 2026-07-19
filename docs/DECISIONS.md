@@ -509,3 +509,29 @@ Every significant decision is recorded here in the required format. Newest first
   (safe-fetch untouched — Phase 4/5 code, out of scope).
 - **Rollback path:** Confined to `domain/deploy/` + `integrations/netlify/`; run scripts/rollback/0012_netlify_deploy_down.sql then reset.
 - **Status:** Accepted (Phase 11). Live smoke: 1 draft deploy `6a5bef3b…`, verified, finalized email created, production untouched.
+
+---
+
+## D-0029 — Phase 12 compose-only OAuth, fail-closed account gate, and persisted idempotency
+
+- **Date:** 2026-07-19
+- **Problem:** Create reviewable Gmail drafts without enabling sending, leaking long-lived tokens,
+  drafting from the wrong account, or duplicating a draft after retries or uncertain responses.
+- **Chosen option:** Request only `gmail.compose`; store the refresh token in a git-ignored local
+  credential file with restrictive permissions; keep access tokens in memory; require both
+  `GMAIL_DRAFTS_ENABLED=true` and the global `OUTBOUND_ACTIONS_ENABLED=true`; verify the authorized
+  profile exactly matches `GMAIL_ACCOUNT_EMAIL`; require a `HUMAN_APPROVED` lead, approved finalized
+  email, verified recipient fact, resolved demo URL, deterministic sender-name substitution, and no
+  remaining tokens. Persist a pre-call account/finalized-email/recipient fingerprint with unique
+  constraints. A prior uncertain reservation is never retried automatically.
+- **Reason:** Draft creation is an external write even though it is not sending. Independent feature
+  and global kill switches, explicit account identity, immutable finalized content, and durable
+  idempotency keep the operation bounded and auditable.
+- **Tradeoffs:** `gmail.compose` permits compose operations broader than the one endpoint used; the
+  adapter deliberately implements only profile verification and `users.drafts.create`. An uncertain
+  provider response requires manual reconciliation rather than an automatic retry.
+- **Rollback path:** Disable `GMAIL_DRAFTS_ENABLED`; remove local OAuth credential files if access
+  should be revoked; run `scripts/rollback/0013_gmail_drafts_down.sql` before reverting the Phase 12 code.
+- **Status:** Accepted (Phase 12). Live smoke created exactly one draft, confirmed it remained a draft,
+  advanced the lead to `DRAFT_CREATED`, persisted the unique fingerprint, and restored the feature flag
+  to false. Private recipient and Gmail identifiers are intentionally not recorded here.

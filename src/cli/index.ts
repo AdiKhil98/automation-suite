@@ -12,6 +12,8 @@ import { composeDemosCommand } from './commands/compose-demos.js';
 import { generateEmailsCommand } from './commands/generate-emails.js';
 import { reviewDashboardCommand } from './commands/review-dashboard.js';
 import { deployDemosCommand } from './commands/deploy-demos.js';
+import { gmailAuthCommand } from './commands/gmail-auth.js';
+import { createGmailDraftsCommand } from './commands/create-gmail-drafts.js';
 import { previewDemoCommand } from './commands/preview-demo.js';
 import { qualifyLeadsCommand } from './commands/qualify-leads.js';
 import { createSampleLeads } from './commands/create-sample-leads.js';
@@ -166,6 +168,17 @@ program
   .description('Phase 11: deploy approved demos to Netlify DRAFT deploys, verify, and finalize the email (mock by default; no send/Gmail)')
   .option('--limit <n>', 'max leads to deploy this run')
   .action((opts: { limit?: string }) => withContext((ctx) => deployDemosCommand(ctx, opts)));
+
+program
+  .command('gmail-auth')
+  .description('One-time local OAuth setup for Gmail draft creation (scope gmail.compose only; loopback callback; stores refresh token 0600)')
+  .action(() => withContext((ctx) => gmailAuthCommand(ctx)));
+
+program
+  .command('create-gmail-drafts')
+  .description('Phase 12: create a Gmail DRAFT (never send) for HUMAN_APPROVED leads with an approved finalized email (mock by default)')
+  .option('--limit <n>', 'max leads to draft this run')
+  .action((opts: { limit?: string }) => withContext((ctx) => createGmailDraftsCommand(ctx, opts)));
 
 program
   .command('review-dashboard')

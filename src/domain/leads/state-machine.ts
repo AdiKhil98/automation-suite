@@ -53,7 +53,8 @@ const BASE_TRANSITIONS: Record<LeadStatus, LeadStatus[]> = {
   // Second human approval of the URL-resolved finalized email.
   FINALIZED_EMAIL_PENDING: ['HUMAN_APPROVED', 'REJECTED', 'NEEDS_MANUAL_REVIEW'],
   READY_FOR_HUMAN_APPROVAL: ['HUMAN_APPROVED', 'REJECTED'],
-  HUMAN_APPROVED: ['DRAFT_CREATED'],
+  // Phase 12: Gmail draft creation; auth/invalid conditions park for manual review.
+  HUMAN_APPROVED: ['DRAFT_CREATED', 'NEEDS_MANUAL_REVIEW'],
   DRAFT_CREATED: ['SENT'],
   SENT: ['REPLIED', 'BOUNCED', 'FAILED'],
   // A lead parked for manual review can be re-accepted or rejected.

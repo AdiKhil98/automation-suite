@@ -185,6 +185,25 @@ const envSchema = z.object({
   NETLIFY_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(2_000),
   NETLIFY_MAX_POLL_ATTEMPTS: z.coerce.number().int().positive().default(30),
   NETLIFY_STAGING_DIR: z.string().default('./.netlify-staging'),
+
+  // --- Phase 12: Gmail draft creation (drafts only; opt-in; OAuth) ---
+  // Fixed API/OAuth origins live in the adapters. Refresh token is stored in a git-ignored
+  // 0600 credential file — NEVER in env, DB, logs, or git.
+  GMAIL_DRAFTS_ENABLED: boolString(false),
+  // Preferred: the downloaded Google Cloud OAuth client JSON (Desktop app → `installed` key).
+  // Git-ignored; avoids putting the secret in .env. Falls back to the two vars below.
+  GMAIL_OAUTH_CLIENT_FILE: z.string().default('./.gmail-oauth-client.json'),
+  GMAIL_OAUTH_CLIENT_ID: z.string().optional(),
+  GMAIL_OAUTH_CLIENT_SECRET: z.string().optional(),
+  GMAIL_OAUTH_REDIRECT_URI: z.string().default('http://127.0.0.1:4700/oauth/callback'),
+  GMAIL_OAUTH_CALLBACK_PORT: z.coerce.number().int().positive().default(4700),
+  GMAIL_ACCOUNT_EMAIL: z.string().optional(),
+  GMAIL_SENDER_NAME: z.string().optional(),
+  GMAIL_CREDENTIALS_FILE: z.string().default('./.gmail-credentials.json'),
+  GMAIL_MAX_DRAFTS_PER_RUN: z.coerce.number().int().positive().default(5),
+  GMAIL_MAX_DRAFTS_PER_DAY: z.coerce.number().int().positive().default(20),
+  GMAIL_MIN_DRAFT_INTERVAL_MS: z.coerce.number().int().nonnegative().default(2_000),
+  GMAIL_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
 });
 
 const refinedEnvSchema = envSchema.superRefine((val, ctx) => {

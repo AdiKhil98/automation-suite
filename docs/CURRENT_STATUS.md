@@ -1,26 +1,33 @@
 # Current Status
 
 ## Current phase
-Phase 11 (Netlify preview deployment) — COMPLETE + live-verified. Committing as `phase-11-netlify-previews`.
+Phase 12 (Gmail draft creation) — COMPLETE + live-verified. UNCOMMITTED; awaiting operator review and commit approval.
 
 ## Completed work
-- Phases 0–10 tagged. Phase 11: Netlify draft deploy + URL verification + immutable email
-  finalization + second human approval (FINALIZED_EMAIL_PENDING). Live smoke: 1 draft deploy
-  `6a5bef3b…`, verified, production untouched. See CHANGELOG + D-0028.
+- Phases 0–11 tagged (`phase-11-netlify-previews`) + dashboard pool-lifecycle fix (`b938ed4`).
+- Phase 12 (uncommitted): OAuth (gmail.compose only) + git-ignored 0600 token store + `gmail-auth` CLI;
+  Gmail provider (interface + mock + http, drafts.create only, token never logged); domain
+  (eligibility, sender-name substitution + no-unresolved-token guard, MIME/base64url, GmailDraftService
+  with idempotency + dup prevention + routing); migration 0013 (gmail_drafts, unique on account+fingerprint
+  and provider draft id, +reverse); repos/UoW/input; CLI `create-gmail-drafts`; state HUMAN_APPROVED→
+  DRAFT_CREATED / NEEDS_MANUAL_REVIEW. Mock-first; no Gmail calls in tests.
+- Live smoke test: exactly one Gmail draft created for one approved lead, confirmed through a read-only
+  draft lookup, and left unsent. Lead advanced to `DRAFT_CREATED`; the unique fingerprint record exists;
+  `GMAIL_DRAFTS_ENABLED=false` again. Private recipient and Gmail identifiers are intentionally omitted.
 
 ## Uncommitted changes
-None after this commit.
+All Phase 12 files. NOT committed/tagged; proposed commit must be reviewed and explicitly approved first.
 
 ## Remaining tasks
-- Second human approval of the finalized email for the smoke-test lead (decideFinalizedEmail) → HUMAN_APPROVED, when desired.
-- Phase 12 (Gmail draft creation, no send) — not started.
+- Review the proposed Phase 12 commit contents; commit/tag only after explicit operator approval.
+- Phase 13/14 not started.
 
 ## Exact commands to continue
-- Suite: `pnpm lint && pnpm typecheck && pnpm test` ; `DATABASE_URL=postgres://postgres:postgres@localhost:5432/outreach pnpm test:integration` ; `pnpm test:browser`
-- Deploy (ARMED only): `pnpm cli deploy-demos --limit 1` (idempotent — reconciles/reuses; never double-deploys).
+- Suite: `pnpm lint && pnpm typecheck && pnpm test` ; `DATABASE_URL=… pnpm test:integration` ; `pnpm test:browser`
 - `pnpm test:integration` truncates the DB.
 
 ## Safety restrictions
-- `.env` currently ARMED for Netlify (deployment enabled + token/site/hostname). Disarm when done: NETLIFY_DEPLOYMENT_ENABLED=false.
-- Draft deploys only (never production). Preview URLs are PUBLIC; noindex/X-Robots-Tag = search guidance, not access control. No send, no Gmail, no scheduling.
-- Do NOT begin Phase 12 without approval.
+- `GMAIL_DRAFTS_ENABLED=false` and `OUTBOUND_ACTIONS_ENABLED=false` default. Both must be true for a real draft.
+- Only users.drafts.create — never send, no inbox read/modify, no scheduling, no contact discovery.
+- Refresh token only in git-ignored 0600 `.gmail-credentials.json` — never in env/DB/logs/git.
+- Do NOT begin Phase 13/14.
