@@ -113,6 +113,13 @@
       "when": 1784310000000,
       "tag": "0015_controlled_sends",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1784396400000,
+      "tag": "0016_production_sending_readiness",
+      "breakpoints": true
     }
   ]
 }

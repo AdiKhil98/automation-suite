@@ -26,6 +26,8 @@ describe('lead state machine', () => {
     expect(canTransition('NEW', 'QUALIFIED')).toBe(false);
     expect(canTransition('NEW', 'SENT')).toBe(false);
     expect(canTransition('QUALIFIED', 'NEW')).toBe(false);
+    // Phase 15 manual send reconciliation is a dedicated audited transaction, never a generic edge.
+    expect(canTransition('NEEDS_MANUAL_REVIEW', 'SENT')).toBe(false);
   });
 
   it('assertTransition throws a typed error carrying from/to', () => {

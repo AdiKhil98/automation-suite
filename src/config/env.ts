@@ -231,6 +231,8 @@ const envSchema = z.object({
   SENDING_POLICY_VERSION: z.string().default('send-policy-1'),
   SENDING_MAX_LATE_MINUTES: z.coerce.number().int().nonnegative().default(60),
   SENDING_CONFIRMATION_TTL_SECONDS: z.coerce.number().int().positive().default(120),
+  // Phase 15 send-time account cap. Confirmed sends only; default intentionally conservative.
+  SENDING_DAILY_CAP: z.coerce.number().int().positive().default(1),
 });
 
 const refinedEnvSchema = envSchema.superRefine((val, ctx) => {

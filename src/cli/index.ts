@@ -17,6 +17,8 @@ import { createGmailDraftsCommand } from './commands/create-gmail-drafts.js';
 import { scheduleDraftsCommand } from './commands/schedule-drafts.js';
 import { cancelScheduleCommand, rescheduleCommand, scheduleStatusCommand } from './commands/schedule-ops.js';
 import { sendScheduledCommand } from './commands/send-scheduled.js';
+import { approveSendingReadinessCommand, reconcileSendAttemptCommand, revokeSendingReadinessCommand,
+  sendAttemptStatusCommand, sendingReadinessStatusCommand } from './commands/send-admin.js';
 import { previewDemoCommand } from './commands/preview-demo.js';
 import { qualifyLeadsCommand } from './commands/qualify-leads.js';
 import { createSampleLeads } from './commands/create-sample-leads.js';
@@ -212,9 +214,44 @@ program
 
 program
   .command('send-scheduled')
-  .description('Phase 14: evaluate ONE scheduled Gmail draft; dry-run is local-only and live use requires interactive TTY confirmation')
+  .description('Phases 14-15: evaluate ONE scheduled Gmail draft; dry-run is local-only and live use requires interactive TTY confirmation')
   .requiredOption('--lead <id>', 'lead id (must have an active SCHEDULED schedule)')
   .action((opts: { lead: string }) => withContext((ctx) => sendScheduledCommand(ctx, opts)));
+
+program
+  .command('approve-sending-readiness')
+  .description('Phase 15: create one expiring account/policy readiness approval; does not call Gmail or send')
+  .requiredOption('--by <operator>', 'operator creating the readiness approval')
+  .requiredOption('--minutes <n>', 'expiry in minutes (1-60)')
+  .action((opts: { by: string; minutes: string }) => withContext((ctx) => approveSendingReadinessCommand(ctx, opts)));
+
+program
+  .command('revoke-sending-readiness')
+  .description('Phase 15: revoke an active readiness approval; does not call Gmail or send')
+  .requiredOption('--id <id>', 'internal readiness approval id')
+  .requiredOption('--by <operator>', 'operator revoking readiness')
+  .requiredOption('--reason <text>', 'audited revocation reason')
+  .action((opts: { id: string; by: string; reason: string }) => withContext((ctx) => revokeSendingReadinessCommand(ctx, opts)));
+
+program
+  .command('sending-readiness-status')
+  .description('Phase 15: show redacted readiness status for the configured account/policy')
+  .action(() => withContext(sendingReadinessStatusCommand));
+
+program
+  .command('send-attempt-status')
+  .description('Phase 15: show redacted send-attempt status; no Gmail access')
+  .option('--lead <id>', 'optional internal lead id')
+  .action((opts: { lead?: string }) => withContext((ctx) => sendAttemptStatusCommand(ctx, opts)));
+
+program
+  .command('reconcile-send-attempt')
+  .description('Phase 15: manually reconcile an uncertain attempt; does not call Gmail or send')
+  .requiredOption('--attempt <id>', 'internal send-attempt id')
+  .requiredOption('--outcome <value>', 'confirmed-sent | confirmed-not-sent | unresolved')
+  .requiredOption('--by <operator>', 'operator performing reconciliation')
+  .requiredOption('--note <text>', 'audited evidence/reason summary; do not include private values or Gmail ids')
+  .action((opts: { attempt: string; outcome: string; by: string; note: string }) => withContext((ctx) => reconcileSendAttemptCommand(ctx, opts)));
 
 program
   .command('review-dashboard')

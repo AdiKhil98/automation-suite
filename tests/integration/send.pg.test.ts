@@ -4,10 +4,12 @@ import pino from 'pino';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { scheduleIntegrityFingerprint } from '../../src/domain/schedule/fingerprint.js';
 import { SendService, type SendConfig } from '../../src/domain/send/send-service.js';
+import { SendAdminService } from '../../src/domain/send/send-admin-service.js';
 import { buildCandidateLead } from '../../src/domain/leads/lead-factory.js';
 import { createDb, type DbHandle } from '../../src/persistence/db.js';
 import { DrizzleSendUnitOfWork } from '../../src/persistence/send-unit-of-work.js';
 import { SendRepository } from '../../src/persistence/repositories/send.repo.js';
+import { SendAdminRepository } from '../../src/persistence/repositories/send-admin.repo.js';
 import { SendInputRepository } from '../../src/persistence/repositories/send-input.repo.js';
 import { LeadFactsRepository } from '../../src/persistence/repositories/lead-facts.repo.js';
 import { LeadsRepository } from '../../src/persistence/repositories/leads.repo.js';
@@ -22,6 +24,7 @@ import {
   emailDrafts,
   gmailDrafts,
   leads as leadsTbl,
+  pipelineEvents,
   sendAttempts,
   sendSchedules,
   sendingReadinessApprovals,
@@ -40,7 +43,7 @@ const SUBJECT = 'Note';
 const NOW = Date.parse('2026-07-20T13:00:00Z');
 const SCHEDULED_AT = new Date(NOW - 10 * 60_000); // 10 minutes ago (due, within the 60-min late window)
 
-const cfg: SendConfig = { gmailAccount: ACCOUNT, senderName: SENDER, policyVersion: POLICY, sendingEnabled: true, outboundActionsEnabled: true, dryRun: false, maxLateMs: 60 * 60_000, confirmationTtlMs: 120_000 };
+const cfg: SendConfig = { gmailAccount: ACCOUNT, senderName: SENDER, policyVersion: POLICY, sendingEnabled: true, outboundActionsEnabled: true, dryRun: false, maxLateMs: 60 * 60_000, confirmationTtlMs: 120_000, dailyCap: 1 };
 
 describe.skipIf(!DATABASE_URL)('controlled sending (PostgreSQL)', () => {
   let handle: DbHandle;
@@ -73,7 +76,21 @@ describe.skipIf(!DATABASE_URL)('controlled sending (PostgreSQL)', () => {
     return { leadId: lead.id, scheduleId: sId };
   }
 
-  const service = () => new SendService({ provider: new MockSendProvider({ account: { ok: true, email: ACCOUNT }, draft: { outcome: 'ok', envelope: { fromName: SENDER, fromEmail: ACCOUNT, to: [RECIP], cc: [], bcc: [], subject: SUBJECT, body: `Hallo, ${SENDER}`, attachmentCount: 0 } } }), store: new SendRepository(handle.db), uow: new DrizzleSendUnitOfWork(handle.db), logger, config: cfg, now: () => NOW });
+  const service = () => new SendService({ provider: new MockSendProvider({ account: { ok: true, email: ACCOUNT }, draft: { outcome: 'ok', providerDraftId: 'provider-draft-example', providerMessageId: 'fictional-message', providerThreadId: 'fictional-thread', envelope: { fromName: SENDER, fromEmail: ACCOUNT, to: [RECIP], cc: [], bcc: [], subject: SUBJECT, body: `Hallo, ${SENDER}`, attachmentCount: 0 } } }), store: new SendRepository(handle.db), uow: new DrizzleSendUnitOfWork(handle.db), logger, config: cfg, now: () => NOW });
+
+  function uncertainService() {
+    const provider = new MockSendProvider({ account: { ok: true, email: ACCOUNT }, draft: { outcome: 'ok',
+      providerDraftId: 'provider-draft-example', providerMessageId: 'fictional-message', providerThreadId: 'fictional-thread',
+      envelope: { fromName: SENDER, fromEmail: ACCOUNT, to: [RECIP], cc: [], bcc: [], subject: SUBJECT,
+        body: `Hallo, ${SENDER}`, attachmentCount: 0 } }, send: { outcome: 'unknown', reason: 'fictional_timeout' } });
+    return { provider, service: new SendService({ provider, store: new SendRepository(handle.db),
+      uow: new DrizzleSendUnitOfWork(handle.db), logger, config: cfg, now: () => NOW }) };
+  }
+
+  function admin(now = NOW + 1000) {
+    return new SendAdminService(new SendAdminRepository(handle.db), { gmailAccount: ACCOUNT,
+      policyVersion: POLICY }, () => now);
+  }
 
   async function buildInput(leadId: string) {
     const data = await new SendInputRepository(handle.db).latest(leadId);
@@ -138,5 +155,77 @@ describe.skipIf(!DATABASE_URL)('controlled sending (PostgreSQL)', () => {
     expect((await handle.db.select().from(leadsTbl).where(eq(leadsTbl.id, leadId)))[0]?.status).toBe('SCHEDULED');
     expect((await handle.db.select().from(sendSchedules).where(eq(sendSchedules.id, scheduleId)))[0]?.status).toBe('SCHEDULED');
     expect(await handle.db.select().from(sendAttempts).where(eq(sendAttempts.scheduleId, scheduleId))).toHaveLength(0);
+  });
+
+  it('dedicated confirmed-sent reconciliation preserves OUTCOME_UNKNOWN, fulfills once, and rejects a duplicate', async () => {
+    const { leadId, scheduleId } = await seed();
+    const uncertain = uncertainService();
+    expect((await execute(uncertain.service, leadId, await new PipelineRunsRepository(handle.db).start('send:unknown', false))).outcome).toBe('OUTCOME_UNKNOWN');
+    const before = await handle.db.select().from(sendAttempts).where(eq(sendAttempts.scheduleId, scheduleId));
+    expect(before).toHaveLength(1); expect(before[0]?.status).toBe('OUTCOME_UNKNOWN');
+    const attemptId = before[0]!.id;
+    const sendCallsBeforeReconciliation = uncertain.provider.sent.length;
+    const ops = admin();
+    const phrase = ops.reconciliationPhrase(attemptId, 'CONFIRMED_SENT');
+    expect(await ops.reconcile({ attemptId, outcome: 'CONFIRMED_SENT', reconciledBy: 'Example Operator',
+      note: 'Fictional provider evidence reference.', observedPhrase: phrase })).toBe('SENT_CONFIRMED');
+    const after = await handle.db.select().from(sendAttempts).where(eq(sendAttempts.scheduleId, scheduleId));
+    expect(after).toHaveLength(1);
+    expect(after[0]?.status).toBe('OUTCOME_UNKNOWN');
+    expect(after[0]?.reconciledOutcome).toBe('CONFIRMED_SENT');
+    expect((await handle.db.select().from(sendSchedules).where(eq(sendSchedules.id, scheduleId)))[0]?.status).toBe('FULFILLED');
+    expect((await handle.db.select().from(leadsTbl).where(eq(leadsTbl.id, leadId)))[0]?.status).toBe('SENT');
+    expect(uncertain.provider.sent.length).toBe(sendCallsBeforeReconciliation);
+    const audit = await handle.db.select().from(pipelineEvents).where(eq(pipelineEvents.leadId, leadId));
+    expect(audit.some((e) => (e.data as { originalAttemptStatus?: string } | null)?.originalAttemptStatus === 'OUTCOME_UNKNOWN')).toBe(true);
+    await expect(ops.reconcile({ attemptId, outcome: 'CONFIRMED_SENT', reconciledBy: 'Example Operator',
+      note: 'Duplicate fictional evidence.', observedPhrase: phrase })).rejects.toThrow('not_unresolved_unknown');
+    expect(await handle.db.select().from(sendAttempts).where(eq(sendAttempts.scheduleId, scheduleId))).toHaveLength(1);
+  });
+
+  it('confirmed-not-sent requires intact bindings, returns to SCHEDULED, and requires fresh readiness', async () => {
+    const { leadId, scheduleId } = await seed();
+    const uncertain = uncertainService();
+    await execute(uncertain.service, leadId, await new PipelineRunsRepository(handle.db).start('send:not-sent', false));
+    const attempt = (await handle.db.select().from(sendAttempts).where(eq(sendAttempts.scheduleId, scheduleId)))[0]!;
+    await handle.db.update(sendSchedules).set({ finalizedContentHash: 'changed-fictional-hash' }).where(eq(sendSchedules.id, scheduleId));
+    const ops = admin();
+    const phrase = ops.reconciliationPhrase(attempt.id, 'CONFIRMED_NOT_SENT');
+    await expect(ops.reconcile({ attemptId: attempt.id, outcome: 'CONFIRMED_NOT_SENT', reconciledBy: 'Example Operator',
+      note: 'Fictional provider non-delivery evidence.', observedPhrase: phrase })).rejects.toThrow('content_binding_changed');
+    await handle.db.update(sendSchedules).set({ finalizedContentHash: CONTENT }).where(eq(sendSchedules.id, scheduleId));
+    expect(await ops.reconcile({ attemptId: attempt.id, outcome: 'CONFIRMED_NOT_SENT', reconciledBy: 'Example Operator',
+      note: 'Fictional provider non-delivery evidence.', observedPhrase: phrase })).toBe('DEFINITIVE_FAILURE');
+    const reconciled = (await handle.db.select().from(sendAttempts).where(eq(sendAttempts.id, attempt.id)))[0];
+    expect(reconciled?.status).toBe('OUTCOME_UNKNOWN'); expect(reconciled?.reconciledOutcome).toBe('CONFIRMED_NOT_SENT');
+    expect((await handle.db.select().from(leadsTbl).where(eq(leadsTbl.id, leadId)))[0]?.status).toBe('SCHEDULED');
+    expect((await uncertain.service.preflight(await buildInput(leadId))).outcome).toBe('READINESS_INVALID');
+    expect(await handle.db.select().from(sendAttempts).where(eq(sendAttempts.scheduleId, scheduleId))).toHaveLength(1);
+  });
+
+  it('unresolved reconciliation remains OUTCOME_UNKNOWN and blocks retry without a second attempt', async () => {
+    const { leadId, scheduleId } = await seed();
+    const uncertain = uncertainService();
+    await execute(uncertain.service, leadId, await new PipelineRunsRepository(handle.db).start('send:unresolved', false));
+    const attempt = (await handle.db.select().from(sendAttempts).where(eq(sendAttempts.scheduleId, scheduleId)))[0]!;
+    const ops = admin();
+    expect(await ops.reconcile({ attemptId: attempt.id, outcome: 'UNRESOLVED', reconciledBy: 'Example Operator',
+      note: 'Fictional evidence remains inconclusive.', observedPhrase: ops.reconciliationPhrase(attempt.id, 'UNRESOLVED') })).toBe('UNCHANGED');
+    const current = (await handle.db.select().from(sendAttempts).where(eq(sendAttempts.id, attempt.id)))[0];
+    expect(current?.status).toBe('OUTCOME_UNKNOWN'); expect(current?.reconciledOutcome).toBeNull();
+    expect((await handle.db.select().from(leadsTbl).where(eq(leadsTbl.id, leadId)))[0]?.status).toBe('NEEDS_MANUAL_REVIEW');
+    expect((await uncertain.service.preflight(await buildInput(leadId))).outcome).toBe('DUPLICATE_PREVENTED');
+    expect(await handle.db.select().from(sendAttempts).where(eq(sendAttempts.scheduleId, scheduleId))).toHaveLength(1);
+  });
+
+  it('creates, reports, and revokes one expiring fictional readiness approval without sending', async () => {
+    const ops = admin();
+    const created = await ops.createReadiness({ approvedBy: 'Example Operator', expiresInMinutes: 15 });
+    expect(created.expiresAt.getTime()).toBe(NOW + 1000 + 15 * 60_000);
+    expect((await ops.status())?.id).toBe(created.id);
+    expect(await ops.revokeReadiness({ id: created.id, revokedBy: 'Example Operator',
+      reason: 'Fictional readiness lifecycle test complete.' })).toBe(true);
+    expect((await ops.status())?.revokedAt).not.toBeNull();
+    expect(await handle.db.select().from(sendAttempts)).toHaveLength(0);
   });
 });

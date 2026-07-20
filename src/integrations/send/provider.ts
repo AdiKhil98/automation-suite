@@ -15,14 +15,14 @@ export interface SendRef {
   providerThreadId: string | null;
 }
 
-/** `rate_limited`/`transient` are allowed only for a confirmed non-delivery response. Timeouts,
- * lost/malformed responses, 5xx, and any ambiguity after dispatch MUST be `unknown`. */
-export type SendResultOutcome = 'ok' | 'rate_limited' | 'transient' | 'auth_error' | 'unknown';
+/** Non-`ok` results are honest provider classifications. Timeouts, network loss, malformed success,
+ * 5xx, and any ambiguity after dispatch MUST be `unknown`, never an automatic retry signal. */
+export type SendResultOutcome = 'ok' | 'definitive_failure' | 'rate_limited' | 'auth_error' | 'unknown';
 export interface SendResult { outcome: SendResultOutcome; ref?: SendRef; reason?: string }
 
 export type DraftInspectionResult =
-  | { outcome: 'ok'; envelope: ProviderDraftEnvelope }
-  | { outcome: 'missing' | 'auth_error' | 'invalid' | 'unknown'; reason: string };
+  | { outcome: 'ok'; envelope: ProviderDraftEnvelope; providerDraftId?: string; providerMessageId?: string; providerThreadId?: string | null }
+  | { outcome: 'missing' | 'auth_error' | 'rate_limited' | 'definitive_failure' | 'invalid' | 'unknown'; reason: string };
 
 export interface SendProvider {
   readonly name: string;

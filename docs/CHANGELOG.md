@@ -2,7 +2,48 @@
 
 All notable changes per phase. Format loosely follows Keep a Changelog.
 
-## [phase-14-sending] — 2026-07-20 (UNCOMMITTED; awaiting review)
+## [phase-15-production-sending-readiness] - 2026-07-20 (UNCOMMITTED; awaiting review)
+
+Production sending readiness and a separately selectable Gmail HTTP send adapter, implemented and
+tested with mocked transport only. Phase 14 remains authoritative; mock stays the default, every sending
+switch remains disabled, and no live Gmail call or email send is authorized.
+
+### Added
+
+- Strict operation allowlist: `users.getProfile`, `drafts.get` for one supplied known draft id, and
+  `drafts.send` with only that same id. Listing/search, inbox/contact access, draft mutation, direct
+  `messages.send`, replacement MIME, bulk sending, and automatic retries are prohibited.
+- Fail-closed MIME normalization and identity verification; explicit provider outcome classification.
+- Expiring readiness approval create/revoke/status, send-attempt status, manual uncertainty
+  reconciliation, and account daily-cap enforcement.
+- Existing `gmail.compose` OAuth/token loading reused unchanged. Tests use an injected mock transport,
+  fictional `.example` fixtures, and zero external network requests.
+- Dedicated manual uncertainty reconciliation: exact interactive TTY phrase, operator identity, evidence
+  note, exactly one unresolved attempt, no later/confirmed attempt, and complete schedule/draft/recipient/
+  account/content/fingerprint revalidation. The generic state machine still rejects
+  `NEEDS_MANUAL_REVIEW -> SENT`.
+- Reconciliation preserves `status='OUTCOME_UNKNOWN'` and records separate resolution metadata. Confirmed
+  sent fulfills the schedule and uses the dedicated audited lead transition; confirmed not sent returns the
+  lead to `SCHEDULED` only after revalidation and forces fresh readiness; unresolved remains blocked.
+- Migration `0016` plus reverse adds readiness revocation and reconciliation audit metadata, effective
+  confirmed/blocking unique indexes, and the effective account/day index.
+- The send-time daily cap is checked before provider access and atomically again at reservation under an
+  account/day transaction lock, conservatively counting in-flight and unresolved attempts.
+
+### Safety boundary
+
+- No OAuth reauthorization, live Gmail call, real draft read or mutation, live seed/schedule/readiness
+  record, or send during implementation. Provider-level exactly-once delivery is not claimed.
+
+### Verification
+
+- Lint and typecheck passed; 390 unit, 43 PostgreSQL integration, and 9 browser tests passed.
+- Migration `0016` apply/reverse/reapply passed; `git diff --check` and the full sensitive-value/security
+  scan passed with zero findings.
+- HTTP adapter tests used injected mock transport and asserted exact URL, method, and id-only send body.
+  No live Gmail call, OAuth reauthorization, draft mutation, schedule/readiness creation, or email send occurred.
+
+## [phase-14-sending] - 2026-07-20
 
 Controlled sending of ONE existing, scheduled Gmail draft. Mock-first: no live provider is wired,
 so no email can be dispatched. Default-safe: all sending kill switches remain false.

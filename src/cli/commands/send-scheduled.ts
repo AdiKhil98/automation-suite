@@ -1,6 +1,6 @@
 import { createInterface } from 'node:readline/promises';
 import { stdin, stdout } from 'node:process';
-import { approvedEnvelopeHash, expectedDraftEnvelope } from '../../domain/send/envelope.js';
+import { approvedEnvelopeHash } from '../../domain/send/envelope.js';
 import { PipelineRunsRepository } from '../../persistence/repositories/runs.repo.js';
 import { SendInputRepository } from '../../persistence/repositories/send-input.repo.js';
 import { buildSendProvider, buildSendService } from './send-build.js';
@@ -35,14 +35,7 @@ export async function sendScheduledCommand(ctx: CliContext, opts: SendScheduledO
   }
   if (!c.SENDING_ENABLED || !c.OUTBOUND_ACTIONS_ENABLED) { console.log('Sending gates are disabled. Nothing was sent.'); return; }
 
-  let mockEnvelope;
-  try {
-    if (!c.GMAIL_SENDER_NAME || !data.currentGmailDraft || !data.currentRecipientEmail || !data.subject || !data.finalization) throw new Error('incomplete');
-    mockEnvelope = expectedDraftEnvelope({ senderName: c.GMAIL_SENDER_NAME, senderEmail: data.currentGmailDraft.senderEmail,
-      recipientEmail: data.currentRecipientEmail, subject: data.subject, resolvedBody: data.finalization.resolvedBody });
-  } catch { console.log('Approved envelope is incomplete or invalid. Nothing was sent.'); return; }
-  const provider = buildSendProvider(c, { account: { ok: true, email: c.GMAIL_ACCOUNT_EMAIL ?? null },
-    draft: { outcome: 'ok', envelope: mockEnvelope } });
+  const provider = buildSendProvider(ctx);
   if (!provider.live) { console.log('No live Gmail send provider is wired. Nothing was sent.'); return; }
   if (!stdin.isTTY || !stdout.isTTY) { console.log('Interactive TTY confirmation is required. Nothing was sent.'); return; }
 

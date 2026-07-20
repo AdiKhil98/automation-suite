@@ -1,59 +1,63 @@
 # Current Status
 
 ## Current phase
-Phase 14 (controlled sending) — implemented MOCK-FIRST. UNCOMMITTED; awaiting operator review and
-commit approval. No live sending provider is wired, so no email can be dispatched.
+
+Phase 15: production sending readiness and live Gmail provider integration. Implementation is complete,
+uncommitted, and awaiting final review. No live Gmail call or send is authorized.
 
 ## Completed work
-- Phases 0–13 are committed and tagged through `phase-13-daily-operations` (`49db3f9`, at HEAD).
-  (Earlier `docs` said Phase 13 was uncommitted — that was stale; git shows it committed + tagged.)
-- Phase 14 (uncommitted): deterministic, fail-closed sending of ONE existing, scheduled Gmail draft.
-  A send requires all three kill switches armed, an intact schedule integrity binding, a verified
-  non-suppressed recipient, a valid readiness approval, and an explicit fresh confirmation of the
-  exact approved envelope. A confirmed send advances the lead `SCHEDULED → SENT` and marks the
-  schedule `FULFILLED`.
-- Provider state is verified twice (before confirmation and after confirmation immediately before
-  reservation): authenticated account plus exact sender/recipient/subject/body/Cc/Bcc/attachments
-  from only the known draft id. Missing or changed drafts fail closed and are never recreated.
-- Sending is mock-first: the only wired provider is a zero-network `MockSendProvider`; the live
-  (`http`) provider is intentionally unimplemented and refused at build time.
-- Durable reservation and DB unique indexes prevent local concurrency/confirmed duplicates. An
-  UNKNOWN provider result permanently blocks automatic retry. Because Gmail has no idempotency key
-  for `drafts.send`, provider-level exactly-once delivery is not claimed.
-- Migration `0015` (applied to the local DB) adds `sending_readiness_approvals`, `send_attempts`,
-  extends `send_schedules` (`FULFILLED`/`INVALIDATED` + timestamps/reason), and adds the `email`
-  suppression scope, with a reverse script. The state machine drops the direct `DRAFT_CREATED → SENT`
-  edge.
-- Verification: lint, typecheck, 381 unit tests, 39 PostgreSQL integration tests, 9 browser tests,
-  isolated 3-test Phase 14 integration run, and migration 0015 apply/reverse/reapply passed.
 
-## Uncommitted changes
-Codex's first Phase 14 patch (migration 0015 + reverse, env sending flags, schema, suppression,
-maintenance ordering, stricter lead transition) PLUS this continuation (the `domain/send` +
-`integrations/send` modules, persistence repos/UoW, CLI `send-scheduled`, tests, docs, and
-`.env.example`). Nothing is committed, tagged, or pushed; the exact proposed commit must be reviewed
-and explicitly approved first.
+- Phases 0-14 are committed and tagged through `phase-14-sending` (`3d5e66c`).
+- Phase 13 persists inert, deterministic, timezone-aware schedules only; it never schedules with Gmail.
+- Phase 14 is the authoritative fail-closed safety controller for exactly one existing scheduled draft.
+  It verifies immutable bindings twice, requires a valid expiring readiness approval and exact interactive
+  confirmation, durably reserves the attempt, and permanently blocks automatic retry after uncertainty.
+- Phase 14 does not claim provider-level exactly-once delivery because Gmail has no idempotency key for
+  `drafts.send`.
+- Migration `0015` and its reverse are committed. The verified Phase 14 suites passed before release.
 
-## Local database note
-The integration suite intentionally truncates the configured test database. It was truncated during
-this work. No Phase 12/13 seed was restored; no real Gmail draft was called, read, mutated, or sent.
+## Phase 15 implementation
 
-## Remaining tasks
-- Review the complete Phase 14 diff and proposed commit contents.
-- Commit/tag/push only after explicit operator approval.
-- A live sending provider + full sending plan (jurisdiction, SPF/DKIM/DMARC, unsubscribe, bounce
-  handling, volume ramp, reply detection, follow-ups) are deferred to a separate, approved step.
+- Added a separate `HttpGmailSendProvider` behind the existing `SendProvider`; mock remains the default.
+- Allows only `users.getProfile`, `drafts.get` for one known draft id, and `drafts.send` for that same id.
+- Strictly parses and compares the known draft; rejects ambiguous MIME, identity drift, Cc/Bcc, attachments,
+  and any non-draft state.
+- Added readiness create/revoke/status, send-attempt status, and manual uncertainty-reconciliation commands.
+- Enforces an account daily cap twice, including an atomic account/day reservation lock that conservatively
+  counts in-flight and unresolved attempts.
+- Reuses the existing `gmail.compose` OAuth/token loading unchanged; insufficient access fails closed.
+- Manual reconciliation requires an exact TTY phrase, operator identity, nonempty evidence note, exactly one
+  `OUTCOME_UNKNOWN` attempt, no later/confirmed attempt, and full local binding revalidation. It never calls Gmail.
+- The original attempt remains `OUTCOME_UNKNOWN`; reconciliation outcome/time/operator/note are separate audit
+  metadata. Unresolved stays blocked. Confirmed-not-sent returns to `SCHEDULED` but requires fresh readiness.
 
-## Exact commands to continue
-- Suite: `pnpm lint`; `pnpm typecheck`; `pnpm test`; `pnpm test:integration` (needs `DATABASE_URL`).
-- Migration: apply 0015, run `scripts/rollback/0015_controlled_sends_down.sql`, then reapply 0015.
-- Dry-run readiness report (no writes/provider call): `pnpm cli send-scheduled --lead <id>` while
-  `DRY_RUN=true` (the default).
-- Warning: `pnpm test:integration` truncates the configured database.
+## Default safety state
 
-## Safety restrictions
-- `SENDING_ENABLED=false` and `SENDING_PROVIDER=mock` by default. The live provider is disabled.
-- Even fully armed, a send additionally requires `OUTBOUND_ACTIONS_ENABLED=true`, `DRY_RUN=false`,
-  a valid readiness approval, an intact schedule binding, and an explicit envelope confirmation.
-- Phase 14 performs no live Gmail call, draft mutation, live schedule creation, or email send in
-  this work; all sending flags remain false.
+- `SENDING_ENABLED=false`
+- `OUTBOUND_ACTIONS_ENABLED=false`
+- `SENDING_PROVIDER=mock`
+- `DRY_RUN=true`
+- No live Gmail call, OAuth reauthorization, real draft read or mutation, real schedule/seed/readiness
+  restoration, or email send is permitted during implementation and tests.
+
+## Remaining steps
+
+1. Review the exact uncommitted diff and proposed commit contents; stop for explicit commit approval.
+2. Controlled production smoke testing requires separate live approval.
+
+## Verification
+
+- Lint and typecheck pass.
+- 390 unit, 43 PostgreSQL integration, and 9 browser tests pass.
+- Migration `0016` apply/reverse/reapply passes.
+- Final diff whitespace check and full sensitive-value/security scan pass with zero findings.
+- Tests used mocked/local providers only. No live Gmail call, OAuth reauthorization, real draft read or
+  mutation, live schedule/readiness record, or email send occurred.
+- Local database has zero schedules, send attempts, Gmail-draft rows, and readiness approvals. One
+  fictional integration-test lead remains; no real seed was restored.
+
+## Out of scope
+
+Inbox access or modification, contact discovery, draft create/update/delete/recreation, direct
+`messages.send`, replacement MIME, bulk sending, automatic retry, reply detection, follow-up automation,
+and Phase 16 work.

@@ -1,13 +1,11 @@
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, count, desc, eq, gte, inArray, isNull, lt, ne, or, sql } from 'drizzle-orm';
 import {
   type SendAttemptRecord,
   type SendStore,
   type SendingReadinessRecord,
 } from '../../domain/send/send-service.js';
-import { type DbExecutor } from '../db.js';
+import { type Database, type DbExecutor } from '../db.js';
 import { sendAttempts, sendSchedules, sendingReadinessApprovals, suppressionList } from '../schema.js';
-
-const BLOCKING: SendAttemptRecord['status'][] = ['RESERVED', 'CALL_STARTED', 'OUTCOME_UNKNOWN'];
 
 function isUniqueViolation(err: unknown): boolean {
   return typeof err === 'object' && err !== null && 'code' in err && (err as { code?: string }).code === '23505';
@@ -15,7 +13,7 @@ function isUniqueViolation(err: unknown): boolean {
 
 /** Read + reserve side of the send store (outside the completion transaction). */
 export class SendRepository implements SendStore {
-  constructor(private readonly db: DbExecutor) {}
+  constructor(private readonly db: Database) {}
 
   async readiness(gmailAccount: string, policyVersion: string): Promise<SendingReadinessRecord | null> {
     const rows = await this.db
@@ -40,20 +38,37 @@ export class SendRepository implements SendStore {
   }
 
   async hasConfirmedAttempt(scheduleId: string): Promise<boolean> {
-    const rows = await this.db.select({ id: sendAttempts.id }).from(sendAttempts).where(and(eq(sendAttempts.scheduleId, scheduleId), eq(sendAttempts.status, 'SENT_CONFIRMED'))).limit(1);
+    const rows = await this.db.select({ id: sendAttempts.id }).from(sendAttempts).where(and(eq(sendAttempts.scheduleId, scheduleId),
+      or(eq(sendAttempts.status, 'SENT_CONFIRMED'), eq(sendAttempts.reconciledOutcome, 'CONFIRMED_SENT')))).limit(1);
     return rows.length > 0;
   }
 
   async hasBlockingAttempt(scheduleId: string): Promise<boolean> {
-    const rows = await this.db.select({ id: sendAttempts.id }).from(sendAttempts).where(and(eq(sendAttempts.scheduleId, scheduleId), inArray(sendAttempts.status, BLOCKING))).limit(1);
+    const rows = await this.db.select({ id: sendAttempts.id }).from(sendAttempts).where(and(eq(sendAttempts.scheduleId, scheduleId),
+      or(inArray(sendAttempts.status, ['RESERVED', 'CALL_STARTED']), and(eq(sendAttempts.status, 'OUTCOME_UNKNOWN'),
+        or(isNull(sendAttempts.reconciledOutcome), ne(sendAttempts.reconciledOutcome, 'CONFIRMED_NOT_SENT')))))).limit(1);
     return rows.length > 0;
   }
 
   async lastDefinitiveFailureAt(scheduleId: string): Promise<Date | null> {
-    const rows = await this.db.select({ at: sendAttempts.completedAt }).from(sendAttempts)
-      .where(and(eq(sendAttempts.scheduleId, scheduleId), eq(sendAttempts.status, 'DEFINITIVE_FAILURE')))
-      .orderBy(desc(sendAttempts.completedAt)).limit(1);
-    return rows[0]?.at ?? null;
+    const rows = await this.db.select({ completedAt: sendAttempts.completedAt,
+      reconciledAt: sendAttempts.reconciledAt }).from(sendAttempts)
+      .where(and(eq(sendAttempts.scheduleId, scheduleId), or(eq(sendAttempts.status, 'DEFINITIVE_FAILURE'),
+        eq(sendAttempts.reconciledOutcome, 'CONFIRMED_NOT_SENT'))));
+    return rows.map((r) => r.reconciledAt ?? r.completedAt).filter((v): v is Date => v !== null)
+      .sort((a, b) => b.getTime() - a.getTime())[0] ?? null;
+  }
+
+  async confirmedSendsToday(gmailAccount: string, now: Date): Promise<number> {
+    const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    const end = new Date(start.getTime() + 24 * 60 * 60_000);
+    const effectiveAt = sql<Date>`COALESCE(${sendAttempts.reconciledAt}, ${sendAttempts.completedAt})`;
+    const rows = await this.db.select({ value: count() }).from(sendAttempts).where(and(
+      eq(sendAttempts.gmailAccount, gmailAccount), or(eq(sendAttempts.status, 'SENT_CONFIRMED'),
+        eq(sendAttempts.reconciledOutcome, 'CONFIRMED_SENT')),
+      gte(effectiveAt, start), lt(effectiveAt, end),
+    ));
+    return rows[0]?.value ?? 0;
   }
 
   async promoteStartedToUnknown(scheduleId: string, now: Date): Promise<void> {
@@ -61,14 +76,26 @@ export class SendRepository implements SendStore {
       .where(and(eq(sendAttempts.scheduleId, scheduleId), eq(sendAttempts.status, 'CALL_STARTED')));
   }
 
-  async reserveAttempt(row: SendAttemptRecord): Promise<boolean> {
-    try {
-      await this.db.insert(sendAttempts).values(toInsert(row));
-      return true;
-    } catch (err) {
-      if (isUniqueViolation(err)) return false;
-      throw err;
-    }
+  reserveAttempt(row: SendAttemptRecord, dailyCap: number): Promise<'reserved' | 'duplicate' | 'daily_cap'> {
+    return this.db.transaction(async (tx) => {
+      const start = new Date(Date.UTC(row.reservedAt.getUTCFullYear(), row.reservedAt.getUTCMonth(), row.reservedAt.getUTCDate()));
+      const end = new Date(start.getTime() + 24 * 60 * 60_000);
+      // Serializes reservations for one account/day. Collisions only serialize unrelated accounts;
+      // they cannot weaken the cap. The lock is released automatically with this transaction.
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`send-cap|${row.gmailAccount}|${start.toISOString()}`}))`);
+      const effectiveAt = sql<Date>`COALESCE(${sendAttempts.reconciledAt}, ${sendAttempts.completedAt})`;
+      const counted = await tx.select({ value: count() }).from(sendAttempts).where(and(
+        eq(sendAttempts.gmailAccount, row.gmailAccount), or(
+          and(or(eq(sendAttempts.status, 'SENT_CONFIRMED'), eq(sendAttempts.reconciledOutcome, 'CONFIRMED_SENT')),
+            gte(effectiveAt, start), lt(effectiveAt, end)),
+          and(inArray(sendAttempts.status, ['RESERVED', 'CALL_STARTED']), gte(sendAttempts.reservedAt, start), lt(sendAttempts.reservedAt, end)),
+          and(eq(sendAttempts.status, 'OUTCOME_UNKNOWN'), or(isNull(sendAttempts.reconciledOutcome),
+            ne(sendAttempts.reconciledOutcome, 'CONFIRMED_NOT_SENT')), gte(sendAttempts.reservedAt, start), lt(sendAttempts.reservedAt, end)),
+        )));
+      if ((counted[0]?.value ?? 0) >= dailyCap) return 'daily_cap';
+      try { await tx.insert(sendAttempts).values(toInsert(row)); return 'reserved'; }
+      catch (err) { if (isUniqueViolation(err)) return 'duplicate'; throw err; }
+    });
   }
 }
 

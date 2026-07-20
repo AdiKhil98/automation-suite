@@ -1013,9 +1013,15 @@ export const sendingReadinessApprovals = pgTable(
     approvedAt: timestamp('approved_at', { withTimezone: true }).notNull(),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
     revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    revokedBy: text('revoked_by'),
+    revokeReason: text('revoke_reason'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => ({ accountIdx: index('sending_readiness_account_idx').on(t.gmailAccount, t.policyVersion) }),
+  (t) => ({
+    accountIdx: index('sending_readiness_account_idx').on(t.gmailAccount, t.policyVersion),
+    activeUk: uniqueIndex('sending_readiness_active_uk').on(t.gmailAccount, t.policyVersion).where(sql`${t.revokedAt} IS NULL`),
+    revocationCk: check('sending_readiness_revocation_ck', sql`(${t.revokedAt} IS NULL AND ${t.revokedBy} IS NULL AND ${t.revokeReason} IS NULL) OR (${t.revokedAt} IS NOT NULL AND ${t.revokedBy} IS NOT NULL AND ${t.revokeReason} IS NOT NULL)`),
+  }),
 );
 
 export const sendAttempts = pgTable(
@@ -1043,14 +1049,20 @@ export const sendAttempts = pgTable(
     reservedAt: timestamp('reserved_at', { withTimezone: true }).notNull(),
     callStartedAt: timestamp('call_started_at', { withTimezone: true }),
     completedAt: timestamp('completed_at', { withTimezone: true }),
+    reconciledOutcome: text('reconciled_outcome'),
+    reconciledBy: text('reconciled_by'),
+    reconciledAt: timestamp('reconciled_at', { withTimezone: true }),
+    reconciliationNote: text('reconciliation_note'),
   },
   (t) => ({
     leadIdx: index('send_attempts_lead_idx').on(t.leadId),
     scheduleIdx: index('send_attempts_schedule_idx').on(t.scheduleId),
     fingerprintUk: uniqueIndex('send_attempts_fingerprint_uk').on(t.sendFingerprint),
-    confirmedScheduleUk: uniqueIndex('send_attempts_confirmed_schedule_uk').on(t.scheduleId).where(sql`${t.status} = 'SENT_CONFIRMED'`),
-    blockingScheduleUk: uniqueIndex('send_attempts_blocking_schedule_uk').on(t.scheduleId).where(sql`${t.status} IN ('RESERVED','CALL_STARTED','SENT_CONFIRMED','OUTCOME_UNKNOWN')`),
+    confirmedScheduleUk: uniqueIndex('send_attempts_confirmed_schedule_uk').on(t.scheduleId).where(sql`${t.status} = 'SENT_CONFIRMED' OR ${t.reconciledOutcome} = 'CONFIRMED_SENT'`),
+    blockingScheduleUk: uniqueIndex('send_attempts_blocking_schedule_uk').on(t.scheduleId).where(sql`${t.status} IN ('RESERVED','CALL_STARTED','SENT_CONFIRMED') OR (${t.status} = 'OUTCOME_UNKNOWN' AND ${t.reconciledOutcome} IS DISTINCT FROM 'CONFIRMED_NOT_SENT')`),
     providerMessageUk: uniqueIndex('send_attempts_provider_message_uk').on(t.providerMessageId).where(sql`${t.providerMessageId} IS NOT NULL`),
+    accountCompletedIdx: index('send_attempts_account_completed_idx').on(t.gmailAccount, sql`COALESCE(${t.reconciledAt}, ${t.completedAt})`).where(sql`${t.status} = 'SENT_CONFIRMED' OR ${t.reconciledOutcome} = 'CONFIRMED_SENT'`),
     statusCk: check('send_attempt_status_ck', sql`${t.status} IN ('RESERVED','CALL_STARTED','SENT_CONFIRMED','DEFINITIVE_FAILURE','OUTCOME_UNKNOWN','DUPLICATE_PREVENTED')`),
+    reconciliationCk: check('send_attempt_reconciliation_ck', sql`(${t.reconciledOutcome} IS NULL AND ${t.reconciledBy} IS NULL AND ${t.reconciledAt} IS NULL AND ${t.reconciliationNote} IS NULL) OR (${t.reconciledOutcome} IN ('CONFIRMED_SENT','CONFIRMED_NOT_SENT') AND ${t.reconciledBy} IS NOT NULL AND ${t.reconciledAt} IS NOT NULL AND ${t.reconciliationNote} IS NOT NULL)`),
   }),
 );

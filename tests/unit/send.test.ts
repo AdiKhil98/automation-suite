@@ -30,7 +30,7 @@ const expected = expectedDraftEnvelope({ senderName: SENDER, senderEmail: ACCOUN
 const readiness = { id: 'readiness-example', gmailAccount: ACCOUNT, policyVersion: POLICY,
   approvedBy: 'Example Operator', approvedAt: new Date(NOW - 1000), expiresAt: new Date(NOW + 60_000), revokedAt: null };
 const config: SendConfig = { gmailAccount: ACCOUNT, senderName: SENDER, policyVersion: POLICY,
-  sendingEnabled: true, outboundActionsEnabled: true, dryRun: false, maxLateMs: 60 * 60_000, confirmationTtlMs: 120_000 };
+  sendingEnabled: true, outboundActionsEnabled: true, dryRun: false, maxLateMs: 60 * 60_000, confirmationTtlMs: 120_000, dailyCap: 1 };
 const logger = pino({ level: 'silent' });
 
 describe('send envelope', () => {
@@ -58,7 +58,8 @@ describe('send eligibility', () => {
     approvedEnvelopeHash: envelopeHash, expectedSendFingerprint: 'send-fingerprint', configGmailAccount: ACCOUNT,
     configPolicyVersion: POLICY, sendingEnabled: true, outboundActionsEnabled: true, dryRun: false,
     nowMs: NOW, maxLateMs: 60 * 60_000, confirmationTtlMs: 120_000,
-    hasConfirmedAttempt: false, hasBlockingAttempt: false, lastDefinitiveFailureAtMs: null });
+    hasConfirmedAttempt: false, hasBlockingAttempt: false, lastDefinitiveFailureAtMs: null,
+    confirmedSendsToday: 0, dailyCap: 1 });
   it('passes only with intact approval, draft binding, account, recipient, readiness and confirmation', () => {
     expect(checkSendEligibility(base()).eligible).toBe(true);
     expect(checkSendEligibility({ ...base(), finalizationApproved: false }).eligible).toBe(false);
@@ -73,6 +74,11 @@ describe('send eligibility', () => {
   it('permanently blocks confirmed and uncertain/blocking attempts', () => {
     expect(checkSendEligibility({ ...base(), hasConfirmedAttempt: true }).alreadySent).toBe(true);
     expect(checkSendEligibility({ ...base(), hasBlockingAttempt: true }).blocked).toBe(true);
+  });
+  it('blocks when the configured account daily cap is reached', () => {
+    const result = checkSendEligibility({ ...base(), confirmedSendsToday: 1, dailyCap: 1 });
+    expect(result.eligible).toBe(false);
+    expect(result.reasons).toContain('daily_cap_reached');
   });
 });
 
@@ -92,15 +98,18 @@ function store(overrides: Partial<SendStore> = {}): SendStore {
   return { async readiness() { return readiness; }, async isEmailSuppressed() { return false; },
     async hasConfirmedAttempt() { return false; }, async hasBlockingAttempt() { return false; },
     async lastDefinitiveFailureAt() { return null; }, async promoteStartedToUnknown() { /* no-op */ },
-    async reserveAttempt() { return true; }, ...overrides };
+    async confirmedSendsToday() { return 0; }, async reserveAttempt() { return 'reserved'; }, ...overrides };
 }
 const baseInput = (): SendInput => ({ leadId: LEAD, leadStatus: 'SCHEDULED', schedule,
   currentGmailDraft: { id: GMAIL_DRAFT, outcome: 'DRAFT_CREATED', providerDraftId: PROVIDER_DRAFT,
+    providerMessageId: 'message-example', providerThreadId: 'thread-example',
     gmailAccount: ACCOUNT, senderEmail: ACCOUNT, recipientEmail: RECIPIENT, finalizedEmailId: FIN },
   finalization: { id: FIN, resolvedBody: BODY, resolvedBodyHash: CONTENT, finalHumanDecision: 'APPROVED', finalReviewedAt: new Date(NOW - 2000) },
   currentFinalizedContentHash: CONTENT, currentRecipientEmail: RECIPIENT, subject: SUBJECT,
   confirmation: null, preflightProof: null });
-function provider(script: MockSendScript = {}) { return new MockSendProvider({ account: { ok: true, email: ACCOUNT }, draft: { outcome: 'ok', envelope: expected }, ...script }); }
+function provider(script: MockSendScript = {}) { return new MockSendProvider({ account: { ok: true, email: ACCOUNT }, draft: {
+  outcome: 'ok', providerDraftId: PROVIDER_DRAFT, providerMessageId: 'message-example', providerThreadId: 'thread-example',
+  envelope: expected }, ...script }); }
 async function confirmedSend(service: SendService, input = baseInput()) {
   const preflight = await service.preflight(input);
   expect(preflight.outcome).toBe('READY');
@@ -147,5 +156,20 @@ describe('SendService two-pass control', () => {
       config: { ...config, sendingEnabled: false, dryRun: true }, now: () => NOW });
     expect((await service.preflight(baseInput())).outcome).toBe('SENDING_DISABLED');
     expect(mock.verified).toHaveLength(0); expect(cap.patches).toHaveLength(0);
+  });
+  it('blocks before provider access when the account daily cap is reached', async () => {
+    const cap = capture(); const mock = provider();
+    const service = new SendService({ provider: mock, store: store({ async confirmedSendsToday() { return 1; } }),
+      uow: uow(cap), logger, config, now: () => NOW });
+    expect((await service.preflight(baseInput())).outcome).toBe('DAILY_CAP_REACHED');
+    expect(mock.verified).toHaveLength(0);
+  });
+  it('rechecks the daily cap atomically at reservation and never dispatches when it fills concurrently', async () => {
+    const cap = capture(); const mock = provider();
+    const service = new SendService({ provider: mock, store: store({ async reserveAttempt() { return 'daily_cap'; } }),
+      uow: uow(cap), logger, config, now: () => NOW });
+    expect((await confirmedSend(service)).outcome).toBe('DAILY_CAP_REACHED');
+    expect(mock.sent).toHaveLength(0);
+    expect(cap.patches).toHaveLength(0);
   });
 });

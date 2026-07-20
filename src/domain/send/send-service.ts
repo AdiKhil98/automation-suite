@@ -11,7 +11,7 @@ import { approvedEnvelopeHash, compareProviderEnvelope, confirmationFingerprint,
 export type SendOutcome = 'READY' | 'SENT_CONFIRMED' | 'SENDING_DISABLED' | 'INVALID_ELIGIBILITY' |
   'READINESS_INVALID' | 'NOT_CONFIRMED' | 'PROVIDER_VERIFICATION_FAILED' | 'BINDING_INVALIDATED' |
   'TOO_LATE' | 'RECIPIENT_SUPPRESSED' | 'NOT_DUE' | 'ALREADY_SENT' | 'DUPLICATE_PREVENTED' |
-  'RATE_LIMITED' | 'TRANSIENT_ERROR' | 'AUTH_ERROR' | 'OUTCOME_UNKNOWN';
+  'RATE_LIMITED' | 'DEFINITIVE_FAILURE' | 'AUTH_ERROR' | 'OUTCOME_UNKNOWN' | 'DAILY_CAP_REACHED';
 export type SendAttemptStatus = 'RESERVED' | 'CALL_STARTED' | 'SENT_CONFIRMED' | 'DEFINITIVE_FAILURE' | 'OUTCOME_UNKNOWN' | 'DUPLICATE_PREVENTED';
 
 export interface SendingReadinessRecord { id: string; gmailAccount: string; policyVersion: string; approvedBy: string; approvedAt: Date; expiresAt: Date; revokedAt: Date | null }
@@ -29,9 +29,10 @@ export interface SendStore {
   hasConfirmedAttempt(scheduleId: string): Promise<boolean>;
   hasBlockingAttempt(scheduleId: string): Promise<boolean>;
   lastDefinitiveFailureAt(scheduleId: string): Promise<Date | null>;
+  confirmedSendsToday(gmailAccount: string, now: Date): Promise<number>;
   /** Crash recovery: a persisted CALL_STARTED has an uncertain provider outcome and is blocking. */
   promoteStartedToUnknown(scheduleId: string, now: Date): Promise<void>;
-  reserveAttempt(row: SendAttemptRecord): Promise<boolean>;
+  reserveAttempt(row: SendAttemptRecord, dailyCap: number): Promise<'reserved' | 'duplicate' | 'daily_cap'>;
 }
 export interface SendTxRepos {
   leads: LeadStore; leadService: LeadService;
@@ -43,12 +44,12 @@ export interface SendTxRepos {
 export interface SendUnitOfWork { transaction<T>(fn: (repos: SendTxRepos) => Promise<T>): Promise<T> }
 export interface SendConfig {
   gmailAccount: string; senderName: string | null; policyVersion: string; sendingEnabled: boolean;
-  outboundActionsEnabled: boolean; dryRun: boolean; maxLateMs: number; confirmationTtlMs: number;
+  outboundActionsEnabled: boolean; dryRun: boolean; maxLateMs: number; confirmationTtlMs: number; dailyCap: number;
 }
 export interface SendServiceDeps { provider: SendProvider; store: SendStore; uow: SendUnitOfWork; logger: Logger; config: SendConfig; now?: () => number }
 export interface SendInput {
   leadId: string; leadStatus: string; schedule: ScheduleView | null;
-  currentGmailDraft: { id: string; outcome: string; providerDraftId: string | null; gmailAccount: string; senderEmail: string; recipientEmail: string; finalizedEmailId: string | null } | null;
+  currentGmailDraft: { id: string; outcome: string; providerDraftId: string | null; providerMessageId: string | null; providerThreadId: string | null; gmailAccount: string; senderEmail: string; recipientEmail: string; finalizedEmailId: string | null } | null;
   finalization: { id: string; resolvedBody: string; resolvedBodyHash: string; finalHumanDecision: string | null; finalReviewedAt: Date | null } | null;
   currentFinalizedContentHash: string | null; currentRecipientEmail: string | null; subject: string | null;
   confirmation: ConfirmationView | null; preflightProof: PreflightProof | null;
@@ -64,7 +65,7 @@ export class SendService {
   async preflight(input: SendInput): Promise<SendResultOut> {
     const state = await this.state(input, false, true);
     if ('result' in state) return state.result;
-    const provider = await this.verifyProvider(state.expected, input.currentGmailDraft?.providerDraftId ?? '');
+    const provider = await this.verifyProvider(state.expected, input.currentGmailDraft);
     if (!provider.ok) return this.out(input.leadId, 'PROVIDER_VERIFICATION_FAILED', provider.reason);
     const checkedAtMs = this.now();
     const proof: PreflightProof = { sendFingerprint: state.sendFp, providerEnvelopeHash: provider.envelopeHash,
@@ -82,7 +83,7 @@ export class SendService {
         this.now() - proof.checkedAtMs > this.deps.config.confirmationTtlMs) {
       return this.out(input.leadId, 'NOT_CONFIRMED', 'preflight_proof_invalid_or_expired');
     }
-    const provider = await this.verifyProvider(state.expected, input.currentGmailDraft?.providerDraftId ?? '');
+    const provider = await this.verifyProvider(state.expected, input.currentGmailDraft);
     if (!provider.ok || provider.envelopeHash !== proof.providerEnvelopeHash) {
       return this.out(input.leadId, 'PROVIDER_VERIFICATION_FAILED', provider.ok ? 'draft_changed_after_confirmation' : provider.reason);
     }
@@ -100,7 +101,9 @@ export class SendService {
       confirmedBy: confirmation.confirmedBy, confirmedAt: new Date(confirmation.confirmedAtMs), status: 'RESERVED',
       providerMessageId: null, providerThreadId: null, errorClass: null, reservedAt: new Date(), callStartedAt: null, completedAt: null,
     };
-    if (!(await this.deps.store.reserveAttempt(attempt))) return this.out(input.leadId, 'DUPLICATE_PREVENTED', 'reserve_conflict');
+    const reservation = await this.deps.store.reserveAttempt(attempt, this.deps.config.dailyCap);
+    if (reservation === 'daily_cap') return this.out(input.leadId, 'DAILY_CAP_REACHED', 'daily_cap_reached_at_reservation');
+    if (reservation !== 'reserved') return this.out(input.leadId, 'DUPLICATE_PREVENTED', 'reserve_conflict');
 
     const callStartedAt = new Date();
     await this.deps.uow.transaction((repos) => repos.completeAttempt(attempt.id, { status: 'CALL_STARTED', callStartedAt }));
@@ -121,7 +124,7 @@ export class SendService {
     if (response.outcome === 'unknown' || (response.outcome === 'ok' && !response.ref?.providerMessageId)) {
       return this.finishUnknown(input, runId, attempt.id, callStartedAt, 'provider_outcome_unknown');
     }
-    const outcome: SendOutcome = response.outcome === 'rate_limited' ? 'RATE_LIMITED' : response.outcome === 'transient' ? 'TRANSIENT_ERROR' : 'AUTH_ERROR';
+    const outcome: SendOutcome = response.outcome === 'rate_limited' ? 'RATE_LIMITED' : response.outcome === 'auth_error' ? 'AUTH_ERROR' : 'DEFINITIVE_FAILURE';
     await this.deps.uow.transaction(async (repos) => {
       await repos.completeAttempt(attempt.id, { status: 'DEFINITIVE_FAILURE', errorClass: response.outcome, completedAt: new Date() });
       await repos.events.record(this.note(input.leadId, runId, outcome, { errorClass: response.outcome }));
@@ -170,6 +173,8 @@ export class SendService {
       hasConfirmedAttempt: await this.deps.store.hasConfirmedAttempt(sched.id),
       hasBlockingAttempt: await this.deps.store.hasBlockingAttempt(sched.id),
       lastDefinitiveFailureAtMs: lastFailure?.getTime() ?? null,
+      confirmedSendsToday: await this.deps.store.confirmedSendsToday(c.gmailAccount, new Date(this.now())),
+      dailyCap: c.dailyCap,
     };
     const elig = checkSendEligibility(snapshot, { requireConfirmation });
     if (!elig.eligible) {
@@ -179,7 +184,7 @@ export class SendService {
       if (elig.tooLate) return { result: mutateInvalid ? await this.routeInvalidate(input, '', 'TOO_LATE', 'too_late') : this.out(input.leadId, 'TOO_LATE', 'too_late') };
       if (elig.suppressed) return { result: mutateInvalid ? await this.routeManual(input, '', 'RECIPIENT_SUPPRESSED', 'recipient_suppressed') : this.out(input.leadId, 'RECIPIENT_SUPPRESSED', 'recipient_suppressed') };
       if (elig.notDue) return { result: this.out(input.leadId, 'NOT_DUE', 'not_due') };
-      const outcome: SendOutcome = elig.reasons.some((r) => r.includes('readiness')) ? 'READINESS_INVALID' : elig.reasons.some((r) => r.includes('confirmation')) ? 'NOT_CONFIRMED' : 'INVALID_ELIGIBILITY';
+      const outcome: SendOutcome = elig.reasons.includes('daily_cap_reached') ? 'DAILY_CAP_REACHED' : elig.reasons.some((r) => r.includes('readiness')) ? 'READINESS_INVALID' : elig.reasons.some((r) => r.includes('confirmation')) ? 'NOT_CONFIRMED' : 'INVALID_ELIGIBILITY';
       return { result: this.out(input.leadId, outcome, elig.reasons.join(',')) };
     }
     if (!c.senderName || !draft || !recipient || !input.subject || !input.finalization) return { result: this.out(input.leadId, 'INVALID_ELIGIBILITY', 'approved_envelope_incomplete') };
@@ -190,11 +195,15 @@ export class SendService {
     return { schedule: sched, readiness: readiness as SendingReadinessRecord, envelopeHash, sendFp, expected };
   }
 
-  private async verifyProvider(expected: ReturnType<typeof expectedDraftEnvelope>, draftId: string): Promise<{ ok: true; envelopeHash: string } | { ok: false; reason: string }> {
+  private async verifyProvider(expected: ReturnType<typeof expectedDraftEnvelope>, stored: SendInput['currentGmailDraft']): Promise<{ ok: true; envelopeHash: string } | { ok: false; reason: string }> {
+    if (!stored?.providerDraftId || !stored.providerMessageId || !stored.providerThreadId) return { ok: false, reason: 'known_draft_identity_missing' };
     const account = await this.deps.provider.verifyAccount(this.deps.config.gmailAccount);
     if (!account.ok || account.email?.toLowerCase() !== this.deps.config.gmailAccount.toLowerCase()) return { ok: false, reason: 'authenticated_account_mismatch' };
-    const draft = await this.deps.provider.getKnownDraft(draftId);
+    const draft = await this.deps.provider.getKnownDraft(stored.providerDraftId);
     if (draft.outcome !== 'ok') return { ok: false, reason: `known_draft_${draft.outcome}` };
+    if (draft.providerDraftId !== undefined && draft.providerDraftId !== stored.providerDraftId) return { ok: false, reason: 'known_draft_identity_changed' };
+    if (draft.providerMessageId !== stored.providerMessageId) return { ok: false, reason: 'known_message_identity_changed' };
+    if (draft.providerThreadId !== stored.providerThreadId) return { ok: false, reason: 'known_thread_identity_changed' };
     const problems = compareProviderEnvelope(expected, draft.envelope);
     if (problems.length > 0) return { ok: false, reason: problems.join(',') };
     return { ok: true, envelopeHash: providerEnvelopeHash(draft.envelope) };

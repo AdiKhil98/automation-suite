@@ -5,7 +5,7 @@ import { emailDraftFinalizations, emailDrafts, gmailDrafts, leadFacts, sendSched
 
 export interface SendInputData {
   schedule: ScheduleView | null;
-  currentGmailDraft: { id: string; outcome: string; providerDraftId: string | null; gmailAccount: string; senderEmail: string; recipientEmail: string; finalizedEmailId: string | null } | null;
+  currentGmailDraft: { id: string; outcome: string; providerDraftId: string | null; providerMessageId: string | null; providerThreadId: string | null; gmailAccount: string; senderEmail: string; recipientEmail: string; finalizedEmailId: string | null } | null;
   finalization: { id: string; resolvedBody: string; resolvedBodyHash: string; finalHumanDecision: string | null; finalReviewedAt: Date | null } | null;
   currentFinalizedContentHash: string | null;
   currentRecipientEmail: string | null;
@@ -39,6 +39,7 @@ export class SendInputRepository {
         recipientEmail: sched.recipientEmail, scheduledAtUtcMs: sched.scheduledAtUtc.getTime(),
         rulesVersion: sched.rulesVersion, storedIntegrityFingerprint: sched.integrityFingerprint } : null,
       currentGmailDraft: draft ? { id: draft.id, outcome: draft.outcome, providerDraftId: draft.providerDraftId,
+        providerMessageId: draft.messageId, providerThreadId: draft.threadId,
         gmailAccount: draft.gmailAccount, senderEmail: draft.senderEmail, recipientEmail: draft.recipientEmail,
         finalizedEmailId: draft.finalizedEmailId } : null,
       finalization: fin ? { id: fin.id, resolvedBody: fin.body, resolvedBodyHash: fin.h,

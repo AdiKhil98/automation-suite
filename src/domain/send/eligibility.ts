@@ -65,6 +65,8 @@ export interface SendEligibilitySnapshot {
   hasConfirmedAttempt: boolean;
   hasBlockingAttempt: boolean;
   lastDefinitiveFailureAtMs: number | null;
+  confirmedSendsToday: number;
+  dailyCap: number;
 }
 
 export interface SendEligibilityResult {
@@ -110,6 +112,8 @@ export function checkSendEligibility(s: SendEligibilitySnapshot, options: { requ
   if (s.hasBlockingAttempt) {
     return { ...base(false), blocked: true, reasons: ['blocking_attempt_exists'] };
   }
+
+  if (s.confirmedSendsToday >= s.dailyCap) reasons.push('daily_cap_reached');
 
   const flagReasons: string[] = [];
   if (!s.sendingEnabled) flagReasons.push('sending_disabled');

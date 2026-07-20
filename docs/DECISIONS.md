@@ -4,6 +4,43 @@ Every significant decision is recorded here in the required format. Newest first
 
 ---
 
+## D-0032 - Phase 15 production sending readiness uses a narrow live adapter behind Phase 14
+
+- **Date:** 2026-07-20
+- **Problem:** Phase 14 proves controlled sending with a zero-network mock, but production readiness still
+  needs a Gmail adapter, strict parsing, operator readiness administration, daily caps, and an honest way
+  to resolve uncertain provider outcomes without weakening the established safety controller.
+- **Chosen option:** Preserve Phase 14 as the authoritative controller and implement a separate
+  `HttpGmailSendProvider`, selectable only with `SENDING_PROVIDER=http`. Its hardcoded allowlist is limited
+  to `users.getProfile`, `drafts.get` for one explicitly supplied stored draft id, and `drafts.send` with a
+  body containing only that same id. Reuse the existing `gmail.compose` credential/token path unchanged;
+  insufficient grants fail closed without reauthorization. Strict parsing rejects ambiguous MIME, unexpected
+  recipients/Cc/Bcc/attachments, identity drift, and non-draft state. Add expiring approval create/revoke/status,
+  attempt status, manual uncertainty reconciliation, and account daily-cap enforcement. Mock remains default;
+  `SENDING_ENABLED=false`, `OUTBOUND_ACTIONS_ENABLED=false`, and `DRY_RUN=true` remain the defaults.
+- **Outcome policy:** Confirmed valid success alone becomes `SENT_CONFIRMED`; definitive failures require a
+  fresh readiness approval and new human confirmation before a new attempt. Timeout, network loss, 5xx,
+  malformed success, or any ambiguous post-dispatch result becomes `OUTCOME_UNKNOWN` and is never retried
+  automatically. Gmail has no idempotency key for `drafts.send`, so provider-level exactly-once delivery is
+  not claimed. Manual reconciliation is explicit and audited.
+- **Dedicated reconciliation lifecycle:** The general state machine continues to reject
+  `NEEDS_MANUAL_REVIEW -> SENT`. Only the reconciliation service may perform the conditional transition,
+  after locking and revalidating the one `OUTCOME_UNKNOWN` attempt and all persisted bindings and receiving
+  an exact TTY confirmation plus operator/evidence metadata. The attempt's original status is never rewritten:
+  confirmed sent/not-sent is stored separately. Confirmed-not-sent may return the lead to `SCHEDULED` only
+  after revalidation and still requires fresh readiness and confirmation; unresolved leaves every block intact.
+- **Prohibitions:** No draft/message listing or search, inbox/contact access, draft create/update/delete/recreate,
+  direct `messages.send`, replacement raw MIME, bulk sends, automatic retries, follow-up automation, or reply
+  detection. Implementation and tests make no live Gmail calls and send no email.
+- **Tradeoffs:** The existing compose grant is broader than the adapter's three-operation allowlist, and a
+  human must investigate uncertain outcomes outside the automatic path. Production smoke testing remains a
+  separately approved action.
+- **Rollback path:** Keep `SENDING_PROVIDER=mock` and all sending flags disabled; reverse migration 0016 before
+  reverting the Phase 15 code. Phase 14 remains independently usable in mock mode.
+- **Status:** Accepted for Phase 15 implementation; live use not approved.
+
+---
+
 ## D-0025 — Demo generation: deterministic, no fake functionality, local-only, provenance-tracked
 
 - **Date:** 2026-07-16

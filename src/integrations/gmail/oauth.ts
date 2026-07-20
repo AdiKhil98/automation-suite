@@ -1,6 +1,7 @@
 import { request as httpsRequest } from 'node:https';
 
-/** ONLY scope requested — create/manage drafts, never send or read inbox. */
+/** Existing least-privilege grant. It supports draft compose/send but not inbox reading; each
+ * Phase 12/15 adapter enforces its own narrower fixed endpoint allowlist. The scope is unchanged. */
 export const GMAIL_COMPOSE_SCOPE = 'https://www.googleapis.com/auth/gmail.compose';
 
 /** Fixed Google endpoints — never configurable. */

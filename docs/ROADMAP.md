@@ -1,7 +1,8 @@
 # Roadmap
 
-**Status:** Phase 13 complete, committed and tagged. Phase 14 (controlled sending) implemented
-mock-first; uncommitted and awaiting review/commit approval.
+**Status:** Phase 14 complete, committed and tagged (`3d5e66c`, `phase-14-sending`). Phase 15
+(production sending readiness and live Gmail provider integration) is approved for implementation
+and testing only; implementation is complete but uncommitted and must make no live Gmail calls or sends.
 **Last updated:** 2026-07-20
 
 One phase at a time. Each phase ends with tests, a commit, an annotated tag, and an explicit approval gate.
@@ -23,7 +24,22 @@ No phase begins before the previous one is approved with `APPROVE PHASE X`.
 | 11 | Netlify preview deployment | `phase-11-netlify-previews` | approved |
 | 12 | Gmail draft creation (no send) | `phase-12-gmail-drafts` | approved + committed + live-verified |
 | 13 | Scheduling & daily operations | `phase-13-daily-operations` | complete; committed + tagged |
-| 14 | Controlled sending (only on explicit request) | `phase-14-sending` | mock-first implemented; uncommitted, awaiting review |
+| 14 | Controlled sending (only on explicit request) | `phase-14-sending` | complete; committed + tagged |
+| 15 | Production sending readiness and live Gmail provider integration | `phase-15-production-sending-readiness` | implemented; uncommitted; awaiting review |
+
+> **Phase 14 implementation:** the committed mock-first safety controller evaluates exactly one known
+> scheduled draft, verifies its immutable bindings twice, requires an expiring readiness approval and
+> exact interactive confirmation, durably reserves the attempt, and permanently blocks automatic retry
+> after an uncertain provider outcome. It does not claim provider-level exactly-once delivery; see D-0031.
+
+> **Phase 15 objective:** production sending readiness and live Gmail provider integration, with no live
+> Gmail calls or sends during implementation. Add a separately selectable HTTP provider behind the Phase 14
+> controller, strict known-draft parsing, readiness/revocation/status/reconciliation operator commands,
+> account daily-cap enforcement, and zero-network tests. Mock remains the default and every sending flag
+> remains disabled. No follow-up automation, reply detection, inbox access, bulk sending, or automatic retry.
+> Manual uncertainty reconciliation is a dedicated TTY-confirmed path, not a general state-machine edge.
+> It preserves the original `OUTCOME_UNKNOWN` attempt and records a separate confirmed-sent,
+> confirmed-not-sent, or unresolved audit decision; see D-0032.
 
 > **Phase 13 implementation:** deterministic, timezone-aware scheduling records intended send times in
 > PostgreSQL only. It requires a verified recipient IANA timezone, enforces configurable local windows,
