@@ -222,6 +222,15 @@ const envSchema = z.object({
   SCHEDULING_EARLIEST_OFFSET_MINUTES: z.coerce.number().int().nonnegative().default(60),
   SCHEDULING_HORIZON_DAYS: z.coerce.number().int().positive().default(14),
   SCHEDULING_RULES_VERSION: z.string().default('sched-rules-1'),
+
+  // --- Phase 14: controlled sending of one existing scheduled Gmail draft ---
+  // Default-safe: the mock provider is selected and live sending is disabled. A live command
+  // additionally requires OUTBOUND_ACTIONS_ENABLED=true and DRY_RUN=false.
+  SENDING_ENABLED: boolString(false),
+  SENDING_PROVIDER: z.enum(['mock', 'http']).default('mock'),
+  SENDING_POLICY_VERSION: z.string().default('send-policy-1'),
+  SENDING_MAX_LATE_MINUTES: z.coerce.number().int().nonnegative().default(60),
+  SENDING_CONFIRMATION_TTL_SECONDS: z.coerce.number().int().positive().default(120),
 });
 
 const refinedEnvSchema = envSchema.superRefine((val, ctx) => {

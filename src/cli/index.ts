@@ -16,6 +16,7 @@ import { gmailAuthCommand } from './commands/gmail-auth.js';
 import { createGmailDraftsCommand } from './commands/create-gmail-drafts.js';
 import { scheduleDraftsCommand } from './commands/schedule-drafts.js';
 import { cancelScheduleCommand, rescheduleCommand, scheduleStatusCommand } from './commands/schedule-ops.js';
+import { sendScheduledCommand } from './commands/send-scheduled.js';
 import { previewDemoCommand } from './commands/preview-demo.js';
 import { qualifyLeadsCommand } from './commands/qualify-leads.js';
 import { createSampleLeads } from './commands/create-sample-leads.js';
@@ -208,6 +209,12 @@ program
   .requiredOption('--lead <id>', 'lead id')
   .requiredOption('--at <iso>', 'new send time (ISO 8601)')
   .action((opts: { lead: string; at: string }) => withContext((ctx) => rescheduleCommand(ctx, opts)));
+
+program
+  .command('send-scheduled')
+  .description('Phase 14: evaluate ONE scheduled Gmail draft; dry-run is local-only and live use requires interactive TTY confirmation')
+  .requiredOption('--lead <id>', 'lead id (must have an active SCHEDULED schedule)')
+  .action((opts: { lead: string }) => withContext((ctx) => sendScheduledCommand(ctx, opts)));
 
 program
   .command('review-dashboard')

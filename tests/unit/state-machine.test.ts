@@ -15,7 +15,11 @@ describe('lead state machine', () => {
     expect(canTransition('EMAIL_DRAFTED', 'EMAIL_APPROVED')).toBe(true);
     expect(canTransition('EMAIL_REVIEW_FAILED', 'EMAIL_DRAFTED')).toBe(true);
     expect(canTransition('HUMAN_APPROVED', 'DRAFT_CREATED')).toBe(true);
-    expect(canTransition('DRAFT_CREATED', 'SENT')).toBe(true);
+    // Phase 13/14: a created draft is scheduled first; sending acts on the schedule.
+    // There is intentionally no direct DRAFT_CREATED → SENT edge.
+    expect(canTransition('DRAFT_CREATED', 'SCHEDULED')).toBe(true);
+    expect(canTransition('DRAFT_CREATED', 'SENT')).toBe(false);
+    expect(canTransition('SCHEDULED', 'SENT')).toBe(true);
   });
 
   it('rejects undocumented transitions', () => {

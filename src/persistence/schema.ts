@@ -188,6 +188,7 @@ const FACT_TYPES = [
   'review_count',
   'business_status',
   'ownership_type',
+  'contact_timezone',
 ] as const;
 
 const factTypeList = FACT_TYPES.map((t) => `'${t}'`).join(', ');
@@ -297,7 +298,7 @@ export const suppressionList = pgTable(
   },
   (t) => ({
     scopeValueUk: uniqueIndex('suppression_list_scope_value_uk').on(t.scope, t.value),
-    scopeCk: check('suppression_scope_ck', sql`${t.scope} IN ('domain', 'phone', 'place_id')`),
+    scopeCk: check('suppression_scope_ck', sql`${t.scope} IN ('domain', 'phone', 'place_id', 'email')`),
   }),
 );
 
@@ -981,18 +982,75 @@ export const sendSchedules = pgTable(
     computedFrom: jsonb('computed_from').notNull(),
     integrityFingerprint: text('integrity_fingerprint').notNull(),
     origin: text('origin').notNull(), // 'auto' | 'manual'
-    status: text('status').notNull(), // 'SCHEDULED' | 'CANCELLED' | 'SUPERSEDED'
+    status: text('status').notNull(), // 'SCHEDULED' | 'CANCELLED' | 'SUPERSEDED' | 'FULFILLED' | 'INVALIDATED'
     supersededById: text('superseded_by_id'),
     cancelReason: text('cancel_reason'),
     rescheduleCount: integer('reschedule_count').notNull().default(0),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
     cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
+    fulfilledAt: timestamp('fulfilled_at', { withTimezone: true }),
+    invalidatedAt: timestamp('invalidated_at', { withTimezone: true }),
+    invalidationReason: text('invalidation_reason'),
   },
   (t) => ({
     leadIdx: index('send_schedules_lead_idx').on(t.leadId),
     // Exactly one ACTIVE schedule per Gmail draft; cancelled/superseded rows are retained (history).
     activeUk: uniqueIndex('send_schedules_active_uk').on(t.gmailDraftId).where(sql`${t.status} = 'SCHEDULED'`),
-    statusCk: check('send_schedule_status_ck', sql`${t.status} IN ('SCHEDULED','CANCELLED','SUPERSEDED')`),
+    statusCk: check('send_schedule_status_ck', sql`${t.status} IN ('SCHEDULED','CANCELLED','SUPERSEDED','FULFILLED','INVALIDATED')`),
+  }),
+);
+
+// --- Phase 14: controlled sending (one known draft, explicit confirmation, durable outcome) ---
+
+export const sendingReadinessApprovals = pgTable(
+  'sending_readiness_approvals',
+  {
+    id: text('id').primaryKey(),
+    gmailAccount: text('gmail_account').notNull(),
+    policyVersion: text('policy_version').notNull(),
+    approvedBy: text('approved_by').notNull(),
+    approvedAt: timestamp('approved_at', { withTimezone: true }).notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({ accountIdx: index('sending_readiness_account_idx').on(t.gmailAccount, t.policyVersion) }),
+);
+
+export const sendAttempts = pgTable(
+  'send_attempts',
+  {
+    id: text('id').primaryKey(),
+    leadId: text('lead_id').notNull().references(() => leads.id, { onDelete: 'cascade' }),
+    scheduleId: text('schedule_id').notNull().references(() => sendSchedules.id, { onDelete: 'cascade' }),
+    gmailDraftId: text('gmail_draft_id').notNull().references(() => gmailDrafts.id, { onDelete: 'cascade' }),
+    readinessApprovalId: text('readiness_approval_id').notNull().references(() => sendingReadinessApprovals.id, { onDelete: 'restrict' }),
+    gmailAccount: text('gmail_account').notNull(),
+    recipientHash: text('recipient_hash').notNull(),
+    finalizedContentHash: text('finalized_content_hash').notNull(),
+    scheduleIntegrityFingerprint: text('schedule_integrity_fingerprint').notNull(),
+    approvedEnvelopeHash: text('approved_envelope_hash').notNull(),
+    observedEnvelopeHash: text('observed_envelope_hash').notNull(),
+    sendFingerprint: text('send_fingerprint').notNull(),
+    confirmationFingerprint: text('confirmation_fingerprint').notNull(),
+    confirmedBy: text('confirmed_by').notNull(),
+    confirmedAt: timestamp('confirmed_at', { withTimezone: true }).notNull(),
+    status: text('status').notNull(),
+    providerMessageId: text('provider_message_id'),
+    providerThreadId: text('provider_thread_id'),
+    errorClass: text('error_class'),
+    reservedAt: timestamp('reserved_at', { withTimezone: true }).notNull(),
+    callStartedAt: timestamp('call_started_at', { withTimezone: true }),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+  },
+  (t) => ({
+    leadIdx: index('send_attempts_lead_idx').on(t.leadId),
+    scheduleIdx: index('send_attempts_schedule_idx').on(t.scheduleId),
+    fingerprintUk: uniqueIndex('send_attempts_fingerprint_uk').on(t.sendFingerprint),
+    confirmedScheduleUk: uniqueIndex('send_attempts_confirmed_schedule_uk').on(t.scheduleId).where(sql`${t.status} = 'SENT_CONFIRMED'`),
+    blockingScheduleUk: uniqueIndex('send_attempts_blocking_schedule_uk').on(t.scheduleId).where(sql`${t.status} IN ('RESERVED','CALL_STARTED','SENT_CONFIRMED','OUTCOME_UNKNOWN')`),
+    providerMessageUk: uniqueIndex('send_attempts_provider_message_uk').on(t.providerMessageId).where(sql`${t.providerMessageId} IS NOT NULL`),
+    statusCk: check('send_attempt_status_ck', sql`${t.status} IN ('RESERVED','CALL_STARTED','SENT_CONFIRMED','DEFINITIVE_FAILURE','OUTCOME_UNKNOWN','DUPLICATE_PREVENTED')`),
   }),
 );

@@ -4,7 +4,7 @@ import { type Lead } from '../../domain/leads/lead.js';
 import { type DbExecutor } from '../db.js';
 import { suppressionList } from '../schema.js';
 
-export type SuppressionScope = 'domain' | 'phone' | 'place_id';
+export type SuppressionScope = 'domain' | 'phone' | 'place_id' | 'email';
 
 /**
  * Read-only suppression gate for qualification (full sending-time enforcement is
@@ -35,5 +35,14 @@ export class SuppressionRepository {
       if (rows.length > 0) return true;
     }
     return false;
+  }
+
+  async isEmailSuppressed(email: string): Promise<boolean> {
+    const rows = await this.db
+      .select({ id: suppressionList.id })
+      .from(suppressionList)
+      .where(and(eq(suppressionList.scope, 'email'), eq(suppressionList.value, email.trim().toLowerCase())))
+      .limit(1);
+    return rows.length > 0;
   }
 }

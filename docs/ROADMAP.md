@@ -1,7 +1,8 @@
 # Roadmap
 
-**Status:** Phase 13 complete; uncommitted and awaiting commit approval. Phase 14 not started.
-**Last updated:** 2026-07-19
+**Status:** Phase 13 complete, committed and tagged. Phase 14 (controlled sending) implemented
+mock-first; uncommitted and awaiting review/commit approval.
+**Last updated:** 2026-07-20
 
 One phase at a time. Each phase ends with tests, a commit, an annotated tag, and an explicit approval gate.
 No phase begins before the previous one is approved with `APPROVE PHASE X`.
@@ -21,8 +22,8 @@ No phase begins before the previous one is approved with `APPROVE PHASE X`.
 | 10 | Review dashboard | `phase-10-review-dashboard` | approved |
 | 11 | Netlify preview deployment | `phase-11-netlify-previews` | approved |
 | 12 | Gmail draft creation (no send) | `phase-12-gmail-drafts` | approved + committed + live-verified |
-| 13 | Scheduling & daily operations | `phase-13-daily-operations` | complete; awaiting commit approval |
-| 14 | Controlled sending (only on explicit request) | `phase-14-sending` | not started |
+| 13 | Scheduling & daily operations | `phase-13-daily-operations` | complete; committed + tagged |
+| 14 | Controlled sending (only on explicit request) | `phase-14-sending` | mock-first implemented; uncommitted, awaiting review |
 
 > **Phase 13 implementation:** deterministic, timezone-aware scheduling records intended send times in
 > PostgreSQL only. It requires a verified recipient IANA timezone, enforces configurable local windows,

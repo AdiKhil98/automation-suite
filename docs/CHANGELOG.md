@@ -2,6 +2,54 @@
 
 All notable changes per phase. Format loosely follows Keep a Changelog.
 
+## [phase-14-sending] — 2026-07-20 (UNCOMMITTED; awaiting review)
+
+Controlled sending of ONE existing, scheduled Gmail draft. Mock-first: no live provider is wired,
+so no email can be dispatched. Default-safe: all sending kill switches remain false.
+
+### Added
+
+- **Controlled-send service** (`domain/send/`): deterministic, fail-closed orchestration —
+  kill-switch guard → eligibility (schedule integrity binding still valid, due + not too late,
+  verified + non-suppressed recipient, valid readiness approval, FRESH explicit confirmation of the
+  exact approved envelope) → reserve a unique attempt → dispatch via injected provider → durable
+  outcome. A confirmed send advances the lead `SCHEDULED → SENT` and marks the schedule `FULFILLED`.
+- **Two-pass provider verification**: before confirmation and again immediately before reservation,
+  verify the configured account and read only the known draft id; compare sender, single recipient,
+  subject, sender-resolved body, Cc, Bcc, and attachments exactly. Missing/changed drafts fail closed.
+- **Envelope + fingerprints** (`domain/send/envelope.ts`): normalized recipient hash, immutable
+  approved-envelope hash, unique send fingerprint, and confirmation fingerprint.
+- **Provider boundary** (`integrations/send/`): `SendProvider` port + zero-network `MockSendProvider`
+  (the only wired provider). Selecting the live `http` provider is refused (mock-first).
+- **Duplicate prevention + uncertainty**: durable reservation and DB unique indexes prevent local
+  concurrency/confirmed duplicates; an UNKNOWN provider result permanently blocks automatic retry
+  and routes to manual reconciliation. Gmail offers no idempotency key for `drafts.send`, so this
+  does not claim mathematically guaranteed exactly-once delivery.
+- **Persistence**: uses migration `0015` (`sending_readiness_approvals`, `send_attempts`, extended
+  `send_schedules` statuses `FULFILLED`/`INVALIDATED`, `email` suppression scope) + reverse script;
+  `send.repo`, `send-input.repo`, and a send unit of work.
+- **State machine**: removed the direct `DRAFT_CREATED → SENT` edge — sending must act on a schedule.
+- **CLI**: `send-scheduled --lead <id>` evaluates exactly one lead. With `DRY_RUN=true` it prints a
+  redacted local-only report with no writes/provider calls. A future live invocation requires an
+  interactive TTY phrase tied to the exact lead + send fingerprint; there is no `--yes` or bulk mode.
+- **Configuration**: `SENDING_ENABLED` (false), `SENDING_PROVIDER` (`mock`), `SENDING_POLICY_VERSION`,
+  `SENDING_MAX_LATE_MINUTES`, `SENDING_CONFIRMATION_TTL_SECONDS`, documented in `.env.example`.
+
+### Verification
+
+- Lint and typecheck passed; 381 unit tests passed (including two-pass send and crash-recovery coverage).
+- 39 PostgreSQL integration tests passed in the full serial run; the 3 Phase 14 tests also passed
+  in isolation. Nine browser tests passed. Migration `0015` apply/reverse/reapply passed.
+- No live Gmail call, draft mutation, live schedule, or email send occurred. All sending flags false.
+  (One unrelated pre-existing integration file intermittently hit a `truncateAll` hook timeout late in
+  the long serial run; it passes in isolation — not a send regression.)
+
+### Not in scope
+
+- No live sending provider (deferred to a separate hardened, approved step), and therefore no
+  jurisdiction/SPF-DKIM-DMARC/unsubscribe/bounce/volume-ramp plan wired yet; no inbox operations,
+  reply detection, or follow-ups.
+
 ## [phase-13-daily-operations] — 2026-07-19
 
 Record deterministic intended send times for created Gmail drafts. Scheduling is local/database-only:
