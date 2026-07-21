@@ -4,6 +4,7 @@ import {
   type CandidateProvider,
   type EnrichmentContextProvider,
   type LeadEnrichmentInput,
+  type WebsiteVerificationAttempt,
   type WebsiteVerifier,
 } from '../../integrations/enrichment/provider.js';
 import { type FactType, type LeadFact, type NewLeadFact } from '../lead-facts/lead-fact.js';
@@ -43,6 +44,11 @@ export interface EnrichmentAttemptStore {
     attemptId: string,
     verifications: CandidateVerification[],
     linkFor: (matchedFactType: FactType | null) => string | null,
+  ): Promise<void>;
+  recordVerificationAttempts(
+    leadId: string,
+    enrichmentAttemptId: string,
+    attempts: WebsiteVerificationAttempt[],
   ): Promise<void>;
 }
 export interface EnrichmentLeadStore extends LeadStore {
@@ -120,6 +126,7 @@ export class EnrichmentService {
     let outcome: EnrichmentOutcome;
     let winner: CandidateVerification | null = null;
     let verifications: CandidateVerification[] = [];
+    let fetchAttempts: WebsiteVerificationAttempt[] = [];
     let candidateCount = 0;
 
     if (!context) {
@@ -134,6 +141,7 @@ export class EnrichmentService {
       } else {
         const report = await this.deps.verifier.verify(candidates, context);
         verifications = report.verifications;
+        fetchAttempts = report.fetchAttempts;
         if (verifications.length > 0) {
           const decided = decideOutcome(verifications, opts);
           outcome = decided.outcome;
@@ -205,6 +213,7 @@ export class EnrichmentService {
       await repos.enrichment.recordCandidates(attemptId, verifications, (t) =>
         t ? (factIdByType.get(t) ?? null) : null,
       );
+      await repos.enrichment.recordVerificationAttempts(input.leadId, attemptId, fetchAttempts);
 
       if (outcome === 'VERIFIED' && winner) {
         const domainFact = winner.facts.find((x) => x.factType === 'official_domain');

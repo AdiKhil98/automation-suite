@@ -30,6 +30,7 @@ import { listLeads } from './commands/list-leads.js';
 import { resetTestData } from './commands/reset-test-data.js';
 import { resumeAuditCommand } from './commands/resume-audit.js';
 import { withContext } from './context.js';
+import { websiteVerificationStatusCommand } from './commands/website-verification-status.js';
 
 const program = new Command();
 
@@ -70,6 +71,14 @@ program
         limit: opts.limit,
       }),
     ),
+  );
+
+program
+  .command('website-verification-status')
+  .description('Show the latest sanitized, stored website-verification attempt; never accesses the network')
+  .requiredOption('--lead <id>', 'internal lead id')
+  .action((opts: { lead: string }) =>
+    withContext((ctx) => websiteVerificationStatusCommand(ctx, opts)),
   );
 
 program

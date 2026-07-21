@@ -2,6 +2,17 @@
 
 All notable changes per phase. Format loosely follows Keep a Changelog.
 
+## [Unreleased] - 2026-07-21
+
+### Fixed
+
+- Successful Google Place Details identity facts now persist independently with field-level provenance before
+  website verification; transient verifier failures no longer discard retrieved business context.
+- Website verification now stores sanitized DNS/TCP/TLS/HTTP/redirect/timeout/policy diagnostics and exposes
+  a read-only per-lead status command.
+- Forward migration `0018_website_verification_observability.sql` adds the diagnostic table and expands the
+  fact provenance constraints. Sending and outbound behavior are unchanged.
+
 ## [phase-16-production-safety-hardening] - 2026-07-21 (UNCOMMITTED; awaiting commit review)
 
 Production safety hardening after the Phase 15 read-only readiness review. This phase is implementation

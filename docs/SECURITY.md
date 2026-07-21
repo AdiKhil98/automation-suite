@@ -17,6 +17,12 @@
 
 ## Google Places data handling (Phase 2)
 
+> **Current policy (migration 0018):** ID-only discovery is unchanged. Approved Place Details fields may be
+> persisted with `google_places` field-level provenance and retrieval timestamps before website verification.
+> Candidate website facts are not official facts; manual/website facts are never overwritten by a Google
+> refresh. Phone requires separate approval. Raw responses, authorization headers, ratings, reviews, and
+> coordinates are not stored. This supersedes the older no-Google-content statements below.
+
 Google Maps Platform terms restrict caching of Places content, so the system persists **no Google Places
 content**. See docs/integrations/google-places.md and DECISIONS D-0008.
 
@@ -46,6 +52,9 @@ content**. See docs/integrations/google-places.md and DECISIONS D-0008.
   credentials, manual redirects with per-hop validation, rejection of private/loopback/link-local/multicast/
   metadata/reserved IPv4 & IPv6 (incl. IPv4-mapped and numeric forms), connect-time DNS re-validation
   (rebinding mitigation), and redirect/byte/time caps; HTML content types only.
+- **Sanitized verification attempts:** DNS/TCP/TLS/HTTP/redirect/timeout/policy stage, allowlisted error code,
+  HTTP status, redirect count, elapsed time, safe IP family, and retryability are stored. URLs are stripped of
+  credentials, query strings, and fragments; headers, cookies, raw bodies, stacks, and recipient data are not.
 - **Bounded crawl:** homepage + a small allowlist of contact/about/location pages (≤5, same-origin). No
   arbitrary crawling, form submission, authentication, or CAPTCHA handling. Full HTML is never persisted.
 - **Contacts:** only publicly displayed `mailto:`/visible emails, `tel:`/visible phones, and real contact

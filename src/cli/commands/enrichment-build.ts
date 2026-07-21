@@ -17,6 +17,7 @@ import { MockPageFetcher } from '../../integrations/enrichment/mock-page-fetcher
 import { type EnrichmentContextProvider, type CandidateProvider, type PageFetcher } from '../../integrations/enrichment/provider.js';
 import { mockEnrichmentCandidates, mockEnrichmentPages } from '../../fixtures/mock-enrichment.js';
 import { DrizzleEnrichmentUnitOfWork } from '../../persistence/enrichment-unit-of-work.js';
+import { DrizzleGooglePlaceDetailsStore } from '../../persistence/google-place-details-store.js';
 import { type VerifyOptions } from '../../domain/enrichment/verify-domain.js';
 import { type CliContext } from '../context.js';
 
@@ -57,6 +58,8 @@ export function buildEnrichmentService(ctx: CliContext, forceManual = false): Bu
       allowPaidReads: c.ALLOW_PAID_READS,
       budget,
       logger: ctx.logger,
+      detailsStore: new DrizzleGooglePlaceDetailsStore(ctx.db),
+      persistApprovedPhone: false,
     });
   }
 

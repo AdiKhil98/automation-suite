@@ -3,8 +3,8 @@ import { type CandidateDecision, type DiscoverySource, type SignalType } from '.
 
 /**
  * In-memory only context used to discover/verify a website. May originate from a
- * provider that returns provider-restricted data (e.g. Google); it is NEVER
- * persisted and must be re-verified against the official site before storage.
+ * provider such as Google. The context object itself is never persisted; approved
+ * Place Details fields are stored separately with field-level provenance.
  */
 export interface EnrichmentContext {
   businessName?: string | null;

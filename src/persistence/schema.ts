@@ -18,10 +18,9 @@ import {
  * Database schema. Phase 1: leads, evidence, pipeline_runs, pipeline_events.
  * Phase 2 adds collection + dedup fields to leads and three source tables.
  *
- * Compliance: Google Places content is never persisted. Google-sourced leads carry
- * only a Place ID (in `place_id` / `source_entities.source_place_id`); their fact
- * columns stay NULL until independent enrichment. `facts_source` is never
- * 'google_places'. See docs/integrations/google-places.md and docs/SECURITY.md.
+ * Google Place Details fields approved for operational use are persisted only in
+ * lead_facts with field-level google_places provenance. Candidate website data is
+ * distinct from website-verified official facts.
  */
 
 export const leads = pgTable(
@@ -173,6 +172,8 @@ const FACT_TYPES = [
   'business_name',
   'official_domain',
   'official_website_url',
+  'candidate_website_url',
+  'google_place_id',
   'official_location_page_url',
   'domain',
   'phone',
@@ -218,7 +219,7 @@ export const leadFacts = pgTable(
       .where(sql`${t.isCurrent}`),
     leadTypeIdx: index('lead_facts_lead_type_idx').on(t.leadId, t.factType),
     confidenceCk: check('lead_facts_confidence_ck', sql`${t.confidence} >= 0 AND ${t.confidence} <= 1`),
-    sourceTypeCk: check('lead_facts_source_type_ck', sql`${t.sourceType} IN ('mock', 'manual', 'website')`),
+    sourceTypeCk: check('lead_facts_source_type_ck', sql`${t.sourceType} IN ('mock', 'manual', 'website', 'google_places')`),
     factTypeCk: check('lead_facts_fact_type_ck', sql.raw(`fact_type IN (${factTypeList})`)),
   }),
 );
@@ -379,6 +380,41 @@ export const enrichmentCandidates = pgTable(
       'enrichment_candidate_confidence_ck',
       sql`${t.confidence} IS NULL OR (${t.confidence} >= 0 AND ${t.confidence} <= 1)`,
     ),
+  }),
+);
+
+export const websiteVerificationAttempts = pgTable(
+  'website_verification_attempts',
+  {
+    id: text('id').primaryKey(),
+    leadId: text('lead_id')
+      .notNull()
+      .references(() => leads.id, { onDelete: 'cascade' }),
+    enrichmentAttemptId: text('enrichment_attempt_id')
+      .notNull()
+      .references(() => enrichmentAttempts.id, { onDelete: 'cascade' }),
+    candidateUrl: text('candidate_url').notNull(),
+    hostname: text('hostname'),
+    attemptedAt: timestamp('attempted_at', { withTimezone: true }).notNull(),
+    finalClassification: text('final_classification').notNull(),
+    failureStage: text('failure_stage'),
+    errorCode: text('error_code'),
+    httpStatus: integer('http_status'),
+    redirectCount: integer('redirect_count').notNull().default(0),
+    elapsedMs: integer('elapsed_ms').notNull(),
+    resolvedIpFamily: integer('resolved_ip_family'),
+    retryable: boolean('retryable').notNull(),
+  },
+  (t) => ({
+    leadAttemptedIdx: index('website_verification_attempts_lead_attempted_idx').on(t.leadId, t.attemptedAt),
+    enrichmentAttemptIdx: index('website_verification_attempts_enrichment_attempt_idx').on(t.enrichmentAttemptId),
+    classificationCk: check('website_verification_classification_ck', sql`${t.finalClassification} IN ('OK','TRANSIENT','INVALID','POLICY_BLOCKED')`),
+    stageCk: check('website_verification_failure_stage_ck', sql`${t.failureStage} IS NULL OR ${t.failureStage} IN ('DNS','TCP_CONNECT','TLS','HTTP','REDIRECT','TIMEOUT','POLICY','UNKNOWN')`),
+    statusCk: check('website_verification_http_status_ck', sql`${t.httpStatus} IS NULL OR (${t.httpStatus} >= 100 AND ${t.httpStatus} <= 599)`),
+    redirectsCk: check('website_verification_redirect_count_ck', sql`${t.redirectCount} >= 0`),
+    elapsedCk: check('website_verification_elapsed_ms_ck', sql`${t.elapsedMs} >= 0`),
+    familyCk: check('website_verification_ip_family_ck', sql`${t.resolvedIpFamily} IS NULL OR ${t.resolvedIpFamily} IN (4,6)`),
+    successCk: check('website_verification_success_ck', sql`(${t.finalClassification} = 'OK' AND ${t.failureStage} IS NULL AND ${t.errorCode} IS NULL) OR ${t.finalClassification} <> 'OK'`),
   }),
 );
 

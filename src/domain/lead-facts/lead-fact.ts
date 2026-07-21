@@ -5,6 +5,8 @@ export const FACT_TYPES = [
   'business_name',
   'official_domain',
   'official_website_url',
+  'candidate_website_url',
+  'google_place_id',
   'official_location_page_url',
   'domain',
   'phone',
@@ -30,8 +32,8 @@ export const FACT_TYPES = [
 export const factTypeSchema = z.enum(FACT_TYPES);
 export type FactType = z.infer<typeof factTypeSchema>;
 
-/** Approved provenance for durable facts. Google Places content is never a source. */
-export const factSourceTypeSchema = z.enum(['mock', 'manual', 'website']);
+/** Approved provenance for durable facts, including explicitly retrieved Place Details. */
+export const factSourceTypeSchema = z.enum(['mock', 'manual', 'website', 'google_places']);
 export type FactSourceType = z.infer<typeof factSourceTypeSchema>;
 
 export const ownershipTypeSchema = z.enum(['INDEPENDENT', 'CHAIN', 'FRANCHISE', 'UNKNOWN']);

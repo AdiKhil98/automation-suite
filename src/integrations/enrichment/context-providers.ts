@@ -29,9 +29,11 @@ export class FactsContextProvider implements EnrichmentContextProvider {
     const formattedAddress = f('formatted_address');
     const hints: string[] = [];
     const officialUrl = f('official_website_url');
+    const candidateUrl = f('candidate_website_url');
     const official = f('official_domain');
     const domain = f('domain');
     if (officialUrl) hints.push(officialUrl);
+    else if (candidateUrl) hints.push(candidateUrl);
     else if (official) hints.push(`https://${official}`);
     else if (domain) hints.push(`https://${domain}`);
     if (!businessName && !phone && !formattedAddress && hints.length === 0) return null;
@@ -93,6 +95,19 @@ export interface GoogleContextOptions {
   allowPaidReads: boolean;
   budget: GoogleReadBudget;
   logger: Logger;
+  detailsStore?: PlaceDetailsStore;
+  persistApprovedPhone?: boolean;
+}
+
+export interface PlaceDetailsStore {
+  persist(input: {
+    leadId: string;
+    placeId: string;
+    provider: 'google_places';
+    retrievedAt: Date;
+    details: NonNullable<Awaited<ReturnType<PlacesDetailsClient['details']>>>;
+    persistApprovedPhone: boolean;
+  }): Promise<number>;
 }
 
 /**
@@ -124,7 +139,9 @@ export class GoogleContextProvider implements EnrichmentContextProvider {
       this.opts.logger.warn({ requests: b.requests, cap: b.maxRequests }, 'google read budget reached; skipping');
       return null;
     }
-    const details = await this.opts.client.details(input.placeId);
+    const details = await this.opts.client.details(input.placeId, {
+      includePhone: this.opts.persistApprovedPhone ?? false,
+    });
     b.requests += 1;
     b.estimatedCostUsd = placeDetailsCostUsd(b.requests);
     // Log only non-restricted accounting — never names/addresses/phones/urls.
@@ -133,13 +150,21 @@ export class GoogleContextProvider implements EnrichmentContextProvider {
       'google context read',
     );
     if (!details) return null;
+    await this.opts.detailsStore?.persist({
+      leadId: input.leadId,
+      placeId: input.placeId,
+      provider: 'google_places',
+      retrievedAt: new Date(),
+      details,
+      persistApprovedPhone: this.opts.persistApprovedPhone ?? false,
+    });
     const hints = details.websiteUri ? [details.websiteUri] : [];
     return {
       businessName: details.displayName ?? null,
       phone: details.nationalPhoneNumber ?? null,
       formattedAddress: details.formattedAddress ?? null,
-      city: null,
-      country: null,
+      city: details.locality ?? null,
+      country: details.country ?? null,
       candidateUrls: hints,
     };
   }

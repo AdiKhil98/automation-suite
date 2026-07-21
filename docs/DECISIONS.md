@@ -4,6 +4,24 @@ Every significant decision is recorded here in the required format. Newest first
 
 ---
 
+## D-0034 - Place Details persistence is independent from website verification
+
+- **Date:** 2026-07-21
+- **Problem:** Successful Place Details calls were used only in memory, so a later transient website fetch
+  discarded valuable business identity data and retained too little information to diagnose the failure.
+- **Chosen option:** Persist the approved Place Details subset immediately with per-field `google_places`
+  provenance, while keeping candidate website facts distinct from independently verified official facts.
+  Record each website fetch in a dedicated sanitized table with deterministic nested-error classification.
+  The read-only diagnostic CLI prints no URL, headers, response body, recipient data, stack, or credential.
+- **Safety boundary:** SSRF IP/protocol/hostname controls, connect-time DNS revalidation, manual redirect
+  validation, byte limits, and timeouts are unchanged. Phone retrieval/persistence requires explicit approval;
+  higher-trust manual or website facts are never overwritten by Google refreshes.
+- **Rollback path:** Disable paid reads and revert the code. Migration 0018 is forward-only because production
+  diagnostic history and expanded provenance should not be silently destroyed.
+- **Status:** Accepted for this production blocker fix; implementation and unit verification are offline.
+
+---
+
 ## D-0033 - Phase 16 hardens production safety before any live send
 
 - **Date:** 2026-07-21

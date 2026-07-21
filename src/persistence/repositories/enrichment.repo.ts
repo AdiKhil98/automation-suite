@@ -1,12 +1,19 @@
 import { randomUUID } from 'node:crypto';
+import { desc, eq } from 'drizzle-orm';
 import {
   type EnrichmentAttemptStore,
   type NewEnrichmentAttempt,
 } from '../../domain/enrichment/enrichment-service.js';
 import { type CandidateVerification } from '../../domain/enrichment/types.js';
+import { type WebsiteVerificationAttempt } from '../../integrations/enrichment/provider.js';
 import { type FactType } from '../../domain/lead-facts/lead-fact.js';
 import { type DbExecutor } from '../db.js';
-import { enrichmentAttempts, enrichmentCandidates, enrichmentSignals } from '../schema.js';
+import {
+  enrichmentAttempts,
+  enrichmentCandidates,
+  enrichmentSignals,
+  websiteVerificationAttempts,
+} from '../schema.js';
 
 export class EnrichmentRepository implements EnrichmentAttemptStore {
   constructor(private readonly db: DbExecutor) {}
@@ -52,5 +59,31 @@ export class EnrichmentRepository implements EnrichmentAttemptStore {
         });
       }
     }
+  }
+
+  async recordVerificationAttempts(
+    leadId: string,
+    enrichmentAttemptId: string,
+    attempts: WebsiteVerificationAttempt[],
+  ): Promise<void> {
+    if (attempts.length === 0) return;
+    await this.db.insert(websiteVerificationAttempts).values(
+      attempts.map((attempt) => ({
+        id: randomUUID(),
+        leadId,
+        enrichmentAttemptId,
+        ...attempt,
+      })),
+    );
+  }
+
+  async latestVerificationForLead(leadId: string): Promise<typeof websiteVerificationAttempts.$inferSelect | null> {
+    const rows = await this.db
+      .select()
+      .from(websiteVerificationAttempts)
+      .where(eq(websiteVerificationAttempts.leadId, leadId))
+      .orderBy(desc(websiteVerificationAttempts.attemptedAt))
+      .limit(1);
+    return rows[0] ?? null;
   }
 }

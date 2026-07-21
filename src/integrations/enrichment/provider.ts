@@ -1,6 +1,10 @@
 import { type LeadFact } from '../../domain/lead-facts/lead-fact.js';
 import { type Candidate, type CandidateVerification, type EnrichmentContext } from '../../domain/enrichment/types.js';
-import { type FetchOutcome } from '../../utils/safe-fetch.js';
+import {
+  type FetchFinalClassification,
+  type FetchOutcome,
+} from '../../utils/safe-fetch.js';
+import { type VerificationFailureStage } from '../../utils/network-error-classification.js';
 
 /** Operator-supplied enrichment input (CLI/CSV). */
 export interface ManualInput {
@@ -51,6 +55,21 @@ export interface PageFetcher {
 export interface VerifyReport {
   verifications: CandidateVerification[];
   fetchKinds: Array<FetchOutcome['kind']>;
+  fetchAttempts: WebsiteVerificationAttempt[];
+}
+
+export interface WebsiteVerificationAttempt {
+  candidateUrl: string;
+  hostname: string | null;
+  attemptedAt: Date;
+  finalClassification: FetchFinalClassification;
+  failureStage: VerificationFailureStage | null;
+  errorCode: string | null;
+  httpStatus: number | null;
+  redirectCount: number;
+  elapsedMs: number;
+  resolvedIpFamily: 4 | 6 | null;
+  retryable: boolean;
 }
 
 export interface WebsiteVerifier {

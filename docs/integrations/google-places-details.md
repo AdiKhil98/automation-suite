@@ -2,6 +2,12 @@
 
 **Status:** Phase 4 (optional context provider). **Verified against official docs:** 2026-07.
 
+> **Current persistence policy (migration 0018):** successful Place Details retrieval now commits the
+> approved business name, candidate website, formatted address/locality/country, category/type, business
+> status, Place ID, provider, retrieval time, and field-level provenance before website verification.
+> Phone is excluded unless separately approved. Raw responses, ratings, reviews, coordinates, headers, and
+> credentials are not stored. This policy supersedes the older in-memory-only text below.
+
 Used only as an **in-memory discovery context** for enrichment. See DECISIONS D-0014 and
 docs/SECURITY.md — none of the returned values are ever persisted.
 

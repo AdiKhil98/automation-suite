@@ -4,6 +4,13 @@ import { request as httpsRequest } from 'node:https';
 import { isIP } from 'node:net';
 import { AppError } from './errors.js';
 import { isBlockedIp } from './ip-guard.js';
+import {
+  classifyHttpStatus,
+  classifyInvalidRedirect,
+  classifyNetworkError,
+  classifyRedirectLimit,
+  type VerificationFailureStage,
+} from './network-error-classification.js';
 
 export class PolicyBlockedError extends AppError {
   constructor(message: string) {
@@ -11,16 +18,32 @@ export class PolicyBlockedError extends AppError {
   }
 }
 export class TransientFetchError extends AppError {
-  constructor(message: string) {
+  override readonly cause?: unknown;
+  constructor(message: string, cause?: unknown) {
     super('TRANSIENT_FETCH', message);
+    this.cause = cause;
   }
 }
 
+export type FetchFinalClassification = 'OK' | 'TRANSIENT' | 'INVALID' | 'POLICY_BLOCKED';
+
+export interface FetchDiagnostic {
+  attemptedAt: Date;
+  finalClassification: FetchFinalClassification;
+  failureStage: VerificationFailureStage | null;
+  errorCode: string | null;
+  httpStatus: number | null;
+  redirectCount: number;
+  elapsedMs: number;
+  resolvedIpFamily: 4 | 6 | null;
+  retryable: boolean;
+}
+
 export type FetchOutcome =
-  | { kind: 'ok'; finalUrl: string; host: string; status: number; html: string }
-  | { kind: 'policy_blocked'; reason: string }
-  | { kind: 'transient'; reason: string }
-  | { kind: 'invalid'; reason: string };
+  | { kind: 'ok'; finalUrl: string; host: string; status: number; html: string; diagnostic?: FetchDiagnostic }
+  | { kind: 'policy_blocked'; reason: string; diagnostic?: FetchDiagnostic }
+  | { kind: 'transient'; reason: string; diagnostic?: FetchDiagnostic }
+  | { kind: 'invalid'; reason: string; diagnostic?: FetchDiagnostic };
 
 export type Resolver = (hostname: string) => Promise<string[]>;
 
@@ -39,6 +62,10 @@ export const dnsResolveAll: Resolver = (hostname) =>
  * real resolver) at connect time to mitigate DNS rebinding.
  */
 export async function assertUrlSafe(rawUrl: string, resolve: Resolver): Promise<URL> {
+  return (await inspectUrlSafe(rawUrl, resolve)).url;
+}
+
+async function inspectUrlSafe(rawUrl: string, resolve: Resolver): Promise<{ url: URL; ipFamily: 4 | 6 | null }> {
   let url: URL;
   try {
     url = new URL(rawUrl);
@@ -58,7 +85,8 @@ export async function assertUrlSafe(rawUrl: string, resolve: Resolver): Promise<
   for (const addr of addresses) {
     if (isBlockedIp(addr)) throw new PolicyBlockedError(`blocked address ${addr} for ${url.hostname}`);
   }
-  return url;
+  const first = addresses[0];
+  return { url, ipFamily: first ? (first.includes(':') ? 6 : 4) : null };
 }
 
 export interface SafeGetOptions {
@@ -78,40 +106,92 @@ const HTML_TYPES = /(text\/html|application\/xhtml\+xml)/i;
 export async function safeGetHtml(rawUrl: string, opts: SafeGetOptions): Promise<FetchOutcome> {
   const resolve = opts.resolver ?? dnsResolveAll;
   let current = rawUrl;
+  const attemptedAt = new Date();
+  const startedAtMs = Date.now();
   const deadline = Date.now() + opts.timeoutMs;
+
+  const diagnostic = (
+    finalClassification: FetchFinalClassification,
+    failureStage: VerificationFailureStage | null,
+    errorCode: string | null,
+    httpStatus: number | null,
+    redirectCount: number,
+    resolvedIpFamily: 4 | 6 | null,
+    retryable: boolean,
+  ): FetchDiagnostic => ({
+    attemptedAt,
+    finalClassification,
+    failureStage,
+    errorCode,
+    httpStatus,
+    redirectCount,
+    elapsedMs: Math.max(0, Date.now() - startedAtMs),
+    resolvedIpFamily,
+    retryable,
+  });
 
   for (let hop = 0; hop <= opts.maxRedirects; hop += 1) {
     let url: URL;
+    let resolvedIpFamily: 4 | 6 | null;
     try {
-      url = await assertUrlSafe(current, resolve);
+      const inspected = await inspectUrlSafe(current, resolve);
+      url = inspected.url;
+      resolvedIpFamily = inspected.ipFamily;
     } catch (err) {
-      if (err instanceof PolicyBlockedError) return { kind: 'policy_blocked', reason: err.message };
-      return { kind: 'transient', reason: err instanceof Error ? err.message : String(err) };
+      if (err instanceof PolicyBlockedError) {
+        return { kind: 'policy_blocked', reason: err.message, diagnostic: diagnostic('POLICY_BLOCKED', 'POLICY', 'POLICY_BLOCKED', null, hop, null, false) };
+      }
+      const classified = classifyNetworkError(err);
+      return { kind: 'transient', reason: 'network resolution failed', diagnostic: diagnostic('TRANSIENT', classified.stage, classified.errorCode, null, hop, null, classified.retryable) };
     }
 
     let res: HopResult;
     try {
       res = await fetchHop(url, resolve, Math.max(1, deadline - Date.now()), opts.maxBytes);
     } catch (err) {
-      if (err instanceof PolicyBlockedError) return { kind: 'policy_blocked', reason: err.message };
-      return { kind: 'transient', reason: err instanceof Error ? err.message : String(err) };
+      if (err instanceof PolicyBlockedError) {
+        return { kind: 'policy_blocked', reason: err.message, diagnostic: diagnostic('POLICY_BLOCKED', 'POLICY', 'POLICY_BLOCKED', null, hop, resolvedIpFamily, false) };
+      }
+      const classified = classifyNetworkError(err);
+      return { kind: 'transient', reason: 'network request failed', diagnostic: diagnostic('TRANSIENT', classified.stage, classified.errorCode, null, hop, resolvedIpFamily, classified.retryable) };
     }
 
-    if (res.status >= 300 && res.status < 400 && res.location) {
-      current = new URL(res.location, url).toString();
-      continue;
+    if (res.status >= 300 && res.status < 400) {
+      try {
+        if (!res.location) throw new Error('missing redirect location');
+        current = new URL(res.location, url).toString();
+        continue;
+      } catch {
+        const redirectFailure = classifyInvalidRedirect();
+        return {
+          kind: 'invalid',
+          reason: 'invalid redirect location',
+          diagnostic: diagnostic(
+            'INVALID',
+            redirectFailure.stage,
+            redirectFailure.errorCode,
+            res.status,
+            hop,
+            resolvedIpFamily,
+            redirectFailure.retryable,
+          ),
+        };
+      }
     }
-    if (res.status === 429) {
-      return { kind: 'transient', reason: `rate limited (429)${res.retryAfter ? `, retry-after ${res.retryAfter}` : ''}` };
+    const httpFailure = classifyHttpStatus(res.status);
+    if (httpFailure?.finalClassification === 'TRANSIENT') {
+      return { kind: 'transient', reason: `http ${res.status}`, diagnostic: diagnostic('TRANSIENT', httpFailure.stage, httpFailure.errorCode, res.status, hop, resolvedIpFamily, httpFailure.retryable) };
     }
-    if (res.status >= 500) return { kind: 'transient', reason: `upstream ${res.status}` };
-    if (res.status >= 400) return { kind: 'invalid', reason: `http ${res.status}` };
+    if (httpFailure?.finalClassification === 'INVALID') {
+      return { kind: 'invalid', reason: `http ${res.status}`, diagnostic: diagnostic('INVALID', httpFailure.stage, httpFailure.errorCode, res.status, hop, resolvedIpFamily, httpFailure.retryable) };
+    }
     if (!res.contentType || !HTML_TYPES.test(res.contentType)) {
-      return { kind: 'policy_blocked', reason: `non-HTML content-type: ${res.contentType ?? 'none'}` };
+      return { kind: 'policy_blocked', reason: `non-HTML content-type: ${res.contentType ?? 'none'}`, diagnostic: diagnostic('POLICY_BLOCKED', 'POLICY', 'NON_HTML_RESPONSE', res.status, hop, resolvedIpFamily, false) };
     }
-    return { kind: 'ok', finalUrl: url.toString(), host: url.host.toLowerCase(), status: res.status, html: res.body };
+    return { kind: 'ok', finalUrl: url.toString(), host: url.host.toLowerCase(), status: res.status, html: res.body, diagnostic: diagnostic('OK', null, null, res.status, hop, resolvedIpFamily, false) };
   }
-  return { kind: 'transient', reason: 'too many redirects' };
+  const redirectFailure = classifyRedirectLimit();
+  return { kind: 'transient', reason: 'too many redirects', diagnostic: diagnostic('TRANSIENT', redirectFailure.stage, redirectFailure.errorCode, null, opts.maxRedirects + 1, null, redirectFailure.retryable) };
 }
 
 interface HopResult {
@@ -180,11 +260,14 @@ function fetchHop(url: URL, resolve: Resolver, timeoutMs: number, maxBytes: numb
         res.on('end', () =>
           resolvePromise({ status, location, contentType, retryAfter, body: Buffer.concat(chunks).toString('utf8') }),
         );
-        res.on('error', (e) => reject(new TransientFetchError(e.message)));
+        res.on('error', (e) => reject(new TransientFetchError(e.message, e)));
       },
     );
-    req.on('timeout', () => req.destroy(new TransientFetchError('request timeout')));
-    req.on('error', (e) => reject(e instanceof PolicyBlockedError ? e : new TransientFetchError(e.message)));
+    req.on('timeout', () => {
+      const timeout = Object.assign(new Error('request timeout'), { code: 'ETIMEDOUT' });
+      req.destroy(new TransientFetchError('request timeout', timeout));
+    });
+    req.on('error', (e) => reject(e instanceof PolicyBlockedError ? e : new TransientFetchError(e.message, e)));
     req.end();
   });
 }

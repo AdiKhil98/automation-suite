@@ -2,6 +2,12 @@
 
 **Status:** Phase 2 (discovery only). **Last verified against official docs:** 2026-07-11.
 
+> **Current Stage 2 policy (migration 0018):** ID-only discovery remains unchanged. A later bounded Place
+> Details read may persist only the approved operational identity subset with `google_places` provenance and
+> retrieval timestamps. The returned website remains a candidate until independently verified. Phone requires
+> separate approval; raw responses, ratings, reviews, and coordinates are not stored. This supersedes the
+> older Stage 2/in-memory-only passages below.
+
 ## Endpoint & auth
 
 - **Text Search (New):** `POST https://places.googleapis.com/v1/places:searchText`
