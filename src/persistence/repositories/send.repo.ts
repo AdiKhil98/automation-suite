@@ -2,6 +2,7 @@ import { and, count, desc, eq, gte, inArray, isNull, lt, ne, or, sql } from 'dri
 import {
   type SendAttemptRecord,
   type SendStore,
+  type SendSuppressionScope,
   type SendingReadinessRecord,
 } from '../../domain/send/send-service.js';
 import { type Database, type DbExecutor } from '../db.js';
@@ -28,13 +29,15 @@ export class SendRepository implements SendStore {
       : null;
   }
 
-  async isEmailSuppressed(email: string): Promise<boolean> {
-    const rows = await this.db
-      .select({ id: suppressionList.id })
-      .from(suppressionList)
-      .where(and(eq(suppressionList.scope, 'email'), eq(suppressionList.value, email.trim().toLowerCase())))
-      .limit(1);
-    return rows.length > 0;
+  async activeSuppressions(identity: { email: string | null; domain: string | null; phone: string | null; placeId: string | null }): Promise<SendSuppressionScope[]> {
+    const checks = [identity.email ? and(eq(suppressionList.scope, 'email'), eq(suppressionList.value, identity.email.trim().toLowerCase())) : undefined,
+      identity.domain ? and(eq(suppressionList.scope, 'domain'), eq(suppressionList.value, identity.domain)) : undefined,
+      identity.phone ? and(eq(suppressionList.scope, 'phone'), eq(suppressionList.value, identity.phone)) : undefined,
+      identity.placeId ? and(eq(suppressionList.scope, 'place_id'), eq(suppressionList.value, identity.placeId)) : undefined].filter((v): v is Exclude<typeof v, undefined> => v !== undefined);
+    if (checks.length === 0) return [];
+    const rows = await this.db.select({ scope: suppressionList.scope }).from(suppressionList)
+      .where(and(isNull(suppressionList.revokedAt), or(...checks)));
+    return [...new Set(rows.map((r) => r.scope as SendSuppressionScope))];
   }
 
   async hasConfirmedAttempt(scheduleId: string): Promise<boolean> {
@@ -69,11 +72,6 @@ export class SendRepository implements SendStore {
       gte(effectiveAt, start), lt(effectiveAt, end),
     ));
     return rows[0]?.value ?? 0;
-  }
-
-  async promoteStartedToUnknown(scheduleId: string, now: Date): Promise<void> {
-    await this.db.update(sendAttempts).set({ status: 'OUTCOME_UNKNOWN', errorClass: 'crash_after_call_started', completedAt: now })
-      .where(and(eq(sendAttempts.scheduleId, scheduleId), eq(sendAttempts.status, 'CALL_STARTED')));
   }
 
   reserveAttempt(row: SendAttemptRecord, dailyCap: number): Promise<'reserved' | 'duplicate' | 'daily_cap'> {

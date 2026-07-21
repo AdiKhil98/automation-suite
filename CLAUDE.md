@@ -27,6 +27,14 @@ outbound-outreach pipeline for a web-design / AI-automation services business:
 
 ## Current approved phase
 
+**Phases 0-15 are complete, committed, and tagged. Phase 16 - production safety hardening - is
+approved for implementation and mock/local testing only.** No live Gmail operation, OAuth
+reauthorization, real-data restoration, real credential ACL change, readiness approval, schedule,
+or email send is authorized. All sending flags remain disabled and the mock provider remains the
+default. `docs/CURRENT_STATUS.md` and `docs/ROADMAP.md` are the authoritative current handoff.
+
+## Historical Phase 6 approval record (superseded)
+
 **Phases 0–5 approved. Phase 6 — AI website audit & opportunity analysis — plan approved with 14 amendments;
 mock implementation, persistence, eval harness, and tests are complete and green.** Two paid gates remain:
 Gate A (single-lead live smoke test) and Gate B (model eval matrix). NO real OpenAI call may be made without

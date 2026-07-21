@@ -58,3 +58,14 @@ export async function reconcileSendAttemptCommand(ctx: CliContext, opts: { attem
   console.log(`Send attempt reconciled to ${status}.`);
   console.log('This command made no Gmail call and sent no email.');
 }
+
+export async function recoverStartedSendCommand(ctx: CliContext, opts: { attempt: string; by: string; note: string }): Promise<void> {
+  if (!stdin.isTTY || !stdout.isTTY) { console.log('Interactive TTY confirmation is required. Recovery was not performed.'); return; }
+  const admin = service(ctx); const phrase = admin.recoveryPhrase(opts.attempt); const rl = createInterface({ input: stdin, output: stdout });
+  try { const observed = await rl.question(`Type exactly: ${phrase}\n> `);
+    if (observed !== phrase) { console.log('Confirmation did not match. Recovery was not performed.'); return; }
+    const changed = await admin.recoverStarted({ attemptId: opts.attempt, recoveredBy: opts.by, note: opts.note, observedPhrase: observed });
+    console.log(changed ? 'CALL_STARTED was recorded as OUTCOME_UNKNOWN; retry remains blocked.' : 'No CALL_STARTED attempt matched.');
+    console.log('This command made no Gmail call and sent no email.');
+  } finally { rl.close(); }
+}

@@ -56,6 +56,25 @@ export class SendAdminRepository implements SendAdminStore {
       reconciledAt: r.reconciledAt, reconciliationNote: r.reconciliationNote }));
   }
 
+  recoverStarted(input: { attemptId: string; recoveredBy: string; note: string; recoveredAt: Date }): Promise<boolean> {
+    return this.db.transaction(async (tx) => {
+      const attempt = (await tx.select().from(sendAttempts).where(eq(sendAttempts.id, input.attemptId)).for('update').limit(1))[0];
+      if (!attempt || attempt.status !== 'CALL_STARTED') return false;
+      await tx.update(sendAttempts).set({ status: 'OUTCOME_UNKNOWN', errorClass: 'crash_after_call_started',
+        completedAt: input.recoveredAt }).where(and(eq(sendAttempts.id, input.attemptId), eq(sendAttempts.status, 'CALL_STARTED')));
+      const lead = (await tx.select({ status: leads.status }).from(leads).where(eq(leads.id, attempt.leadId)).for('update').limit(1))[0];
+      if (lead?.status === 'SCHEDULED') await tx.update(leads).set({ status: 'NEEDS_MANUAL_REVIEW', updatedAt: input.recoveredAt })
+        .where(and(eq(leads.id, attempt.leadId), eq(leads.status, 'SCHEDULED')));
+      await new PipelineRepository(tx).record({ leadId: attempt.leadId, runId: null, type: 'NOTE',
+        fromStatus: lead?.status === 'SCHEDULED' ? 'SCHEDULED' : null,
+        toStatus: lead?.status === 'SCHEDULED' ? 'NEEDS_MANUAL_REVIEW' : null,
+        message: 'Crash-left send attempt recovered as outcome unknown', data: { eventKind: 'SEND_CALL_STARTED_RECOVERED',
+          attemptId: attempt.id, originalAttemptStatus: 'CALL_STARTED', recoveredBy: input.recoveredBy,
+          recoveredAt: input.recoveredAt.toISOString(), evidenceNote: input.note } });
+      return true;
+    });
+  }
+
   reconcile(input: { attemptId: string; outcome: 'CONFIRMED_SENT' | 'CONFIRMED_NOT_SENT'; reconciledBy: string;
     note: string; reconciledAt: Date; gmailAccount: string; policyVersion: string }): Promise<'SENT_CONFIRMED' | 'DEFINITIVE_FAILURE'> {
     return this.db.transaction(async (tx) => {

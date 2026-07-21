@@ -2,7 +2,32 @@
 
 All notable changes per phase. Format loosely follows Keep a Changelog.
 
-## [phase-15-production-sending-readiness] - 2026-07-20 (UNCOMMITTED; awaiting review)
+## [phase-16-production-safety-hardening] - 2026-07-21 (UNCOMMITTED; awaiting commit review)
+
+Production safety hardening after the Phase 15 read-only readiness review. This phase is implementation
+and mock/local testing only: no live Gmail operation, real-data restoration, credential ACL change, schedule,
+readiness approval, or send is authorized.
+
+### Added
+
+- Reply-To integrity and fingerprint binding, including strict malformed/duplicate/multiple-value rejection.
+- Full redacted local dry-run readiness reporting and a separately gated, structurally read-only Gmail verifier.
+- Non-mutating preflight with crash recovery isolated in an audited TTY-confirmed administrative command.
+- Audited multi-scope suppression add/status/revoke and repeated send-time enforcement.
+- Credential ACL inspection/remediation tooling tested on temporary fictional files only.
+- Configurable retention windows and `docs/PRODUCTION_OPERATIONS.md` for objection, complaint, bounce, reply,
+  credential, smoke-test, rollback, and uncertain-outcome procedures.
+- Migration `0017` adds suppression operator/revocation audit fields with a symmetrical reverse script.
+
+### Verification
+
+- Lint, typecheck, and `git diff --check` pass.
+- 400 unit, 45 PostgreSQL integration, and 9 browser tests pass using fictional/mock-only fixtures.
+- Migration `0017` apply/reverse/reapply passes; the final local database is empty.
+- The full sensitive-value/security scan passes with zero findings. No Gmail call, real draft read/mutation,
+  real credential ACL change, readiness/schedule creation, network send, or email send occurred.
+
+## [phase-15-production-sending-readiness] - 2026-07-20
 
 Production sending readiness and a separately selectable Gmail HTTP send adapter, implemented and
 tested with mocked transport only. Phase 14 remains authoritative; mock stays the default, every sending

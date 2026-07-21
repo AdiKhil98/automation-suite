@@ -2,12 +2,13 @@
 
 ## Current phase
 
-Phase 15: production sending readiness and live Gmail provider integration. Implementation is complete,
-uncommitted, and awaiting final review. No live Gmail call or send is authorized.
+Phase 16: production safety hardening. Implementation and local/mock verification are complete and uncommitted,
+awaiting commit review. No live Gmail operation, real-data restoration, credential-ACL change, readiness approval,
+schedule, or send was authorized or performed.
 
 ## Completed work
 
-- Phases 0-14 are committed and tagged through `phase-14-sending` (`3d5e66c`).
+- Phases 0-15 are committed and tagged through `phase-15-production-sending-readiness` (`5d15c50`).
 - Phase 13 persists inert, deterministic, timezone-aware schedules only; it never schedules with Gmail.
 - Phase 14 is the authoritative fail-closed safety controller for exactly one existing scheduled draft.
   It verifies immutable bindings twice, requires a valid expiring readiness approval and exact interactive
@@ -16,7 +17,7 @@ uncommitted, and awaiting final review. No live Gmail call or send is authorized
   `drafts.send`.
 - Migration `0015` and its reverse are committed. The verified Phase 14 suites passed before release.
 
-## Phase 15 implementation
+## Phase 15 completed
 
 - Added a separate `HttpGmailSendProvider` behind the existing `SendProvider`; mock remains the default.
 - Allows only `users.getProfile`, `drafts.get` for one known draft id, and `drafts.send` for that same id.
@@ -40,24 +41,43 @@ uncommitted, and awaiting final review. No live Gmail call or send is authorized
 - No live Gmail call, OAuth reauthorization, real draft read or mutation, real schedule/seed/readiness
   restoration, or email send is permitted during implementation and tests.
 
-## Remaining steps
+## Phase 16 implementation scope
 
-1. Review the exact uncommitted diff and proposed commit contents; stop for explicit commit approval.
-2. Controlled production smoke testing requires separate live approval.
+- Reply-To integrity in every approved/provider envelope and fingerprint.
+- A complete local-only dry-run readiness report and a separate structurally read-only Gmail verifier.
+- Non-mutating preflight with explicit recovery separated from provider verification.
+- Audited suppression add/status/revoke across email, domain, business, phone, and Place ID scopes.
+- Credential-file ACL inspection/remediation tooling, tested only on temporary fictional files.
+- Production retention, objection, complaint, bounce, reply, rollback, and uncertainty runbooks.
+
+## Phase 16 implemented controls (uncommitted)
+
+- Reply-To is normalized, exact-or-absent, included in approved/provider hashes, and rejected when unexpected,
+  duplicated, multiple, or malformed.
+- `send-scheduled` dry-run reports every local readiness gate without provider access or writes.
+- `gmail-send-preflight` is separately disabled by default and uses a provider boundary with profile/draft-read
+  methods only; it has no send operation.
+- Normal preflight is non-mutating. `recover-started-send` is the only audited path from crash-left
+  `CALL_STARTED` to `OUTCOME_UNKNOWN`; retries remain blocked.
+- Suppression add/status/revoke is TTY-confirmed and audited with redacted hashes. Email, domain/business,
+  phone, and Place-ID scopes are rechecked before reservation.
+- Credential ACL status/fix tooling is scoped to the configured Gmail files; real ACLs were not touched.
+- Migration `0017` adds suppression operator/revocation metadata. Retention windows and the production runbook
+  are documented in `docs/PRODUCTION_OPERATIONS.md`.
 
 ## Verification
 
 - Lint and typecheck pass.
-- 390 unit, 43 PostgreSQL integration, and 9 browser tests pass.
-- Migration `0016` apply/reverse/reapply passes.
+- 400 unit, 45 PostgreSQL integration, and 9 browser tests pass.
+- Migration `0017` apply/reverse/reapply passes.
 - Final diff whitespace check and full sensitive-value/security scan pass with zero findings.
 - Tests used mocked/local providers only. No live Gmail call, OAuth reauthorization, real draft read or
   mutation, live schedule/readiness record, or email send occurred.
-- Local database has zero schedules, send attempts, Gmail-draft rows, and readiness approvals. One
-  fictional integration-test lead remains; no real seed was restored.
+- Local database has zero leads, schedules, send attempts, Gmail-draft rows, readiness approvals, and
+  suppressions; no real seed was restored.
 
 ## Out of scope
 
 Inbox access or modification, contact discovery, draft create/update/delete/recreation, direct
 `messages.send`, replacement MIME, bulk sending, automatic retry, reply detection, follow-up automation,
-and Phase 16 work.
+and live production smoke testing.

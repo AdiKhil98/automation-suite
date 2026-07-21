@@ -17,7 +17,10 @@ import { createGmailDraftsCommand } from './commands/create-gmail-drafts.js';
 import { scheduleDraftsCommand } from './commands/schedule-drafts.js';
 import { cancelScheduleCommand, rescheduleCommand, scheduleStatusCommand } from './commands/schedule-ops.js';
 import { sendScheduledCommand } from './commands/send-scheduled.js';
-import { approveSendingReadinessCommand, reconcileSendAttemptCommand, revokeSendingReadinessCommand,
+import { gmailSendPreflightCommand } from './commands/gmail-send-preflight.js';
+import { addSuppressionCommand, revokeSuppressionCommand, suppressionStatusCommand } from './commands/suppression-admin.js';
+import { gmailCredentialAclCommand } from './commands/gmail-credential-acl.js';
+import { approveSendingReadinessCommand, reconcileSendAttemptCommand, recoverStartedSendCommand, revokeSendingReadinessCommand,
   sendAttemptStatusCommand, sendingReadinessStatusCommand } from './commands/send-admin.js';
 import { previewDemoCommand } from './commands/preview-demo.js';
 import { qualifyLeadsCommand } from './commands/qualify-leads.js';
@@ -219,6 +222,42 @@ program
   .action((opts: { lead: string }) => withContext((ctx) => sendScheduledCommand(ctx, opts)));
 
 program
+  .command('gmail-send-preflight')
+  .description('Phase 16: read-only account + one known Gmail draft verification; structurally cannot send')
+  .requiredOption('--lead <id>', 'internal lead id with one active schedule')
+  .action((opts: { lead: string }) => withContext((ctx) => gmailSendPreflightCommand(ctx, opts)));
+
+program
+  .command('add-suppression')
+  .description('Phase 16: add an audited suppression after exact interactive confirmation; no external call')
+  .requiredOption('--scope <scope>', 'email | domain | phone | place_id')
+  .requiredOption('--value <value>', 'identity value (never printed or written to audit events)')
+  .requiredOption('--reason <text>', 'audited operational reason; do not include private identity data')
+  .requiredOption('--by <operator>', 'operator identity')
+  .action((opts: { scope: string; value: string; reason: string; by: string }) => withContext((ctx) => addSuppressionCommand(ctx, opts)));
+
+program
+  .command('suppression-status')
+  .description('Phase 16: inspect suppressions with identity values replaced by hashes')
+  .option('--scope <scope>', 'optional email | domain | phone | place_id filter')
+  .action((opts: { scope?: string }) => withContext((ctx) => suppressionStatusCommand(ctx, opts)));
+
+program
+  .command('revoke-suppression')
+  .description('Phase 16: revoke one suppression after exact interactive confirmation; history remains')
+  .requiredOption('--id <id>', 'internal suppression id')
+  .requiredOption('--reason <text>', 'audited revocation reason')
+  .requiredOption('--by <operator>', 'operator identity')
+  .action((opts: { id: string; reason: string; by: string }) => withContext((ctx) => revokeSuppressionCommand(ctx, opts)));
+
+program
+  .command('gmail-credential-acl')
+  .description('Phase 16: inspect Gmail credential-file ACLs; optional owner-only remediation requires exact TTY confirmation')
+  .option('--fix', 'apply owner-only ACLs to existing configured credential files')
+  .option('--by <operator>', 'operator identity required with --fix')
+  .action((opts: { fix?: boolean; by?: string }) => withContext((ctx) => gmailCredentialAclCommand(ctx, opts)));
+
+program
   .command('approve-sending-readiness')
   .description('Phase 15: create one expiring account/policy readiness approval; does not call Gmail or send')
   .requiredOption('--by <operator>', 'operator creating the readiness approval')
@@ -252,6 +291,14 @@ program
   .requiredOption('--by <operator>', 'operator performing reconciliation')
   .requiredOption('--note <text>', 'audited evidence/reason summary; do not include private values or Gmail ids')
   .action((opts: { attempt: string; outcome: string; by: string; note: string }) => withContext((ctx) => reconcileSendAttemptCommand(ctx, opts)));
+
+program
+  .command('recover-started-send')
+  .description('Phase 16: explicitly record one crash-left CALL_STARTED as OUTCOME_UNKNOWN; never calls Gmail')
+  .requiredOption('--attempt <id>', 'internal send-attempt id')
+  .requiredOption('--by <operator>', 'operator identity')
+  .requiredOption('--note <text>', 'audited recovery evidence; do not include private values or Gmail ids')
+  .action((opts: { attempt: string; by: string; note: string }) => withContext((ctx) => recoverStartedSendCommand(ctx, opts)));
 
 program
   .command('review-dashboard')

@@ -12,6 +12,7 @@ function fakeStore(overrides: Partial<SendAdminStore> = {}): SendAdminStore {
     async revokeReadiness() { return true; }, async latestReadiness() { return null; },
     async listAttempts() { return []; }, async reconcile(input) { return input.outcome === 'CONFIRMED_SENT' ? 'SENT_CONFIRMED' : 'DEFINITIVE_FAILURE'; },
     async recordUnresolved() { /* audited by the persistence implementation */ },
+    async recoverStarted() { return true; },
     ...overrides,
   };
 }
@@ -49,5 +50,15 @@ describe('SendAdminService', () => {
       reconciledBy: 'Example Operator', note: 'Evidence remains inconclusive.',
       observedPhrase: 'RECONCILE attempt-example UNRESOLVED' })).toBe('UNCHANGED');
     expect(unresolved).toBe(1); expect(changed).toBe(0);
+  });
+
+  it('requires an attempt-bound confirmation for explicit CALL_STARTED recovery', async () => {
+    let recovered = 0; const service = new SendAdminService(fakeStore({ async recoverStarted() { recovered += 1; return true; } }),
+      { gmailAccount: ACCOUNT, policyVersion: 'send-policy-1' }, () => NOW);
+    expect(() => service.recoverStarted({ attemptId: 'attempt-example', recoveredBy: 'Example Operator', note: 'fictional crash evidence', observedPhrase: 'wrong' }))
+      .toThrow('recovery_confirmation_mismatch');
+    const phrase = service.recoveryPhrase('attempt-example');
+    expect(await service.recoverStarted({ attemptId: 'attempt-example', recoveredBy: 'Example Operator', note: 'fictional crash evidence', observedPhrase: phrase })).toBe(true);
+    expect(recovered).toBe(1);
   });
 });

@@ -1,9 +1,9 @@
 # Roadmap
 
-**Status:** Phase 14 complete, committed and tagged (`3d5e66c`, `phase-14-sending`). Phase 15
-(production sending readiness and live Gmail provider integration) is approved for implementation
-and testing only; implementation is complete but uncommitted and must make no live Gmail calls or sends.
-**Last updated:** 2026-07-20
+**Status:** Phase 15 complete, committed and tagged (`5d15c50`,
+`phase-15-production-sending-readiness`). Phase 16 (production safety hardening) is approved for
+implementation and testing only; it must make no live Gmail calls or sends.
+**Last updated:** 2026-07-21
 
 One phase at a time. Each phase ends with tests, a commit, an annotated tag, and an explicit approval gate.
 No phase begins before the previous one is approved with `APPROVE PHASE X`.
@@ -25,7 +25,16 @@ No phase begins before the previous one is approved with `APPROVE PHASE X`.
 | 12 | Gmail draft creation (no send) | `phase-12-gmail-drafts` | approved + committed + live-verified |
 | 13 | Scheduling & daily operations | `phase-13-daily-operations` | complete; committed + tagged |
 | 14 | Controlled sending (only on explicit request) | `phase-14-sending` | complete; committed + tagged |
-| 15 | Production sending readiness and live Gmail provider integration | `phase-15-production-sending-readiness` | implemented; uncommitted; awaiting review |
+| 15 | Production sending readiness and live Gmail provider integration | `phase-15-production-sending-readiness` | complete; committed + tagged |
+| 16 | Production safety hardening | `phase-16-production-safety-hardening` | implemented + verified; uncommitted; no live use |
+
+> **Phase 16 objective:** close the production-readiness blockers found after Phase 15 without any
+> live Gmail operation or send. Reconcile operations documentation; bind and verify Reply-To; make
+> provider preflight read-only; add a complete local dry-run report, a structurally read-only Gmail
+> verification command, audited multi-scope suppression intake, credential ACL tooling, and explicit
+> retention/objection/recovery procedures. Mock remains the default and every sending flag stays disabled.
+> Operational execution is defined in `docs/PRODUCTION_OPERATIONS.md`; each live or state-changing step retains
+> its own approval gate.
 
 > **Phase 14 implementation:** the committed mock-first safety controller evaluates exactly one known
 > scheduled draft, verifies its immutable bindings twice, requires an expiring readiness approval and

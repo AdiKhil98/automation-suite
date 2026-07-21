@@ -4,6 +4,35 @@ Every significant decision is recorded here in the required format. Newest first
 
 ---
 
+## D-0033 - Phase 16 hardens production safety before any live send
+
+- **Date:** 2026-07-21
+- **Problem:** Phase 15 supplies the narrow Gmail adapter and controlled-send lifecycle, but the
+  production-readiness review found gaps in Reply-To integrity, read-only verification, dry-run depth,
+  suppression intake, Windows credential ACLs, retention, and recovery documentation.
+- **Chosen option:** Add a production-safety layer without weakening Phase 14/15. Bind Reply-To to the
+  approved envelope; keep provider verification structurally read-only; separate crash recovery into an
+  explicit administrative action; report every local gate without writes or network access; enforce audited
+  suppressions across all supported identities; add inspect/confirm/remediate ACL tooling; and document
+  retention plus objection, complaint, bounce, reply, and uncertain-outcome procedures.
+- **Safety boundary:** Mock remains the default. `SENDING_ENABLED=false`,
+  `OUTBOUND_ACTIONS_ENABLED=false`, `DRY_RUN=true`, and `SENDING_PROVIDER=mock` remain enforced during
+  implementation and tests. No OAuth scope change, reauthorization, live Gmail call, real ACL change,
+  real-data restoration, live schedule/readiness approval, or email send is permitted.
+- **Recovery policy:** An uncertain send is never recovered with a migration rollback and is never retried
+  automatically. Disable flags, revoke readiness, preserve the attempt, and use only audited manual
+  reconciliation. Schema rollback is maintenance performed only after confirming no uncertain/in-flight state.
+- **Tradeoffs:** More explicit operator steps and retained audit metadata; live account/draft verification and
+  any production smoke test still require separate approvals.
+- **Rollback path:** Keep all live flags disabled and revert only Phase 16 code/docs after confirming no
+  Phase 16-created local records require preservation. Do not reverse migrations as incident recovery.
+- **Implementation:** Migration `0017`, Reply-To binding, local readiness reporting, a structurally read-only
+  Gmail preflight boundary, explicit crash recovery, audited suppression operations, credential ACL tooling,
+  configurable retention windows, and `docs/PRODUCTION_OPERATIONS.md` implement this decision.
+- **Status:** Implemented and locally verified; awaiting commit review. Live use not approved.
+
+---
+
 ## D-0032 - Phase 15 production sending readiness uses a narrow live adapter behind Phase 14
 
 - **Date:** 2026-07-20

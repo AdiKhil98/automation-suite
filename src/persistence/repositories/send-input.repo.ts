@@ -1,7 +1,7 @@
 import { and, desc, eq } from 'drizzle-orm';
 import { type ScheduleView } from '../../domain/send/eligibility.js';
 import { type DbExecutor } from '../db.js';
-import { emailDraftFinalizations, emailDrafts, gmailDrafts, leadFacts, sendSchedules } from '../schema.js';
+import { emailDraftFinalizations, emailDrafts, gmailDrafts, leadFacts, leads, sendSchedules } from '../schema.js';
 
 export interface SendInputData {
   schedule: ScheduleView | null;
@@ -10,6 +10,9 @@ export interface SendInputData {
   currentFinalizedContentHash: string | null;
   currentRecipientEmail: string | null;
   subject: string | null;
+  normalizedDomain: string | null;
+  normalizedPhone: string | null;
+  placeId: string | null;
 }
 
 /** Read the exact schedule-bound draft, its finalization, and current verified recipient fact. */
@@ -33,6 +36,8 @@ export class SendInputRepository {
       : undefined;
     const recipient = (await this.db.select({ value: leadFacts.value }).from(leadFacts)
       .where(and(eq(leadFacts.leadId, leadId), eq(leadFacts.factType, 'contact_email'), eq(leadFacts.isCurrent, true))).limit(1))[0]?.value ?? null;
+    const identity = (await this.db.select({ domain: leads.normalizedDomain, phone: leads.normalizedPhone, placeId: leads.placeId })
+      .from(leads).where(eq(leads.id, leadId)).limit(1))[0];
     return {
       schedule: sched ? { id: sched.id, status: sched.status, gmailDraftId: sched.gmailDraftId,
         providerDraftId: sched.providerDraftId, finalizedContentHash: sched.finalizedContentHash,
@@ -47,6 +52,9 @@ export class SendInputRepository {
       currentFinalizedContentHash: fin?.h ?? null,
       currentRecipientEmail: recipient,
       subject: fin?.subject ?? null,
+      normalizedDomain: identity?.domain ?? null,
+      normalizedPhone: identity?.phone ?? null,
+      placeId: identity?.placeId ?? null,
     };
   }
 }

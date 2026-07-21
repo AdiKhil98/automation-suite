@@ -7,11 +7,11 @@ export function recipientHash(email: string): string { return sha256Hex(`recipie
 
 export interface ApprovedEnvelope {
   gmailAccount: string; recipientEmail: string; subject: string; finalizedContentHash: string;
-  scheduleId: string; scheduledAtUtcMs: number;
+  scheduleId: string; scheduledAtUtcMs: number; replyTo?: string | null;
 }
 export function approvedEnvelopeHash(e: ApprovedEnvelope): string {
   return sha256Hex([normalizeEmail(e.gmailAccount), normalizeEmail(e.recipientEmail), e.subject,
-    e.finalizedContentHash, e.scheduleId, String(e.scheduledAtUtcMs)].join('|'));
+    e.finalizedContentHash, e.replyTo ? normalizeEmail(e.replyTo) : '', e.scheduleId, String(e.scheduledAtUtcMs)].join('|'));
 }
 
 export interface SendFingerprintInput { scheduleId: string; gmailDraftId: string; approvedEnvelopeHash: string; readinessApprovalId: string }
@@ -25,17 +25,19 @@ export function confirmationFingerprint(i: ConfirmationInput): string {
 
 export function expectedDraftEnvelope(input: {
   senderName: string; senderEmail: string; recipientEmail: string; subject: string; resolvedBody: string;
+  replyTo?: string | null;
 }): ProviderDraftEnvelope {
   const body = resolveSenderName(input.resolvedBody, input.senderName);
   if (hasUnresolvedTokens(body)) throw new Error('approved email contains unresolved tokens');
   return { fromName: input.senderName, fromEmail: normalizeEmail(input.senderEmail),
-    to: [normalizeEmail(input.recipientEmail)], cc: [], bcc: [], subject: input.subject,
+    to: [normalizeEmail(input.recipientEmail)], cc: [], bcc: [], replyTo: input.replyTo ? normalizeEmail(input.replyTo) : null, subject: input.subject,
     body, attachmentCount: 0 };
 }
 
 export function providerEnvelopeHash(e: ProviderDraftEnvelope): string {
   return sha256Hex(JSON.stringify({ fromName: e.fromName, fromEmail: normalizeEmail(e.fromEmail),
     to: e.to.map(normalizeEmail), cc: e.cc.map(normalizeEmail), bcc: e.bcc.map(normalizeEmail),
+    replyTo: e.replyTo ? normalizeEmail(e.replyTo) : null,
     subject: e.subject, bodyHash: sha256Hex(e.body), attachmentCount: e.attachmentCount }));
 }
 
@@ -46,6 +48,7 @@ export function compareProviderEnvelope(expected: ProviderDraftEnvelope, actual:
   if (actual.to.length !== 1 || normalizeEmail(actual.to[0] ?? '') !== normalizeEmail(expected.to[0] ?? '')) problems.push('recipient_changed');
   if (actual.cc.length > 0) problems.push('unexpected_cc');
   if (actual.bcc.length > 0) problems.push('unexpected_bcc');
+  if ((actual.replyTo ? normalizeEmail(actual.replyTo) : null) !== (expected.replyTo ? normalizeEmail(expected.replyTo) : null)) problems.push('reply_to_changed');
   if (actual.attachmentCount !== 0) problems.push('unexpected_attachment');
   if (actual.subject !== expected.subject) problems.push('subject_changed');
   if (actual.body !== expected.body) problems.push('body_changed');

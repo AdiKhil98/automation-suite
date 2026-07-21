@@ -76,12 +76,13 @@ describe.skipIf(!DATABASE_URL)('controlled sending (PostgreSQL)', () => {
     return { leadId: lead.id, scheduleId: sId };
   }
 
-  const service = () => new SendService({ provider: new MockSendProvider({ account: { ok: true, email: ACCOUNT }, draft: { outcome: 'ok', providerDraftId: 'provider-draft-example', providerMessageId: 'fictional-message', providerThreadId: 'fictional-thread', envelope: { fromName: SENDER, fromEmail: ACCOUNT, to: [RECIP], cc: [], bcc: [], subject: SUBJECT, body: `Hallo, ${SENDER}`, attachmentCount: 0 } } }), store: new SendRepository(handle.db), uow: new DrizzleSendUnitOfWork(handle.db), logger, config: cfg, now: () => NOW });
+  const scriptedProvider = () => new MockSendProvider({ account: { ok: true, email: ACCOUNT }, draft: { outcome: 'ok', providerDraftId: 'provider-draft-example', providerMessageId: 'fictional-message', providerThreadId: 'fictional-thread', envelope: { fromName: SENDER, fromEmail: ACCOUNT, to: [RECIP], cc: [], bcc: [], replyTo: null, subject: SUBJECT, body: `Hallo, ${SENDER}`, attachmentCount: 0 } } });
+  const service = (provider = scriptedProvider()) => new SendService({ provider, store: new SendRepository(handle.db), uow: new DrizzleSendUnitOfWork(handle.db), logger, config: cfg, now: () => NOW });
 
   function uncertainService() {
     const provider = new MockSendProvider({ account: { ok: true, email: ACCOUNT }, draft: { outcome: 'ok',
       providerDraftId: 'provider-draft-example', providerMessageId: 'fictional-message', providerThreadId: 'fictional-thread',
-      envelope: { fromName: SENDER, fromEmail: ACCOUNT, to: [RECIP], cc: [], bcc: [], subject: SUBJECT,
+      envelope: { fromName: SENDER, fromEmail: ACCOUNT, to: [RECIP], cc: [], bcc: [], replyTo: null, subject: SUBJECT,
         body: `Hallo, ${SENDER}`, attachmentCount: 0 } }, send: { outcome: 'unknown', reason: 'fictional_timeout' } });
     return { provider, service: new SendService({ provider, store: new SendRepository(handle.db),
       uow: new DrizzleSendUnitOfWork(handle.db), logger, config: cfg, now: () => NOW }) };
@@ -98,6 +99,7 @@ describe.skipIf(!DATABASE_URL)('controlled sending (PostgreSQL)', () => {
     return {
       leadId, leadStatus: lead?.status ?? 'UNKNOWN', schedule: data.schedule, currentGmailDraft: data.currentGmailDraft,
       finalization: data.finalization, currentFinalizedContentHash: data.currentFinalizedContentHash, currentRecipientEmail: data.currentRecipientEmail, subject: data.subject,
+      normalizedDomain: data.normalizedDomain, normalizedPhone: data.normalizedPhone, placeId: data.placeId,
       confirmation: null, preflightProof: null,
     };
   }
@@ -134,17 +136,28 @@ describe.skipIf(!DATABASE_URL)('controlled sending (PostgreSQL)', () => {
     expect(await handle.db.select().from(sendAttempts).where(eq(sendAttempts.scheduleId, scheduleId))).toHaveLength(1);
   });
 
-  it('binding drift invalidates the schedule and routes to manual review (no attempt reserved)', async () => {
+  it('read-only preflight reports binding drift; only send execution invalidates and routes to manual review', async () => {
     const { leadId, scheduleId } = await seed();
     // Change the current verified recipient so the recomputed integrity fingerprint no longer matches.
     await handle.db.transaction(async (tx) => {
       await new LeadFactsRepository(tx).writeCurrentFact({ leadId, factType: 'contact_email', value: 'moved@example.invalid', normalizedValue: 'moved@example.invalid', sourceType: 'website', sourceUrl: null, confidence: 1 });
     });
-    const r = await service().preflight(await buildInput(leadId));
+    const provider = scriptedProvider(); const instance = service(provider);
+    const eventsBefore = (await handle.db.select().from(pipelineEvents)).length;
+    const r = await instance.preflight(await buildInput(leadId));
     expect(r.outcome).toBe('BINDING_INVALIDATED');
+    expect((await handle.db.select().from(sendSchedules).where(eq(sendSchedules.id, scheduleId)))[0]?.status).toBe('SCHEDULED');
+    expect((await handle.db.select().from(leadsTbl).where(eq(leadsTbl.id, leadId)))[0]?.status).toBe('SCHEDULED');
+    expect((await handle.db.select().from(pipelineEvents)).length).toBe(eventsBefore);
+    expect(await handle.db.select().from(sendAttempts).where(eq(sendAttempts.scheduleId, scheduleId))).toHaveLength(0);
+    expect(provider.verified).toHaveLength(0); expect(provider.inspected).toHaveLength(0); expect(provider.sent).toHaveLength(0);
+
+    const executed = await instance.send(await buildInput(leadId), 'run-binding-drift');
+    expect(executed.outcome).toBe('BINDING_INVALIDATED');
     expect((await handle.db.select().from(sendSchedules).where(eq(sendSchedules.id, scheduleId)))[0]?.status).toBe('INVALIDATED');
     expect((await handle.db.select().from(leadsTbl).where(eq(leadsTbl.id, leadId)))[0]?.status).toBe('NEEDS_MANUAL_REVIEW');
     expect(await handle.db.select().from(sendAttempts).where(eq(sendAttempts.scheduleId, scheduleId))).toHaveLength(0);
+    expect(provider.verified).toHaveLength(0); expect(provider.inspected).toHaveLength(0); expect(provider.sent).toHaveLength(0);
   });
 
   it('is inert when the kill switches are disabled (SENDING_DISABLED, nothing written)', async () => {
@@ -213,6 +226,22 @@ describe.skipIf(!DATABASE_URL)('controlled sending (PostgreSQL)', () => {
       note: 'Fictional evidence remains inconclusive.', observedPhrase: ops.reconciliationPhrase(attempt.id, 'UNRESOLVED') })).toBe('UNCHANGED');
     const current = (await handle.db.select().from(sendAttempts).where(eq(sendAttempts.id, attempt.id)))[0];
     expect(current?.status).toBe('OUTCOME_UNKNOWN'); expect(current?.reconciledOutcome).toBeNull();
+    expect((await handle.db.select().from(leadsTbl).where(eq(leadsTbl.id, leadId)))[0]?.status).toBe('NEEDS_MANUAL_REVIEW');
+    expect((await uncertain.service.preflight(await buildInput(leadId))).outcome).toBe('DUPLICATE_PREVENTED');
+    expect(await handle.db.select().from(sendAttempts).where(eq(sendAttempts.scheduleId, scheduleId))).toHaveLength(1);
+  });
+
+  it('recovers CALL_STARTED only through the explicit admin path and preserves retry blocking', async () => {
+    const { leadId, scheduleId } = await seed(); const uncertain = uncertainService();
+    await execute(uncertain.service, leadId, await new PipelineRunsRepository(handle.db).start('send:crash-fixture', false));
+    const attempt = (await handle.db.select().from(sendAttempts).where(eq(sendAttempts.scheduleId, scheduleId)))[0]!;
+    await handle.db.update(sendAttempts).set({ status: 'CALL_STARTED', errorClass: null, completedAt: null }).where(eq(sendAttempts.id, attempt.id));
+    await handle.db.update(leadsTbl).set({ status: 'SCHEDULED' }).where(eq(leadsTbl.id, leadId));
+    const ops = admin(); const phrase = ops.recoveryPhrase(attempt.id);
+    expect(await ops.recoverStarted({ attemptId: attempt.id, recoveredBy: 'Example Operator',
+      note: 'Fictional process-crash evidence.', observedPhrase: phrase })).toBe(true);
+    const recovered = (await handle.db.select().from(sendAttempts).where(eq(sendAttempts.id, attempt.id)))[0];
+    expect(recovered?.status).toBe('OUTCOME_UNKNOWN'); expect(recovered?.errorClass).toBe('crash_after_call_started');
     expect((await handle.db.select().from(leadsTbl).where(eq(leadsTbl.id, leadId)))[0]?.status).toBe('NEEDS_MANUAL_REVIEW');
     expect((await uncertain.service.preflight(await buildInput(leadId))).outcome).toBe('DUPLICATE_PREVENTED');
     expect(await handle.db.select().from(sendAttempts).where(eq(sendAttempts.scheduleId, scheduleId))).toHaveLength(1);

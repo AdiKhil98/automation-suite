@@ -3,9 +3,9 @@ import { OAuthAccessTokenProvider } from '../../integrations/gmail/access-token.
 import { loadGmailClientCredentials } from '../../integrations/gmail/client-config.js';
 import { GoogleOAuthClient } from '../../integrations/gmail/oauth.js';
 import { LocalGmailTokenStore } from '../../integrations/gmail/token-store.js';
-import { HttpGmailSendProvider } from '../../integrations/send/http-gmail-send.js';
+import { HttpGmailReadOnlyVerifier, HttpGmailSendProvider } from '../../integrations/send/http-gmail-send.js';
 import { MockSendProvider, type MockSendScript } from '../../integrations/send/mock-send.js';
-import { type SendProvider } from '../../integrations/send/provider.js';
+import { type ReadOnlyGmailVerifier, type SendProvider } from '../../integrations/send/provider.js';
 import { DrizzleSendUnitOfWork } from '../../persistence/send-unit-of-work.js';
 import { SendRepository } from '../../persistence/repositories/send.repo.js';
 import { type CliContext } from '../context.js';
@@ -27,6 +27,18 @@ export function buildSendProvider(ctx: CliContext, mockScript: MockSendScript = 
   const oauth = new GoogleOAuthClient({ clientId: client.clientId, clientSecret: client.clientSecret,
     redirectUri: c.GMAIL_OAUTH_REDIRECT_URI, timeoutMs: c.GMAIL_TIMEOUT_MS });
   return new HttpGmailSendProvider({ tokens: new OAuthAccessTokenProvider(oauth, store), timeoutMs: c.GMAIL_TIMEOUT_MS });
+}
+
+/** Build the structurally read-only Gmail verifier. It never starts OAuth authorization. */
+export function buildReadOnlyGmailVerifier(ctx: CliContext): ReadOnlyGmailVerifier {
+  const c = ctx.config;
+  const client = loadGmailClientCredentials({ clientFile: c.GMAIL_OAUTH_CLIENT_FILE,
+    envClientId: c.GMAIL_OAUTH_CLIENT_ID, envClientSecret: c.GMAIL_OAUTH_CLIENT_SECRET });
+  const store = new LocalGmailTokenStore(c.GMAIL_CREDENTIALS_FILE);
+  if (!client || !store.exists() || !c.GMAIL_ACCOUNT_EMAIL) throw new Error('read_only_gmail_preflight_not_credential_ready');
+  const oauth = new GoogleOAuthClient({ clientId: client.clientId, clientSecret: client.clientSecret,
+    redirectUri: c.GMAIL_OAUTH_REDIRECT_URI, timeoutMs: c.GMAIL_TIMEOUT_MS });
+  return new HttpGmailReadOnlyVerifier({ tokens: new OAuthAccessTokenProvider(oauth, store), timeoutMs: c.GMAIL_TIMEOUT_MS });
 }
 
 export function buildSendConfig(c: CliContext['config']): SendConfig {

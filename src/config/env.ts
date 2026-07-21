@@ -233,6 +233,15 @@ const envSchema = z.object({
   SENDING_CONFIRMATION_TTL_SECONDS: z.coerce.number().int().positive().default(120),
   // Phase 15 send-time account cap. Confirmed sends only; default intentionally conservative.
   SENDING_DAILY_CAP: z.coerce.number().int().positive().default(1),
+
+  // --- Phase 16: production safety hardening ---
+  // A separate read-only Gmail preflight switch. It never authorizes sending and is off by default.
+  GMAIL_SEND_PREFLIGHT_ENABLED: boolString(false),
+  // Documented retention windows. Execution remains an explicit administrative procedure.
+  RETENTION_LEAD_DAYS: z.coerce.number().int().positive().default(365),
+  RETENTION_PROVIDER_ID_DAYS: z.coerce.number().int().positive().default(90),
+  RETENTION_READINESS_DAYS: z.coerce.number().int().positive().default(365),
+  RETENTION_AUDIT_DAYS: z.coerce.number().int().positive().default(730),
 });
 
 const refinedEnvSchema = envSchema.superRefine((val, ctx) => {

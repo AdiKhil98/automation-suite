@@ -8,11 +8,12 @@ import { checkSendEligibility, type ConfirmationView, type ReadinessView, type S
 import { approvedEnvelopeHash, compareProviderEnvelope, confirmationFingerprint, expectedDraftEnvelope,
   preflightProofHash, providerEnvelopeHash, recipientHash, sendFingerprint } from './envelope.js';
 
-export type SendOutcome = 'READY' | 'SENT_CONFIRMED' | 'SENDING_DISABLED' | 'INVALID_ELIGIBILITY' |
+export type SendOutcome = 'READY' | 'SENT_CONFIRMED' | 'SENDING_DISABLED' | 'OUTBOUND_ACTIONS_DISABLED' | 'DRY_RUN_ACTIVE' | 'INVALID_ELIGIBILITY' |
   'READINESS_INVALID' | 'NOT_CONFIRMED' | 'PROVIDER_VERIFICATION_FAILED' | 'BINDING_INVALIDATED' |
   'TOO_LATE' | 'RECIPIENT_SUPPRESSED' | 'NOT_DUE' | 'ALREADY_SENT' | 'DUPLICATE_PREVENTED' |
   'RATE_LIMITED' | 'DEFINITIVE_FAILURE' | 'AUTH_ERROR' | 'OUTCOME_UNKNOWN' | 'DAILY_CAP_REACHED';
 export type SendAttemptStatus = 'RESERVED' | 'CALL_STARTED' | 'SENT_CONFIRMED' | 'DEFINITIVE_FAILURE' | 'OUTCOME_UNKNOWN' | 'DUPLICATE_PREVENTED';
+export type SendSuppressionScope = 'email' | 'domain' | 'phone' | 'place_id';
 
 export interface SendingReadinessRecord { id: string; gmailAccount: string; policyVersion: string; approvedBy: string; approvedAt: Date; expiresAt: Date; revokedAt: Date | null }
 export interface SendAttemptRecord {
@@ -25,13 +26,11 @@ export interface SendAttemptRecord {
 }
 export interface SendStore {
   readiness(account: string, policy: string): Promise<SendingReadinessRecord | null>;
-  isEmailSuppressed(email: string): Promise<boolean>;
+  activeSuppressions(identity: { email: string | null; domain: string | null; phone: string | null; placeId: string | null }): Promise<SendSuppressionScope[]>;
   hasConfirmedAttempt(scheduleId: string): Promise<boolean>;
   hasBlockingAttempt(scheduleId: string): Promise<boolean>;
   lastDefinitiveFailureAt(scheduleId: string): Promise<Date | null>;
   confirmedSendsToday(gmailAccount: string, now: Date): Promise<number>;
-  /** Crash recovery: a persisted CALL_STARTED has an uncertain provider outcome and is blocking. */
-  promoteStartedToUnknown(scheduleId: string, now: Date): Promise<void>;
   reserveAttempt(row: SendAttemptRecord, dailyCap: number): Promise<'reserved' | 'duplicate' | 'daily_cap'>;
 }
 export interface SendTxRepos {
@@ -52,18 +51,63 @@ export interface SendInput {
   currentGmailDraft: { id: string; outcome: string; providerDraftId: string | null; providerMessageId: string | null; providerThreadId: string | null; gmailAccount: string; senderEmail: string; recipientEmail: string; finalizedEmailId: string | null } | null;
   finalization: { id: string; resolvedBody: string; resolvedBodyHash: string; finalHumanDecision: string | null; finalReviewedAt: Date | null } | null;
   currentFinalizedContentHash: string | null; currentRecipientEmail: string | null; subject: string | null;
+  normalizedDomain: string | null; normalizedPhone: string | null; placeId: string | null;
   confirmation: ConfirmationView | null; preflightProof: PreflightProof | null;
 }
 export interface PreflightProof { sendFingerprint: string; providerEnvelopeHash: string; checkedAtMs: number; proofHash: string }
 export interface SendResultOut { leadId: string; outcome: SendOutcome; reason?: string; preflightProof?: PreflightProof }
+export interface LocalSendReadinessReport {
+  leadStatus: string; scheduleStatus: string; timing: 'missing' | 'not_due' | 'due' | 'too_late';
+  accountCap: { confirmedToday: number; dailyCap: number; available: boolean };
+  recipientFactPresent: boolean; finalizedApproved: boolean;
+  fingerprints: { scheduleMatches: boolean; approvedEnvelopeHash: string; sendFingerprint: string | null };
+  databaseLinkage: { scheduleToDraft: boolean; draftToFinalization: boolean };
+  readiness: { present: boolean; valid: boolean }; suppressionScopes: SendSuppressionScope[];
+  provider: { name: string; live: boolean }; flags: { sendingEnabled: boolean; outboundActionsEnabled: boolean; dryRun: boolean };
+  externalVerificationRequired: true; evaluatedCandidates: 1; outcome: SendOutcome; reasons: string[];
+}
 
 export class SendService {
   private readonly now: () => number;
   constructor(private readonly deps: SendServiceDeps) { this.now = deps.now ?? Date.now; }
 
+  /** Complete local-only readiness inspection. No provider call and no database write. */
+  async localReadiness(input: SendInput): Promise<LocalSendReadinessReport> {
+    const c = this.deps.config; const now = this.now(); const sched = input.schedule;
+    const suppressions = await this.deps.store.activeSuppressions(this.identity(input));
+    const confirmedToday = await this.deps.store.confirmedSendsToday(c.gmailAccount, new Date(now));
+    const readiness = await this.deps.store.readiness(c.gmailAccount, c.policyVersion);
+    const draft = input.currentGmailDraft; const recipient = input.currentRecipientEmail;
+    const recomputed = sched && draft?.providerDraftId && input.currentFinalizedContentHash && recipient
+      ? scheduleIntegrityFingerprint({ leadId: input.leadId, gmailDraftId: draft.id, providerDraftId: draft.providerDraftId,
+          finalizedContentHash: input.currentFinalizedContentHash, recipientEmail: recipient,
+          scheduledAtUtcMs: sched.scheduledAtUtcMs, rulesVersion: sched.rulesVersion }) : null;
+    const envelopeHash = sched ? approvedEnvelopeHash({ gmailAccount: c.gmailAccount, recipientEmail: recipient ?? '',
+      subject: input.subject ?? '', finalizedContentHash: input.currentFinalizedContentHash ?? '', scheduleId: sched.id,
+      scheduledAtUtcMs: sched.scheduledAtUtcMs, replyTo: null }) : '';
+    const sendFp = sched && readiness ? sendFingerprint({ scheduleId: sched.id, gmailDraftId: sched.gmailDraftId,
+      approvedEnvelopeHash: envelopeHash, readinessApprovalId: readiness.id }) : null;
+    const checked = await this.state(input, false, false);
+    const result = 'result' in checked ? checked.result : this.out(input.leadId, 'READY');
+    const readinessValid = !!readiness && !readiness.revokedAt && readiness.gmailAccount.toLowerCase() === c.gmailAccount.toLowerCase() &&
+      readiness.policyVersion === c.policyVersion && readiness.approvedAt.getTime() <= now && now < readiness.expiresAt.getTime();
+    const timing = !sched ? 'missing' : now < sched.scheduledAtUtcMs ? 'not_due' : now - sched.scheduledAtUtcMs > c.maxLateMs ? 'too_late' : 'due';
+    return { leadStatus: input.leadStatus, scheduleStatus: sched?.status ?? 'missing', timing,
+      accountCap: { confirmedToday, dailyCap: c.dailyCap, available: confirmedToday < c.dailyCap },
+      recipientFactPresent: !!recipient, finalizedApproved: input.finalization?.finalHumanDecision === 'APPROVED' && input.finalization.finalReviewedAt !== null,
+      fingerprints: { scheduleMatches: !!sched && recomputed === sched.storedIntegrityFingerprint, approvedEnvelopeHash: envelopeHash, sendFingerprint: sendFp },
+      databaseLinkage: { scheduleToDraft: !!sched && !!draft && sched.gmailDraftId === draft.id,
+        draftToFinalization: !!draft && !!input.finalization && draft.finalizedEmailId === input.finalization.id },
+      readiness: { present: !!readiness, valid: readinessValid }, suppressionScopes: suppressions,
+      provider: { name: this.deps.provider.name, live: this.deps.provider.live },
+      flags: { sendingEnabled: c.sendingEnabled, outboundActionsEnabled: c.outboundActionsEnabled, dryRun: c.dryRun },
+      externalVerificationRequired: true, evaluatedCandidates: 1, outcome: result.outcome,
+      reasons: result.reason ? result.reason.split(',') : [] };
+  }
+
   /** First read-only provider verification, performed before the operator is prompted. */
   async preflight(input: SendInput): Promise<SendResultOut> {
-    const state = await this.state(input, false, true);
+    const state = await this.state(input, false, false);
     if ('result' in state) return state.result;
     const provider = await this.verifyProvider(state.expected, input.currentGmailDraft);
     if (!provider.ok) return this.out(input.leadId, 'PROVIDER_VERIFICATION_FAILED', provider.reason);
@@ -86,6 +130,9 @@ export class SendService {
     const provider = await this.verifyProvider(state.expected, input.currentGmailDraft);
     if (!provider.ok || provider.envelopeHash !== proof.providerEnvelopeHash) {
       return this.out(input.leadId, 'PROVIDER_VERIFICATION_FAILED', provider.ok ? 'draft_changed_after_confirmation' : provider.reason);
+    }
+    if ((await this.deps.store.activeSuppressions(this.identity(input))).length > 0) {
+      return this.out(input.leadId, 'RECIPIENT_SUPPRESSED', 'recipient_suppressed_before_reservation');
     }
     const confirmation = input.confirmation as ConfirmationView;
     const attempt: SendAttemptRecord = {
@@ -137,10 +184,11 @@ export class SendService {
     expected: ReturnType<typeof expectedDraftEnvelope>;
   } | { result: SendResultOut }> {
     const c = this.deps.config;
-    if (!c.sendingEnabled || !c.outboundActionsEnabled || c.dryRun) return { result: this.out(input.leadId, 'SENDING_DISABLED', 'kill_switch_not_armed') };
+    if (!c.sendingEnabled) return { result: this.out(input.leadId, 'SENDING_DISABLED', 'sending_disabled') };
+    if (!c.outboundActionsEnabled) return { result: this.out(input.leadId, 'OUTBOUND_ACTIONS_DISABLED', 'outbound_actions_disabled') };
+    if (c.dryRun) return { result: this.out(input.leadId, 'DRY_RUN_ACTIVE', 'dry_run_enabled') };
     if (!input.schedule) return { result: this.out(input.leadId, 'INVALID_ELIGIBILITY', 'no_active_schedule') };
     const sched = input.schedule;
-    await this.deps.store.promoteStartedToUnknown(sched.id, new Date(this.now()));
     const draft = input.currentGmailDraft;
     const recipient = input.currentRecipientEmail;
     const recomputed = draft?.providerDraftId && input.currentFinalizedContentHash && recipient
@@ -153,7 +201,7 @@ export class SendService {
     const readiness = await this.deps.store.readiness(c.gmailAccount, c.policyVersion);
     const sendFp = readiness ? sendFingerprint({ scheduleId: sched.id, gmailDraftId: sched.gmailDraftId,
       approvedEnvelopeHash: envelopeHash, readinessApprovalId: readiness.id }) : '';
-    const suppressed = recipient ? await this.deps.store.isEmailSuppressed(recipient) : false;
+    const suppressed = (await this.deps.store.activeSuppressions(this.identity(input))).length > 0;
     const lastFailure = await this.deps.store.lastDefinitiveFailureAt(sched.id);
     const readinessView: ReadinessView | null = readiness ? { id: readiness.id, gmailAccount: readiness.gmailAccount,
       policyVersion: readiness.policyVersion, approvedAtMs: readiness.approvedAt.getTime(), expiresAtMs: readiness.expiresAt.getTime(), revoked: readiness.revokedAt !== null } : null;
@@ -194,6 +242,9 @@ export class SendService {
     catch { return { result: this.out(input.leadId, 'INVALID_ELIGIBILITY', 'approved_envelope_invalid') }; }
     return { schedule: sched, readiness: readiness as SendingReadinessRecord, envelopeHash, sendFp, expected };
   }
+
+  private identity(input: SendInput) { return { email: input.currentRecipientEmail, domain: input.normalizedDomain,
+    phone: input.normalizedPhone, placeId: input.placeId }; }
 
   private async verifyProvider(expected: ReturnType<typeof expectedDraftEnvelope>, stored: SendInput['currentGmailDraft']): Promise<{ ok: true; envelopeHash: string } | { ok: false; reason: string }> {
     if (!stored?.providerDraftId || !stored.providerMessageId || !stored.providerThreadId) return { ok: false, reason: 'known_draft_identity_missing' };

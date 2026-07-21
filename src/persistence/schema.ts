@@ -292,13 +292,18 @@ export const suppressionList = pgTable(
   {
     id: text('id').primaryKey(),
     scope: text('scope').notNull(),
-    value: text('value').notNull(),
-    reason: text('reason'),
-    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+      value: text('value').notNull(),
+      reason: text('reason'),
+      createdBy: text('created_by').notNull(),
+      createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+      revokedAt: timestamp('revoked_at', { withTimezone: true }),
+      revokedBy: text('revoked_by'),
+      revokeReason: text('revoke_reason'),
   },
   (t) => ({
     scopeValueUk: uniqueIndex('suppression_list_scope_value_uk').on(t.scope, t.value),
-    scopeCk: check('suppression_scope_ck', sql`${t.scope} IN ('domain', 'phone', 'place_id', 'email')`),
+      scopeCk: check('suppression_scope_ck', sql`${t.scope} IN ('domain', 'phone', 'place_id', 'email')`),
+      revocationCk: check('suppression_revocation_ck', sql`(${t.revokedAt} IS NULL AND ${t.revokedBy} IS NULL AND ${t.revokeReason} IS NULL) OR (${t.revokedAt} IS NOT NULL AND ${t.revokedBy} IS NOT NULL AND ${t.revokeReason} IS NOT NULL)`),
   }),
 );
 

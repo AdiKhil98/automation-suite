@@ -1,7 +1,7 @@
 import { request as httpsRequest } from 'node:https';
 import { type AccessTokenProvider } from '../gmail/oauth.js';
 import { parseKnownGmailDraft } from './gmail-draft-parser.js';
-import { type DraftInspectionResult, type SendProvider, type SendResult } from './provider.js';
+import { type DraftInspectionResult, type ReadOnlyGmailVerifier, type SendProvider, type SendResult } from './provider.js';
 
 const GMAIL_API_ORIGIN = 'https://gmail.googleapis.com';
 
@@ -100,6 +100,18 @@ export class HttpGmailSendProvider implements SendProvider {
       return { failure: 'unknown', reason: err instanceof Error && err.message === 'gmail_request_timeout' ? 'request_timeout' : 'network_failure' };
     }
   }
+}
+
+/** Publicly read-only wrapper: no send operation exists on this provider boundary. */
+export class HttpGmailReadOnlyVerifier implements ReadOnlyGmailVerifier {
+  readonly name = 'http-gmail-read-only';
+  readonly live = true;
+  private readonly delegate: HttpGmailSendProvider;
+  constructor(deps: { tokens: AccessTokenProvider; timeoutMs: number; transport?: GmailHttpTransport }) {
+    this.delegate = new HttpGmailSendProvider(deps);
+  }
+  verifyAccount(expectedEmail: string) { return this.delegate.verifyAccount(expectedEmail); }
+  getKnownDraft(providerDraftId: string) { return this.delegate.getKnownDraft(providerDraftId); }
 }
 
 function parseJson(body: string): Record<string, unknown> | null {

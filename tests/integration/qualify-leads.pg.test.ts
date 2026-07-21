@@ -18,6 +18,7 @@ import { LeadsRepository } from '../../src/persistence/repositories/leads.repo.j
 import { PipelineRepository } from '../../src/persistence/repositories/pipeline.repo.js';
 import { QualificationResultsRepository } from '../../src/persistence/repositories/qualification.repo.js';
 import { SuppressionRepository } from '../../src/persistence/repositories/suppression.repo.js';
+import { SuppressionAdminService } from '../../src/domain/suppression/admin-service.js';
 import { pipelineEvents, qualificationResultFacts } from '../../src/persistence/schema.js';
 
 const DATABASE_URL = process.env.DATABASE_URL;
@@ -120,6 +121,19 @@ describe.skipIf(!DATABASE_URL)('qualifyLead (PostgreSQL)', () => {
     expect(r.decision).toBe('REJECT');
     expect(r.triggeredRules).toContain('gate.suppressed');
     expect((await leads.getById(id))?.status).toBe('REJECTED');
+  });
+
+  it('audits suppression add/revoke and excludes revoked identities from active matching', async () => {
+    const repo = new SuppressionRepository(handle.db); const events = new PipelineRepository(handle.db);
+    const admin = new SuppressionAdminService(repo, events, () => new Date('2026-07-21T00:00:00Z'));
+    const id = await admin.add('domain', 'example.invalid', 'fictional objection', 'Example Operator');
+    expect(await repo.isSuppressed({ normalizedDomain: 'example.invalid', normalizedPhone: null, placeId: null })).toBe(true);
+    const viewed = await admin.list('domain'); expect(viewed).toHaveLength(1); expect(viewed[0]?.valueHash).not.toContain('example.invalid');
+    expect(await admin.revoke(id, 'fictional resolution', 'Example Operator')).toBe(true);
+    expect(await repo.isSuppressed({ normalizedDomain: 'example.invalid', normalizedPhone: null, placeId: null })).toBe(false);
+    const audit = await handle.db.select().from(pipelineEvents);
+    expect(audit.filter((e) => e.message?.startsWith('suppression:')).map((e) => e.message)).toEqual(['suppression: ADDED', 'suppression: REVOKED']);
+    expect(JSON.stringify(audit)).not.toContain('example.invalid');
   });
 
   it('enforces one current fact per (lead, type) via the partial unique index', async () => {

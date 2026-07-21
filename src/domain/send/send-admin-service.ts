@@ -34,6 +34,7 @@ export interface SendAdminStore {
   reconcile(input: { attemptId: string; outcome: ReconciliationOutcome; reconciledBy: string; note: string;
     reconciledAt: Date; gmailAccount: string; policyVersion: string }): Promise<'SENT_CONFIRMED' | 'DEFINITIVE_FAILURE'>;
   recordUnresolved(input: { attemptId: string; reconciledBy: string; note: string; reconciledAt: Date }): Promise<void>;
+  recoverStarted(input: { attemptId: string; recoveredBy: string; note: string; recoveredAt: Date }): Promise<boolean>;
 }
 
 export class SendAdminService {
@@ -66,6 +67,15 @@ export class SendAdminService {
 
   reconciliationPhrase(attemptId: string, outcome: ReconciliationSelection): string {
     return `RECONCILE ${requiredId(attemptId)} ${outcome}`;
+  }
+
+  recoveryPhrase(attemptId: string): string { return `RECOVER STARTED ${requiredId(attemptId)} AS OUTCOME_UNKNOWN`; }
+
+  recoverStarted(input: { attemptId: string; recoveredBy: string; note: string; observedPhrase: string }): Promise<boolean> {
+    const attemptId = requiredId(input.attemptId);
+    if (input.observedPhrase !== this.recoveryPhrase(attemptId)) throw new Error('recovery_confirmation_mismatch');
+    return this.store.recoverStarted({ attemptId, recoveredBy: requiredText(input.recoveredBy, 'recovered_by', 120),
+      note: requiredText(input.note, 'recovery_note', 1000), recoveredAt: new Date(this.now()) });
   }
 
   async reconcile(input: { attemptId: string; outcome: ReconciliationSelection; reconciledBy: string; note: string; observedPhrase: string }): Promise<'SENT_CONFIRMED' | 'DEFINITIVE_FAILURE' | 'UNCHANGED'> {

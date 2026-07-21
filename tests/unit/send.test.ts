@@ -39,6 +39,7 @@ describe('send envelope', () => {
     expect(recipientHash(RECIPIENT)).not.toContain(RECIPIENT);
     expect(compareProviderEnvelope(expected, { ...expected, cc: ['copy@example.invalid'] })).toContain('unexpected_cc');
     expect(compareProviderEnvelope(expected, { ...expected, body: 'changed' })).toContain('body_changed');
+    expect(compareProviderEnvelope(expected, { ...expected, replyTo: 'other@example.invalid' })).toContain('reply_to_changed');
     expect(compareProviderEnvelope(expected, { ...expected, attachmentCount: 1 })).toContain('unexpected_attachment');
   });
 });
@@ -95,9 +96,9 @@ function uow(cap: Capture): SendUnitOfWork {
   } as SendTxRepos); } };
 }
 function store(overrides: Partial<SendStore> = {}): SendStore {
-  return { async readiness() { return readiness; }, async isEmailSuppressed() { return false; },
+  return { async readiness() { return readiness; }, async activeSuppressions() { return []; },
     async hasConfirmedAttempt() { return false; }, async hasBlockingAttempt() { return false; },
-    async lastDefinitiveFailureAt() { return null; }, async promoteStartedToUnknown() { /* no-op */ },
+    async lastDefinitiveFailureAt() { return null; },
     async confirmedSendsToday() { return 0; }, async reserveAttempt() { return 'reserved'; }, ...overrides };
 }
 const baseInput = (): SendInput => ({ leadId: LEAD, leadStatus: 'SCHEDULED', schedule,
@@ -106,6 +107,7 @@ const baseInput = (): SendInput => ({ leadId: LEAD, leadStatus: 'SCHEDULED', sch
     gmailAccount: ACCOUNT, senderEmail: ACCOUNT, recipientEmail: RECIPIENT, finalizedEmailId: FIN },
   finalization: { id: FIN, resolvedBody: BODY, resolvedBodyHash: CONTENT, finalHumanDecision: 'APPROVED', finalReviewedAt: new Date(NOW - 2000) },
   currentFinalizedContentHash: CONTENT, currentRecipientEmail: RECIPIENT, subject: SUBJECT,
+  normalizedDomain: 'example.invalid', normalizedPhone: '+15550100000', placeId: 'place-example',
   confirmation: null, preflightProof: null });
 function provider(script: MockSendScript = {}) { return new MockSendProvider({ account: { ok: true, email: ACCOUNT }, draft: {
   outcome: 'ok', providerDraftId: PROVIDER_DRAFT, providerMessageId: 'message-example', providerThreadId: 'thread-example',
@@ -142,13 +144,18 @@ describe('SendService two-pass control', () => {
     expect(cap.patches.map((x) => x.status)).toEqual(['CALL_STARTED', 'OUTCOME_UNKNOWN']);
     expect(cap.fulfilled).toHaveLength(0); expect(cap.transitions).toEqual(['NEEDS_MANUAL_REVIEW']);
   });
-  it('promotes a crash-left CALL_STARTED before permanently blocking the next evaluation', async () => {
-    const cap = capture(); let promoted = 0;
-    const service = new SendService({ provider: provider(), store: store({
-      async promoteStartedToUnknown() { promoted += 1; }, async hasBlockingAttempt() { return true; },
-    }), uow: uow(cap), logger, config, now: () => NOW });
+  it('keeps crash recovery out of read-only preflight and permanently blocks a started attempt', async () => {
+    const cap = capture();
+    const service = new SendService({ provider: provider(), store: store({ async hasBlockingAttempt() { return true; } }), uow: uow(cap), logger, config, now: () => NOW });
     expect((await service.preflight(baseInput())).outcome).toBe('DUPLICATE_PREVENTED');
-    expect(promoted).toBe(1);
+    expect(cap.patches).toHaveLength(0);
+  });
+  it('rechecks suppression after provider verification and before reservation', async () => {
+    const cap = capture(); const mock = provider(); let checks = 0;
+    const service = new SendService({ provider: mock, store: store({ async activeSuppressions() { checks += 1; return checks >= 3 ? ['email'] : []; } }),
+      uow: uow(cap), logger, config, now: () => NOW });
+    expect((await confirmedSend(service)).outcome).toBe('RECIPIENT_SUPPRESSED');
+    expect(mock.sent).toHaveLength(0); expect(cap.patches).toHaveLength(0);
   });
   it('keeps disabled/dry-run execution fully inert', async () => {
     const cap = capture(); const mock = provider();
@@ -156,6 +163,16 @@ describe('SendService two-pass control', () => {
       config: { ...config, sendingEnabled: false, dryRun: true }, now: () => NOW });
     expect((await service.preflight(baseInput())).outcome).toBe('SENDING_DISABLED');
     expect(mock.verified).toHaveLength(0); expect(cap.patches).toHaveLength(0);
+  });
+  it('classifies outbound and dry-run gates before confirmation or readiness findings', async () => {
+    const cap = capture(); const mock = provider();
+    const outboundOff = new SendService({ provider: mock, store: store(), uow: uow(cap), logger,
+      config: { ...config, outboundActionsEnabled: false }, now: () => NOW });
+    expect((await outboundOff.send(baseInput(), '')).outcome).toBe('OUTBOUND_ACTIONS_DISABLED');
+    const dryRun = new SendService({ provider: mock, store: store(), uow: uow(cap), logger,
+      config: { ...config, dryRun: true }, now: () => NOW });
+    expect((await dryRun.send(baseInput(), '')).outcome).toBe('DRY_RUN_ACTIVE');
+    expect(mock.verified).toHaveLength(0); expect(mock.sent).toHaveLength(0); expect(cap.patches).toHaveLength(0);
   });
   it('blocks before provider access when the account daily cap is reached', async () => {
     const cap = capture(); const mock = provider();

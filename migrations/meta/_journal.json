@@ -120,6 +120,13 @@
       "when": 1784396400000,
       "tag": "0016_production_sending_readiness",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1784660400000,
+      "tag": "0017_production_safety_hardening",
+      "breakpoints": true
     }
   ]
 }

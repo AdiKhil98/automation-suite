@@ -47,6 +47,7 @@ export function parseRawMessage(rawBase64Url: string): ProviderDraftEnvelope {
   const to = parseAddresses(singleton(headers, 'to', true)).map((a) => a.email);
   const cc = optionalAddresses(headers, 'cc');
   const bcc = optionalAddresses(headers, 'bcc');
+  const replyTo = optionalSingleAddress(headers, 'reply-to');
   if (cc.length > 0) throw new Error('unexpected_cc');
   if (bcc.length > 0) throw new Error('unexpected_bcc');
   return {
@@ -55,10 +56,20 @@ export function parseRawMessage(rawBase64Url: string): ProviderDraftEnvelope {
     to,
     cc,
     bcc,
+    replyTo,
     subject: decodeHeader(singleton(headers, 'subject', true)),
     body,
     attachmentCount: 0,
   };
+}
+
+function optionalSingleAddress(headers: Map<string, string[]>, name: string): string | null {
+  const values = headers.get(name) ?? [];
+  if (values.length > 1) throw new Error(`duplicate_${name}_header`);
+  if (!values[0]) return null;
+  const parsed = parseAddresses(values[0]);
+  if (parsed.length !== 1) throw new Error(`multiple_${name}_addresses`);
+  return parsed[0]?.email ?? null;
 }
 
 function parseHeaders(block: string): Map<string, string[]> {

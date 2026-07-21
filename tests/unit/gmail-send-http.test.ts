@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildRawMessage } from '../../src/domain/gmail/mime.js';
 import { parseKnownGmailDraft } from '../../src/integrations/send/gmail-draft-parser.js';
-import { HttpGmailSendProvider, type GmailHttpRequest, type GmailHttpResponse, type GmailHttpTransport } from '../../src/integrations/send/http-gmail-send.js';
+import { HttpGmailReadOnlyVerifier, HttpGmailSendProvider, type GmailHttpRequest, type GmailHttpResponse, type GmailHttpTransport } from '../../src/integrations/send/http-gmail-send.js';
 
 const ACCOUNT = 'sender@example.invalid';
 const RECIPIENT = 'contact@example.invalid';
@@ -35,6 +35,15 @@ function provider(responses: (GmailHttpResponse | Error)[]) {
 }
 
 describe('HttpGmailSendProvider allowlist (mock transport only)', () => {
+  it('exposes a structurally read-only verifier with no send method', async () => {
+    const transport = new FakeTransport([{ status: 200, body: JSON.stringify({ emailAddress: ACCOUNT }) },
+      { status: 200, body: draftBody() }]);
+    const verifier = new HttpGmailReadOnlyVerifier({ tokens: { async getAccessToken() { return 'fictional-access-token'; } }, timeoutMs: 5000, transport });
+    expect('sendExistingDraft' in verifier).toBe(false);
+    expect((await verifier.verifyAccount(ACCOUNT)).ok).toBe(true);
+    expect((await verifier.getKnownDraft(DRAFT_ID)).outcome).toBe('ok');
+    expect(transport.requests.every((r) => r.method === 'GET' && r.body === null)).toBe(true);
+  });
   it('uses only profile, one known drafts.get, and drafts.send with an id-only body', async () => {
     const { instance, transport } = provider([
       { status: 200, body: JSON.stringify({ emailAddress: ACCOUNT }) },
@@ -66,6 +75,18 @@ describe('HttpGmailSendProvider allowlist (mock transport only)', () => {
     expect(() => parseKnownGmailDraft(JSON.parse(draftBody({ raw: multipart })), DRAFT_ID)).toThrow('unsupported_mime_structure');
     const attachment = Buffer.from(decoded.replace('Content-Transfer-Encoding:', 'Content-Disposition: attachment; filename="x.txt"\r\nContent-Transfer-Encoding:')).toString('base64url');
     expect(() => parseKnownGmailDraft(JSON.parse(draftBody({ raw: attachment })), DRAFT_ID)).toThrow('attachment_not_allowed');
+  });
+
+  it('normalizes one Reply-To and rejects unexpected, duplicate, multiple, or malformed values', () => {
+    const decoded = Buffer.from(raw.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8');
+    const encoded = (header: string) => Buffer.from(decoded.replace('Subject:', `${header}\r\nSubject:`)).toString('base64url');
+    expect(parseKnownGmailDraft(JSON.parse(draftBody({ raw: encoded('Reply-To: Replies@Example.Invalid') })), DRAFT_ID).envelope.replyTo)
+      .toBe('replies@example.invalid');
+    expect(() => parseKnownGmailDraft(JSON.parse(draftBody({ raw: encoded('Reply-To: one@example.invalid\r\nReply-To: two@example.invalid') })), DRAFT_ID))
+      .toThrow('duplicate_reply-to_header');
+    expect(() => parseKnownGmailDraft(JSON.parse(draftBody({ raw: encoded('Reply-To: one@example.invalid, two@example.invalid') })), DRAFT_ID))
+      .toThrow('multiple_reply-to_addresses');
+    expect(() => parseKnownGmailDraft(JSON.parse(draftBody({ raw: encoded('Reply-To: not-an-address') })), DRAFT_ID)).toThrow('invalid_address');
   });
 
   it('classifies auth, rate limit, definitive rejection, timeout/network, 5xx and malformed success honestly', async () => {

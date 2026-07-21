@@ -5,6 +5,8 @@ export interface ProviderDraftEnvelope {
   to: string[];
   cc: string[];
   bcc: string[];
+  /** Normalized single Reply-To address, or null when the approved envelope has none. */
+  replyTo: string | null;
   subject: string;
   body: string;
   attachmentCount: number;
@@ -24,12 +26,15 @@ export type DraftInspectionResult =
   | { outcome: 'ok'; envelope: ProviderDraftEnvelope; providerDraftId?: string; providerMessageId?: string; providerThreadId?: string | null }
   | { outcome: 'missing' | 'auth_error' | 'rate_limited' | 'definitive_failure' | 'invalid' | 'unknown'; reason: string };
 
-export interface SendProvider {
+export interface ReadOnlyGmailVerifier {
   readonly name: string;
   readonly live: boolean;
   verifyAccount(expectedEmail: string): Promise<{ ok: boolean; email: string | null; reason?: string }>;
   /** Read only the already-known draft id. Never list/search drafts or access the inbox. */
   getKnownDraft(providerDraftId: string): Promise<DraftInspectionResult>;
+}
+
+export interface SendProvider extends ReadOnlyGmailVerifier {
   /** Dispatch exactly the existing draft id. No MIME/raw or replacement message is accepted. */
   sendExistingDraft(providerDraftId: string): Promise<SendResult>;
 }
