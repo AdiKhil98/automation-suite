@@ -24,6 +24,21 @@ pnpm cli lead-state <id>
 pnpm cli reset-test-data     # clears local test data only
 ```
 
+## Operational vs. integration-test databases
+
+`DATABASE_URL` is the Supabase production database connection. It must never be used by integration tests or
+destructive reset tooling. Production migrations use only the explicit `pnpm db:migrate` command against
+`DATABASE_URL` after separate operator approval.
+
+`TEST_DATABASE_URL` is a separate local PostgreSQL connection for integration tests and `reset-test-data` only.
+Destructive test actions require all of: `NODE_ENV=test`,
+`ALLOW_TEST_DATABASE_DESTRUCTIVE_ACTIONS=true`, a loopback host (`localhost`, `127.0.0.1`, or `::1`), and a
+clearly test-only database name such as `outreach_test`. There is no fallback to `DATABASE_URL`; Supabase,
+session poolers, and remote hosts are rejected before a connection opens.
+
+Never run `pnpm test:integration` or `pnpm cli reset-test-data` against Supabase. Keep the operational and local
+test connections separate.
+
 ## Collection & qualification commands (Phase 2 / Phase 3)
 
 ```text

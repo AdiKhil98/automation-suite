@@ -2,11 +2,12 @@ import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import pino from 'pino';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { requireIntegrationTestDatabase } from '../support/test-database.js';
 import { scheduleIntegrityFingerprint } from '../../src/domain/schedule/fingerprint.js';
 import { SendService, type SendConfig } from '../../src/domain/send/send-service.js';
 import { SendAdminService } from '../../src/domain/send/send-admin-service.js';
 import { buildCandidateLead } from '../../src/domain/leads/lead-factory.js';
-import { createDb, type DbHandle } from '../../src/persistence/db.js';
+import { type DbHandle } from '../../src/persistence/db.js';
 import { DrizzleSendUnitOfWork } from '../../src/persistence/send-unit-of-work.js';
 import { SendRepository } from '../../src/persistence/repositories/send.repo.js';
 import { SendAdminRepository } from '../../src/persistence/repositories/send-admin.repo.js';
@@ -15,7 +16,6 @@ import { LeadFactsRepository } from '../../src/persistence/repositories/lead-fac
 import { LeadsRepository } from '../../src/persistence/repositories/leads.repo.js';
 import { PipelineRunsRepository } from '../../src/persistence/repositories/runs.repo.js';
 import { MockSendProvider } from '../../src/integrations/send/mock-send.js';
-import { truncateAll } from '../../src/persistence/maintenance.js';
 import {
   demoDecisions,
   demoDeploymentRuns,
@@ -30,7 +30,7 @@ import {
   sendingReadinessApprovals,
 } from '../../src/persistence/schema.js';
 
-const DATABASE_URL = process.env.DATABASE_URL;
+const testDatabase = requireIntegrationTestDatabase();
 const logger = pino({ level: 'silent' });
 const TZ = 'America/New_York';
 const RECIP = 'contact@example.invalid';
@@ -45,9 +45,9 @@ const SCHEDULED_AT = new Date(NOW - 10 * 60_000); // 10 minutes ago (due, within
 
 const cfg: SendConfig = { gmailAccount: ACCOUNT, senderName: SENDER, policyVersion: POLICY, sendingEnabled: true, outboundActionsEnabled: true, dryRun: false, maxLateMs: 60 * 60_000, confirmationTtlMs: 120_000, dailyCap: 1 };
 
-describe.skipIf(!DATABASE_URL)('controlled sending (PostgreSQL)', () => {
+describe('controlled sending (PostgreSQL)', () => {
   let handle: DbHandle;
-  beforeEach(async () => { handle ??= createDb(DATABASE_URL as string); await truncateAll(handle.db); });
+  beforeEach(async () => { handle ??= testDatabase.createHandle(); await testDatabase.truncate(handle.db); });
   afterAll(async () => { if (handle) await handle.pool.end(); });
 
   async function seed(): Promise<{ leadId: string; scheduleId: string }> {

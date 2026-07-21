@@ -19,6 +19,10 @@ const envSchema = z.object({
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
 
   DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
+  // Test-only connection. Application commands never use this; destructive test
+  // helpers additionally validate it as a loopback, clearly test-named database.
+  TEST_DATABASE_URL: z.string().optional(),
+  ALLOW_TEST_DATABASE_DESTRUCTIVE_ACTIONS: boolString(false),
 
   // Global safety switches. Default-safe: dry-run on, outbound off.
   DRY_RUN: boolString(true),

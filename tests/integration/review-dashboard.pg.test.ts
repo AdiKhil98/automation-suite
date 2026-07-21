@@ -4,23 +4,23 @@ import { request } from 'node:http';
 import { eq } from 'drizzle-orm';
 import pino from 'pino';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { requireIntegrationTestDatabase } from '../support/test-database.js';
 import { ReviewService } from '../../src/domain/review/review-service.js';
 import { createReviewServer } from '../../src/dashboard/server.js';
 import { buildCandidateLead } from '../../src/domain/leads/lead-factory.js';
-import { createDb, type DbHandle } from '../../src/persistence/db.js';
+import { type DbHandle } from '../../src/persistence/db.js';
 import { DrizzleReviewUnitOfWork } from '../../src/persistence/review-unit-of-work.js';
 import { ReviewReadRepository } from '../../src/persistence/repositories/review.repo.js';
-import { truncateAll } from '../../src/persistence/maintenance.js';
 import { LeadFactsRepository } from '../../src/persistence/repositories/lead-facts.repo.js';
 import { LeadsRepository } from '../../src/persistence/repositories/leads.repo.js';
 import { auditFindings, auditRuns, demoDecisions, demos, emailDrafts, leads as leadsTbl } from '../../src/persistence/schema.js';
 
-const DATABASE_URL = process.env.DATABASE_URL;
+const testDatabase = requireIntegrationTestDatabase();
 const logger = pino({ level: 'silent' });
 
-describe.skipIf(!DATABASE_URL)('review dashboard (PostgreSQL)', () => {
+describe('review dashboard (PostgreSQL)', () => {
   let handle: DbHandle;
-  beforeEach(async () => { handle ??= createDb(DATABASE_URL as string); await truncateAll(handle.db); });
+  beforeEach(async () => { handle ??= testDatabase.createHandle(); await testDatabase.truncate(handle.db); });
   afterAll(async () => { if (handle) await handle.pool.end(); });
 
   async function seed(opts: { leadStatus: string; placeholder?: boolean }): Promise<string> {

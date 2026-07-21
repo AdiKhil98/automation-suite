@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import pino from 'pino';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { requireIntegrationTestDatabase } from '../support/test-database.js';
 import {
   EnrichmentService,
   type EnrichmentTxRepos,
@@ -23,8 +24,7 @@ import {
   type LeadEnrichmentInput,
 } from '../../src/integrations/enrichment/provider.js';
 import { type FetchOutcome } from '../../src/utils/safe-fetch.js';
-import { createDb, type DbHandle } from '../../src/persistence/db.js';
-import { truncateAll } from '../../src/persistence/maintenance.js';
+import { type DbHandle } from '../../src/persistence/db.js';
 import { DrizzleEnrichmentUnitOfWork } from '../../src/persistence/enrichment-unit-of-work.js';
 import { EnrichmentRepository } from '../../src/persistence/repositories/enrichment.repo.js';
 import { LeadFactsRepository } from '../../src/persistence/repositories/lead-facts.repo.js';
@@ -39,7 +39,7 @@ import {
   pipelineEvents,
 } from '../../src/persistence/schema.js';
 
-const DATABASE_URL = process.env.DATABASE_URL;
+const testDatabase = requireIntegrationTestDatabase();
 const logger = pino({ level: 'silent' });
 const VERIFY = { minConfidence: 0.6, ambiguousMargin: 0.1 };
 
@@ -62,12 +62,12 @@ class FixedCandidates implements CandidateProvider {
   }
 }
 
-describe.skipIf(!DATABASE_URL)('enrichLead (PostgreSQL)', () => {
+describe('enrichLead (PostgreSQL)', () => {
   let handle: DbHandle;
 
   beforeEach(async () => {
-    handle ??= createDb(DATABASE_URL as string);
-    await truncateAll(handle.db);
+    handle ??= testDatabase.createHandle();
+    await testDatabase.truncate(handle.db);
   });
   afterAll(async () => {
     if (handle) await handle.pool.end();

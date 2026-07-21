@@ -2,28 +2,28 @@ import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import pino from 'pino';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { requireIntegrationTestDatabase } from '../support/test-database.js';
 import { GmailDraftService, type GmailConfig } from '../../src/domain/gmail/gmail-service.js';
 import { MockGmailDraftProvider } from '../../src/integrations/gmail/mock-gmail.js';
 import { buildCandidateLead } from '../../src/domain/leads/lead-factory.js';
-import { createDb, type DbHandle } from '../../src/persistence/db.js';
+import { type DbHandle } from '../../src/persistence/db.js';
 import { DrizzleGmailUnitOfWork } from '../../src/persistence/gmail-unit-of-work.js';
 import { GmailRepository } from '../../src/persistence/repositories/gmail.repo.js';
 import { GmailInputRepository } from '../../src/persistence/repositories/gmail-input.repo.js';
 import { LeadFactsRepository } from '../../src/persistence/repositories/lead-facts.repo.js';
 import { LeadsRepository } from '../../src/persistence/repositories/leads.repo.js';
 import { PipelineRunsRepository } from '../../src/persistence/repositories/runs.repo.js';
-import { truncateAll } from '../../src/persistence/maintenance.js';
 import { demoDecisions, demoDeploymentRuns, demos, emailDraftFinalizations, emailDrafts, gmailDrafts, leads as leadsTbl } from '../../src/persistence/schema.js';
 
-const DATABASE_URL = process.env.DATABASE_URL;
+const testDatabase = requireIntegrationTestDatabase();
 const logger = pino({ level: 'silent' });
 const ACCOUNT = 'sender@example.com';
 const RECIP = 'office@example.org';
 const BODY = 'Hallo,\n\nDas Konzept: https://demo.example.net/\n\nBeste Grüße\n{{SENDER_NAME}}';
 
-describe.skipIf(!DATABASE_URL)('createGmailDrafts (PostgreSQL)', () => {
+describe('createGmailDrafts (PostgreSQL)', () => {
   let handle: DbHandle;
-  beforeEach(async () => { handle ??= createDb(DATABASE_URL as string); await truncateAll(handle.db); });
+  beforeEach(async () => { handle ??= testDatabase.createHandle(); await testDatabase.truncate(handle.db); });
   afterAll(async () => { if (handle) await handle.pool.end(); });
 
   async function seed(): Promise<string> {

@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { eq } from 'drizzle-orm';
 import pino from 'pino';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { requireIntegrationTestDatabase } from '../support/test-database.js';
 import { AuditService, type AuditConfig, type AuditTxRepos, type AuditUnitOfWork } from '../../src/domain/audit/audit-service.js';
 import { recoverEnvelopes } from '../../src/domain/audit/envelope-recovery.js';
 import { buildEvidencePackage, type EvidencePackage } from '../../src/domain/audit/evidence-package.js';
@@ -12,8 +13,7 @@ import { buildCandidateLead } from '../../src/domain/leads/lead-factory.js';
 import { defaultMockAuditResponder } from '../../src/fixtures/mock-audit-responses.js';
 import { LocalEnvelopeStore } from '../../src/integrations/audit/envelope-store.js';
 import { MockLlmProvider, type MockResponder } from '../../src/integrations/llm/mock-llm.js';
-import { createDb, type DbHandle } from '../../src/persistence/db.js';
-import { truncateAll } from '../../src/persistence/maintenance.js';
+import { type DbHandle } from '../../src/persistence/db.js';
 import { DrizzleAuditUnitOfWork } from '../../src/persistence/audit-unit-of-work.js';
 import { AuditInputRepository } from '../../src/persistence/repositories/audit-input.repo.js';
 import { LeadsRepository } from '../../src/persistence/repositories/leads.repo.js';
@@ -30,7 +30,7 @@ import {
   websiteCaptureRuns,
 } from '../../src/persistence/schema.js';
 
-const DATABASE_URL = process.env.DATABASE_URL;
+const testDatabase = requireIntegrationTestDatabase();
 const logger = pino({ level: 'silent' });
 const URL_PRIMARY = 'https://www.acmedental.example/';
 
@@ -53,13 +53,13 @@ const CONFIG: AuditConfig = {
   worstCaseInputTokensPerCall: 35_800,
 };
 
-describe.skipIf(!DATABASE_URL)('auditWebsites (PostgreSQL)', () => {
+describe('auditWebsites (PostgreSQL)', () => {
   let handle: DbHandle;
   let envDir: string;
 
   beforeEach(async () => {
-    handle ??= createDb(DATABASE_URL as string);
-    await truncateAll(handle.db);
+    handle ??= testDatabase.createHandle();
+    await testDatabase.truncate(handle.db);
     envDir = await mkdtemp(join(tmpdir(), 'auditenv-'));
   });
   afterAll(async () => {

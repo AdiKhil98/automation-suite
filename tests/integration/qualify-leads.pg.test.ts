@@ -1,5 +1,6 @@
 import { eq, sql } from 'drizzle-orm';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { requireIntegrationTestDatabase } from '../support/test-database.js';
 import { QUALIFICATION_RULES } from '../../src/config/qualification-rules.js';
 import { buildLeadFactInputs } from '../../src/domain/lead-facts/build-facts.js';
 import { buildCandidateLead, buildLeadFromFacts, type LeadFactsInput } from '../../src/domain/leads/lead-factory.js';
@@ -10,8 +11,7 @@ import {
   type QualificationUnitOfWork,
 } from '../../src/domain/qualification/qualification-service.js';
 import { type QualificationNiche } from '../../src/domain/qualification/qualify.js';
-import { createDb, type DbHandle } from '../../src/persistence/db.js';
-import { truncateAll } from '../../src/persistence/maintenance.js';
+import { type DbHandle } from '../../src/persistence/db.js';
 import { DrizzleQualificationUnitOfWork } from '../../src/persistence/qualification-unit-of-work.js';
 import { LeadFactsRepository } from '../../src/persistence/repositories/lead-facts.repo.js';
 import { LeadsRepository } from '../../src/persistence/repositories/leads.repo.js';
@@ -21,7 +21,7 @@ import { SuppressionRepository } from '../../src/persistence/repositories/suppre
 import { SuppressionAdminService } from '../../src/domain/suppression/admin-service.js';
 import { pipelineEvents, qualificationResultFacts } from '../../src/persistence/schema.js';
 
-const DATABASE_URL = process.env.DATABASE_URL;
+const testDatabase = requireIntegrationTestDatabase();
 const NICHE: QualificationNiche = {
   allowedCategories: ['dentist', 'orthodontist'],
   excludeChains: true,
@@ -45,12 +45,12 @@ const STRONG: LeadFactsInput = {
   ownershipType: 'INDEPENDENT',
 };
 
-describe.skipIf(!DATABASE_URL)('qualifyLead (PostgreSQL)', () => {
+describe('qualifyLead (PostgreSQL)', () => {
   let handle: DbHandle;
 
   beforeEach(async () => {
-    handle ??= createDb(DATABASE_URL as string);
-    await truncateAll(handle.db);
+    handle ??= testDatabase.createHandle();
+    await testDatabase.truncate(handle.db);
   });
 
   afterAll(async () => {

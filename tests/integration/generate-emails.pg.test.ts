@@ -2,26 +2,26 @@ import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import pino from 'pino';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { requireIntegrationTestDatabase } from '../support/test-database.js';
 import { EmailWriterService } from '../../src/domain/email/email-writer-service.js';
 import { worstCaseEmailInputTokens } from '../../src/domain/email/email-token-budget.js';
 import { buildCandidateLead } from '../../src/domain/leads/lead-factory.js';
 import { defaultMockEmailResponder } from '../../src/fixtures/mock-email-responses.js';
 import { MockLlmProvider } from '../../src/integrations/llm/mock-llm.js';
-import { createDb, type DbHandle } from '../../src/persistence/db.js';
+import { type DbHandle } from '../../src/persistence/db.js';
 import { DrizzleEmailUnitOfWork } from '../../src/persistence/email-unit-of-work.js';
-import { truncateAll } from '../../src/persistence/maintenance.js';
 import { DemoInputRepository } from '../../src/persistence/repositories/demo-input.repo.js';
 import { LeadFactsRepository } from '../../src/persistence/repositories/lead-facts.repo.js';
 import { LeadsRepository } from '../../src/persistence/repositories/leads.repo.js';
 import { PipelineRunsRepository } from '../../src/persistence/repositories/runs.repo.js';
 import { auditFindings, auditRuns, emailDrafts, emailFactInputs, emailFindingInputs, modelCalls, opportunityAssessments } from '../../src/persistence/schema.js';
 
-const DATABASE_URL = process.env.DATABASE_URL;
+const testDatabase = requireIntegrationTestDatabase();
 const logger = pino({ level: 'silent' });
 
-describe.skipIf(!DATABASE_URL)('generateEmails (PostgreSQL)', () => {
+describe('generateEmails (PostgreSQL)', () => {
   let handle: DbHandle;
-  beforeEach(async () => { handle ??= createDb(DATABASE_URL as string); await truncateAll(handle.db); });
+  beforeEach(async () => { handle ??= testDatabase.createHandle(); await testDatabase.truncate(handle.db); });
   afterAll(async () => { if (handle) await handle.pool.end(); });
 
   async function seed(): Promise<string> {

@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { eq } from 'drizzle-orm';
 import pino from 'pino';
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { requireIntegrationTestDatabase } from '../support/test-database.js';
 import { DemoComposerService } from '../../src/domain/demo/composer/demo-composer-service.js';
 import { COMPOSER_TEMPLATE_ID, COMPOSER_TEMPLATE_VERSION } from '../../src/domain/demo/composer/compose.js';
 import { worstCaseComposerInputTokens } from '../../src/domain/demo/composer/composer-token-budget.js';
@@ -12,9 +13,8 @@ import { buildCandidateLead } from '../../src/domain/leads/lead-factory.js';
 import { defaultMockComposerResponder } from '../../src/fixtures/mock-composer-responses.js';
 import { LocalDemoWriter } from '../../src/integrations/demo/demo-writer.js';
 import { MockLlmProvider } from '../../src/integrations/llm/mock-llm.js';
-import { createDb, type DbHandle } from '../../src/persistence/db.js';
+import { type DbHandle } from '../../src/persistence/db.js';
 import { DrizzleComposerUnitOfWork } from '../../src/persistence/composer-unit-of-work.js';
-import { truncateAll } from '../../src/persistence/maintenance.js';
 import { DemoInputRepository } from '../../src/persistence/repositories/demo-input.repo.js';
 import { LeadFactsRepository } from '../../src/persistence/repositories/lead-facts.repo.js';
 import { LeadsRepository } from '../../src/persistence/repositories/leads.repo.js';
@@ -23,16 +23,16 @@ import {
   auditFindings, auditRuns, demoDesignSpecs, demoFactInputs, demoFindingInputs, demos, modelCalls, opportunityAssessments,
 } from '../../src/persistence/schema.js';
 
-const DATABASE_URL = process.env.DATABASE_URL;
+const testDatabase = requireIntegrationTestDatabase();
 const logger = pino({ level: 'silent' });
 
-describe.skipIf(!DATABASE_URL)('composeDemos (PostgreSQL)', () => {
+describe('composeDemos (PostgreSQL)', () => {
   let handle: DbHandle;
   let outDir: string;
 
   beforeEach(async () => {
-    handle ??= createDb(DATABASE_URL as string);
-    await truncateAll(handle.db);
+    handle ??= testDatabase.createHandle();
+    await testDatabase.truncate(handle.db);
     outDir = await mkdtemp(join(tmpdir(), 'compose-'));
   });
   afterEach(async () => {

@@ -313,8 +313,8 @@ program
 
 program
   .command('reset-test-data')
-  .description('Clear all local pipeline data (blocked when NODE_ENV=production)')
-  .action(() => withContext(resetTestData));
+  .description('Clear only the validated local integration-test database')
+  .action(() => resetTestData());
 
 program.parseAsync(process.argv).catch((err: unknown) => {
   const message = err instanceof Error ? err.message : String(err);

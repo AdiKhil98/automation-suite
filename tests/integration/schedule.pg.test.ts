@@ -2,20 +2,20 @@ import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import pino from 'pino';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { requireIntegrationTestDatabase } from '../support/test-database.js';
 import { ScheduleService, type ScheduleConfig } from '../../src/domain/schedule/schedule-service.js';
 import { type SchedulingRules } from '../../src/domain/schedule/scheduler.js';
 import { buildCandidateLead } from '../../src/domain/leads/lead-factory.js';
-import { createDb, type DbHandle } from '../../src/persistence/db.js';
+import { type DbHandle } from '../../src/persistence/db.js';
 import { DrizzleScheduleUnitOfWork } from '../../src/persistence/schedule-unit-of-work.js';
 import { ScheduleRepository } from '../../src/persistence/repositories/schedule.repo.js';
 import { ScheduleInputRepository } from '../../src/persistence/repositories/schedule-input.repo.js';
 import { LeadFactsRepository } from '../../src/persistence/repositories/lead-facts.repo.js';
 import { LeadsRepository } from '../../src/persistence/repositories/leads.repo.js';
 import { PipelineRunsRepository } from '../../src/persistence/repositories/runs.repo.js';
-import { truncateAll } from '../../src/persistence/maintenance.js';
 import { demoDecisions, demoDeploymentRuns, demos, emailDraftFinalizations, emailDrafts, gmailDrafts, leads as leadsTbl, sendSchedules } from '../../src/persistence/schema.js';
 
-const DATABASE_URL = process.env.DATABASE_URL;
+const testDatabase = requireIntegrationTestDatabase();
 const logger = pino({ level: 'silent' });
 const TZ = 'America/New_York';
 const RECIP = 'contact@example.com';
@@ -23,9 +23,9 @@ const MON = Date.parse('2026-07-20T00:00:00Z');
 const rules: SchedulingRules = { windowStartHour: 9, windowEndHour: 17, allowedWeekdays: [1, 2, 3, 4, 5], minSpacingMinutes: 30, dailyCap: 20, earliestOffsetMinutes: 60, horizonDays: 14 };
 const cfg: ScheduleConfig = { featureEnabled: true, rules, rulesVersion: 'sched-rules-1' };
 
-describe.skipIf(!DATABASE_URL)('scheduling (PostgreSQL)', () => {
+describe('scheduling (PostgreSQL)', () => {
   let handle: DbHandle;
-  beforeEach(async () => { handle ??= createDb(DATABASE_URL as string); await truncateAll(handle.db); });
+  beforeEach(async () => { handle ??= testDatabase.createHandle(); await testDatabase.truncate(handle.db); });
   afterAll(async () => { if (handle) await handle.pool.end(); });
 
   async function seed(): Promise<string> {

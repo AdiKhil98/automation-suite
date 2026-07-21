@@ -5,12 +5,13 @@ import { join } from 'node:path';
 import { eq } from 'drizzle-orm';
 import pino from 'pino';
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { requireIntegrationTestDatabase } from '../support/test-database.js';
 import { hashCanonical } from '../../src/utils/hash.js';
 import { DeploymentService, type DeployConfig, type VerifyFetchFn } from '../../src/domain/deploy/deployment-service.js';
 import { ReviewService } from '../../src/domain/review/review-service.js';
 import { MockNetlifyDeploymentProvider } from '../../src/integrations/netlify/mock-netlify.js';
 import { buildCandidateLead } from '../../src/domain/leads/lead-factory.js';
-import { createDb, type DbHandle } from '../../src/persistence/db.js';
+import { type DbHandle } from '../../src/persistence/db.js';
 import { DrizzleDeployUnitOfWork } from '../../src/persistence/deploy-unit-of-work.js';
 import { DrizzleReviewUnitOfWork } from '../../src/persistence/review-unit-of-work.js';
 import { DeployRepository } from '../../src/persistence/repositories/deploy.repo.js';
@@ -19,20 +20,19 @@ import { ReviewReadRepository } from '../../src/persistence/repositories/review.
 import { LeadFactsRepository } from '../../src/persistence/repositories/lead-facts.repo.js';
 import { LeadsRepository } from '../../src/persistence/repositories/leads.repo.js';
 import { PipelineRunsRepository } from '../../src/persistence/repositories/runs.repo.js';
-import { truncateAll } from '../../src/persistence/maintenance.js';
 import { demoDecisions, demoDeploymentRuns, demos, emailDraftFinalizations, emailDrafts, leads as leadsTbl } from '../../src/persistence/schema.js';
 
-const DATABASE_URL = process.env.DATABASE_URL;
+const testDatabase = requireIntegrationTestDatabase();
 const logger = pino({ level: 'silent' });
 const HOST = 'deploy-preview.netlify.app';
 const DEMO_HTML = `<!doctype html><html lang="en"><head><meta name="robots" content="noindex,nofollow,noarchive"><meta http-equiv="Content-Security-Policy" content="default-src 'none'"><title>x — concept redesign (demo)</title></head><body><a class="cta" href="#contact">Get in touch</a><div>concept redesign</div></body></html>`;
 const ARTIFACT_HASH = hashCanonical({ html: DEMO_HTML, template: 'composer-v1', version: 'composer-tpl-1' });
 const okFetch: VerifyFetchFn = (url) => Promise.resolve({ kind: 'ok', status: 200, finalUrl: url, host: new URL(url).host, headers: { 'x-robots-tag': 'noindex' }, body: DEMO_HTML });
 
-describe.skipIf(!DATABASE_URL)('deployDemos (PostgreSQL)', () => {
+describe('deployDemos (PostgreSQL)', () => {
   let handle: DbHandle;
   let dir: string;
-  beforeEach(async () => { handle ??= createDb(DATABASE_URL as string); await truncateAll(handle.db); dir = await mkdtemp(join(tmpdir(), 'deploy-pg-')); await writeFile(join(dir, 'index.html'), DEMO_HTML, 'utf8'); await writeFile(join(dir, 'netlify.toml'), '# x', 'utf8'); });
+  beforeEach(async () => { handle ??= testDatabase.createHandle(); await testDatabase.truncate(handle.db); dir = await mkdtemp(join(tmpdir(), 'deploy-pg-')); await writeFile(join(dir, 'index.html'), DEMO_HTML, 'utf8'); await writeFile(join(dir, 'netlify.toml'), '# x', 'utf8'); });
   afterEach(async () => { await rm(dir, { recursive: true, force: true }); });
   afterAll(async () => { if (handle) await handle.pool.end(); });
 

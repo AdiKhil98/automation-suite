@@ -1,17 +1,18 @@
 import { truncateAll } from '../../persistence/maintenance.js';
-import { type CliContext } from '../context.js';
+import { createDb } from '../../persistence/db.js';
+import { requireDestructiveTestDatabase } from '../../persistence/test-database-guard.js';
 
 /**
- * Clear all local pipeline data. Refuses to run when NODE_ENV=production so the
- * command can never wipe a production database by accident.
+ * Clear only the validated local integration-test database. This command never
+ * reads the operational connection setting, so it cannot open Supabase.
  */
-export async function resetTestData(ctx: CliContext): Promise<void> {
-  if (ctx.config.NODE_ENV === 'production') {
-    console.error('Refusing to reset data: NODE_ENV=production.');
-    process.exitCode = 1;
-    return;
+export async function resetTestData(): Promise<void> {
+  const permit = requireDestructiveTestDatabase();
+  const { db, pool } = createDb(permit.databaseUrl);
+  try {
+    await truncateAll(db, permit);
+  } finally {
+    await pool.end();
   }
-  await truncateAll(ctx.db);
-
   console.log('Local test data cleared (leads, evidence, pipeline_runs, pipeline_events).');
 }

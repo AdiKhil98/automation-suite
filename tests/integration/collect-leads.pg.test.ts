@@ -1,16 +1,16 @@
 import pino from 'pino';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { requireIntegrationTestDatabase } from '../support/test-database.js';
 import { collectLeads, type CollectOptions } from '../../src/pipeline/collect-leads.js';
 import { MockLeadSource, type MockBusiness } from '../../src/integrations/lead-source/mock-lead-source.js';
-import { createDb, type DbHandle } from '../../src/persistence/db.js';
-import { truncateAll } from '../../src/persistence/maintenance.js';
+import { type DbHandle } from '../../src/persistence/db.js';
 import { DrizzleUnitOfWork } from '../../src/persistence/unit-of-work.js';
 import { PipelineRunsRepository } from '../../src/persistence/repositories/runs.repo.js';
 import { SourceRequestsRepository } from '../../src/persistence/repositories/source.repo.js';
 import { leads, sourceEntities, sourceObservations } from '../../src/persistence/schema.js';
 import { type CollectTxRepos, type UnitOfWork } from '../../src/pipeline/ports.js';
 
-const DATABASE_URL = process.env.DATABASE_URL;
+const testDatabase = requireIntegrationTestDatabase();
 const logger = pino({ level: 'silent' });
 
 function biz(id: string, over: Partial<MockBusiness> = {}): MockBusiness {
@@ -41,12 +41,12 @@ function baseOpts(runId: string, over: Partial<CollectOptions> = {}): CollectOpt
 }
 
 // Skips entirely when no database is configured (keeps `pnpm test` unit-only).
-describe.skipIf(!DATABASE_URL)('collectLeads (PostgreSQL)', () => {
+describe('collectLeads (PostgreSQL)', () => {
   let handle: DbHandle;
 
   beforeEach(async () => {
-    handle ??= createDb(DATABASE_URL as string);
-    await truncateAll(handle.db);
+    handle ??= testDatabase.createHandle();
+    await testDatabase.truncate(handle.db);
   });
 
   afterAll(async () => {

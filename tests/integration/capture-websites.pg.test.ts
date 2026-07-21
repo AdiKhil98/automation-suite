@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { requireIntegrationTestDatabase } from '../support/test-database.js';
 import {
   CaptureService,
   type CaptureTxRepos,
@@ -13,8 +14,7 @@ import { buildCandidateLead } from '../../src/domain/leads/lead-factory.js';
 import { LeadService } from '../../src/domain/leads/lead-service.js';
 import { MockCaptureProvider, type MockPageSpec } from '../../src/integrations/capture/mock-capture.js';
 import { LocalFsCaptureStorage } from '../../src/integrations/capture/local-fs-storage.js';
-import { createDb, type DbHandle } from '../../src/persistence/db.js';
-import { truncateAll } from '../../src/persistence/maintenance.js';
+import { type DbHandle } from '../../src/persistence/db.js';
 import { DrizzleCaptureUnitOfWork } from '../../src/persistence/capture-unit-of-work.js';
 import { CaptureRepository } from '../../src/persistence/repositories/capture.repo.js';
 import { LeadFactsRepository } from '../../src/persistence/repositories/lead-facts.repo.js';
@@ -29,7 +29,7 @@ import {
   websiteCaptureRuns,
 } from '../../src/persistence/schema.js';
 
-const DATABASE_URL = process.env.DATABASE_URL;
+const testDatabase = requireIntegrationTestDatabase();
 
 const RENDERABLE = '<html lang="en"><head><title>Acme Dental</title></head><body><h1>Acme Dental</h1><p>Welcome to our Manchester dental practice — book an appointment today.</p><a href="tel:+441614960000">Call</a></body></html>';
 
@@ -45,13 +45,13 @@ const CONFIG = {
   ambiguousMargin: 0.1,
 };
 
-describe.skipIf(!DATABASE_URL)('captureWebsites (PostgreSQL)', () => {
+describe('captureWebsites (PostgreSQL)', () => {
   let handle: DbHandle;
   let artDir: string;
 
   beforeEach(async () => {
-    handle ??= createDb(DATABASE_URL as string);
-    await truncateAll(handle.db);
+    handle ??= testDatabase.createHandle();
+    await testDatabase.truncate(handle.db);
     artDir = await mkdtemp(join(tmpdir(), 'capdb-'));
   });
   afterAll(async () => {
