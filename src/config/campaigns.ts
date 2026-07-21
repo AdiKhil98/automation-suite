@@ -44,6 +44,12 @@ export const campaigns: Record<string, Campaign> = {
     query: { textQuery: 'Zahnärzte am Ufer Berlin' },
     niche: dentalNiche,
   },
+  'prospect-runtime': {
+    name: 'prospect-runtime',
+    provider: 'mock',
+    query: { textQuery: 'bounded prospect continuation' },
+    niche: { allowedCategories: ['dentist', 'dental_clinic', 'lawyer', 'gym', 'fitness_center', 'real_estate_agency'], excludeChains: true, chainNames: [] },
+  },
 };
 
 export function getCampaign(name: string): Campaign {

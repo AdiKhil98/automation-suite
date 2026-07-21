@@ -56,6 +56,15 @@ const envSchema = z.object({
   PLACES_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
   PLACES_MAX_RETRIES: z.coerce.number().int().nonnegative().default(2),
 
+  // Bounded radius prospecting. Disabled by default; real reads also require ALLOW_PAID_READS.
+  PROSPECT_DISCOVERY_ENABLED: boolString(false),
+  PROSPECT_MAX_CANDIDATES_PER_RUN: z.coerce.number().int().min(1).max(20).default(5),
+  PROSPECT_TARGET_QUALIFIED_PER_RUN: z.coerce.number().int().min(1).max(20).default(1),
+  PROSPECT_MAX_PLACE_DETAILS_PER_RUN: z.coerce.number().int().min(1).max(20).default(5),
+  PROSPECT_MAX_WEBSITE_VERIFICATIONS_PER_RUN: z.coerce.number().int().min(1).max(20).default(5),
+  PROSPECT_RANK_PREFERENCE: z.enum(['POPULARITY', 'DISTANCE']).default('POPULARITY'),
+  PROSPECT_CONTINUE_PIPELINE: boolString(false),
+
   // Deduplication near-address threshold in metres (conservative).
   DEDUP_NEAR_ADDRESS_METERS: z.coerce.number().positive().default(40),
 
@@ -249,6 +258,15 @@ const envSchema = z.object({
 });
 
 const refinedEnvSchema = envSchema.superRefine((val, ctx) => {
+  if (val.PROSPECT_TARGET_QUALIFIED_PER_RUN > val.PROSPECT_MAX_CANDIDATES_PER_RUN) {
+    ctx.addIssue({ code: 'custom', path: ['PROSPECT_TARGET_QUALIFIED_PER_RUN'], message: 'prospect target cannot exceed candidate cap' });
+  }
+  if (val.PROSPECT_MAX_PLACE_DETAILS_PER_RUN > val.PROSPECT_MAX_CANDIDATES_PER_RUN || val.PROSPECT_MAX_WEBSITE_VERIFICATIONS_PER_RUN > val.PROSPECT_MAX_CANDIDATES_PER_RUN) {
+    ctx.addIssue({ code: 'custom', path: ['PROSPECT_MAX_CANDIDATES_PER_RUN'], message: 'prospect external-call caps cannot exceed candidate cap' });
+  }
+  if (val.PROSPECT_DISCOVERY_ENABLED && val.ALLOW_PAID_READS && !val.GOOGLE_PLACES_API_KEY) {
+    ctx.addIssue({ code: 'custom', path: ['GOOGLE_PLACES_API_KEY'], message: 'GOOGLE_PLACES_API_KEY is required for enabled prospect discovery' });
+  }
   if (val.LEAD_SOURCE === 'google_places' && !val.GOOGLE_PLACES_API_KEY) {
     ctx.addIssue({
       code: 'custom',

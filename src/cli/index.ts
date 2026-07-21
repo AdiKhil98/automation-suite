@@ -24,6 +24,7 @@ import { approveSendingReadinessCommand, reconcileSendAttemptCommand, recoverSta
   sendAttemptStatusCommand, sendingReadinessStatusCommand } from './commands/send-admin.js';
 import { previewDemoCommand } from './commands/preview-demo.js';
 import { qualifyLeadsCommand } from './commands/qualify-leads.js';
+import { prospectRunCommand } from './commands/prospect-run.js';
 import { createSampleLeads } from './commands/create-sample-leads.js';
 import { leadState } from './commands/lead-state.js';
 import { listLeads } from './commands/list-leads.js';
@@ -80,6 +81,20 @@ program
   .action((opts: { lead: string }) =>
     withContext((ctx) => websiteVerificationStatusCommand(ctx, opts)),
   );
+
+program
+  .command('prospect-run')
+  .description('Discover and qualify a bounded niche + radius candidate set; disabled by default')
+  .requiredOption('--niche <name>', 'dentists | lawyers | gyms | real_estate')
+  .option('--location <text>', 'city/locality/administrative area; optional with explicit coordinates')
+  .requiredOption('--radius-km <n>', 'radius greater than 0 and no more than 50 km')
+  .option('--target-qualified <n>', 'qualified lead target, bounded by configured cap')
+  .option('--max-candidates <n>', 'candidate budget, 1-20 and bounded by configured cap')
+  .option('--rank <rank>', 'POPULARITY | DISTANCE')
+  .option('--latitude <n>', 'manual latitude; requires longitude and bypasses location resolution')
+  .option('--longitude <n>', 'manual longitude; requires latitude and bypasses location resolution')
+  .option('--continue-pipeline', 'continue only the first qualified lead through existing guarded stages')
+  .action((opts: { niche: string; location?: string; radiusKm: string; targetQualified?: string; maxCandidates?: string; rank?: string; latitude?: string; longitude?: string; continuePipeline?: boolean }) => withContext((ctx) => prospectRunCommand(ctx, opts)));
 
 program
   .command('qualify-leads')
@@ -239,7 +254,7 @@ program
 program
   .command('add-suppression')
   .description('Phase 16: add an audited suppression after exact interactive confirmation; no external call')
-  .requiredOption('--scope <scope>', 'email | domain | phone | place_id')
+  .requiredOption('--scope <scope>', 'email | domain | phone | place_id | business')
   .requiredOption('--value <value>', 'identity value (never printed or written to audit events)')
   .requiredOption('--reason <text>', 'audited operational reason; do not include private identity data')
   .requiredOption('--by <operator>', 'operator identity')
@@ -248,7 +263,7 @@ program
 program
   .command('suppression-status')
   .description('Phase 16: inspect suppressions with identity values replaced by hashes')
-  .option('--scope <scope>', 'optional email | domain | phone | place_id filter')
+  .option('--scope <scope>', 'optional email | domain | phone | place_id | business filter')
   .action((opts: { scope?: string }) => withContext((ctx) => suppressionStatusCommand(ctx, opts)));
 
 program

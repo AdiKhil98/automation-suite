@@ -13,6 +13,7 @@ export interface CaptureCliOptions {
   campaign: string;
   purpose?: string;
   limit?: string;
+  lead?: string;
 }
 
 export async function captureWebsitesCommand(ctx: CliContext, cliOpts: CaptureCliOptions): Promise<void> {
@@ -26,7 +27,7 @@ export async function captureWebsitesCommand(ctx: CliContext, cliOpts: CaptureCl
   const items: CaptureItem[] = [];
 
   if (purpose === 'AUDIT_CAPTURE') {
-    let leads = all.filter((l) => l.status === 'QUALIFIED' || l.status === 'READY_FOR_CAPTURE');
+    let leads = all.filter((l) => (l.status === 'QUALIFIED' || l.status === 'READY_FOR_CAPTURE') && (!cliOpts.lead || l.id === cliOpts.lead));
     if (cliOpts.limit) leads = leads.slice(0, Number.parseInt(cliOpts.limit, 10));
     leads = leads.slice(0, ctx.config.CAPTURE_MAX_LEADS_PER_RUN);
     for (const lead of leads) {
@@ -34,7 +35,7 @@ export async function captureWebsitesCommand(ctx: CliContext, cliOpts: CaptureCl
       items.push({ input: { leadId: lead.id, purpose, facts: await factsRepo.listCurrentFacts(lead.id) } });
     }
   } else {
-    let leads = all.filter((l) => l.status === 'NEEDS_MANUAL_REVIEW');
+    let leads = all.filter((l) => l.status === 'NEEDS_MANUAL_REVIEW' && (!cliOpts.lead || l.id === cliOpts.lead));
     if (cliOpts.limit) leads = leads.slice(0, Number.parseInt(cliOpts.limit, 10));
     for (const lead of leads) {
       const target = await captureRepo.getVerificationTarget(lead.id);

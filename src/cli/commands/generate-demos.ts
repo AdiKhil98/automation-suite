@@ -14,6 +14,7 @@ import { type CliContext } from '../context.js';
 export interface GenerateDemosOptions {
   campaign: string;
   limit?: string;
+  lead?: string;
 }
 
 export async function generateDemosCommand(ctx: CliContext, cliOpts: GenerateDemosOptions): Promise<void> {
@@ -41,7 +42,7 @@ export async function generateDemosCommand(ctx: CliContext, cliOpts: GenerateDem
   const factsRepo = new LeadFactsRepository(ctx.db);
 
   const all = await ctx.leads.list(1000);
-  let leads = all.filter((l) => l.status === 'OPPORTUNITY_READY');
+  let leads = all.filter((l) => l.status === 'OPPORTUNITY_READY' && (!cliOpts.lead || l.id === cliOpts.lead));
   if (cliOpts.limit) leads = leads.slice(0, Number.parseInt(cliOpts.limit, 10));
   leads = leads.slice(0, c.MAX_BRANDED_DEMOS_PER_RUN);
 

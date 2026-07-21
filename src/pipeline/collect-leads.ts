@@ -48,9 +48,10 @@ export interface CollectSummary {
   interrupted: boolean;
 }
 
-interface CandidateOutcome {
+export interface CandidateOutcome {
   result: ProcessingResult | 'REJECTED' | 'BRANCH';
   newLead: boolean;
+  leadId: string | null;
 }
 
 function factsToDedupInput(facts: NonNullable<RawCandidate['facts']>): DedupInput {
@@ -178,7 +179,7 @@ export async function collectLeads(
   return summary;
 }
 
-async function processCandidate(
+export async function processCandidate(
   repos: CollectTxRepos,
   candidate: RawCandidate,
   requestId: string,
@@ -201,7 +202,7 @@ async function processCandidate(
       message: `Malformed candidate rejected (placeId="${candidate.sourcePlaceId}")`,
       data: null,
     });
-    return { result: 'REJECTED', newLead: false };
+    return { result: 'REJECTED', newLead: false, leadId: null };
   }
 
   // Idempotency: known (provider, Place ID) => reuse the same lead, append observation.
@@ -223,7 +224,7 @@ async function processCandidate(
       message: `Re-observed ${provider} place ${sourcePlaceId}`,
       data: null,
     });
-    return { result: 'REFRESHED', newLead: false };
+    return { result: 'REFRESHED', newLead: false, leadId: existing.leadId };
   }
 
   let leadId: string;
@@ -325,5 +326,5 @@ async function processCandidate(
   });
 
   const newLead = result === 'CREATED' || result === 'BRANCH' || result === 'AMBIGUOUS';
-  return { result, newLead };
+  return { result, newLead, leadId };
 }

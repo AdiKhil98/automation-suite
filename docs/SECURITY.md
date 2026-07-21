@@ -17,11 +17,27 @@
 
 ## Google Places data handling (Phase 2)
 
-> **Current policy (migration 0018):** ID-only discovery is unchanged. Approved Place Details fields may be
+> **Current policy (migrations 0018-0019):** ID-only discovery is unchanged. Approved Place Details fields may be
 > persisted with `google_places` field-level provenance and retrieval timestamps before website verification.
 > Candidate website facts are not official facts; manual/website facts are never overwritten by a Google
 > refresh. Phone requires separate approval. Raw responses, authorization headers, ratings, reviews, and
-> coordinates are not stored. This supersedes the older no-Google-content statements below.
+> location-resolution coordinates are stored only in the dedicated normalized location cache/run records.
+> This supersedes the older no-Google-content statements below.
+
+### Bounded radius discovery
+
+- `PROSPECT_DISCOVERY_ENABLED=false` and `PROSPECT_CONTINUE_PIPELINE=false` by default; real Places reads also
+  require `ALLOW_PAID_READS=true` and a configured key.
+- Operator niches resolve through a fixed allowlist. Nearby Search is one request, one page, maximum 20 IDs,
+  with `places.id` as the complete field mask. Place Details remains one attempt per new candidate and never
+  requests phone unless separately approved.
+- Location-name resolution makes at most one Text Search request and caches only normalized location,
+  formatted location, coordinates, provider, and timestamp. Entries older than 30 days are not reused;
+  manual coordinates bypass resolution.
+- Exact candidate order, internal lead binding, skip reason, and aggregate call counters are persisted. API
+  keys, raw provider responses, response bodies, headers, and unrelated fields are not.
+- Three consecutive matching or very-fast verifier failures trip a systemic circuit breaker; candidate-specific
+  failures do not. No automatic provider or website retry exists.
 
 Google Maps Platform terms restrict caching of Places content, so the system persists **no Google Places
 content**. See docs/integrations/google-places.md and DECISIONS D-0008.

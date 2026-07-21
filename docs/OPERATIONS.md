@@ -46,6 +46,11 @@ test connections separate.
 pnpm cli collect-leads --campaign dental-manchester-test
 pnpm cli collect-leads --campaign dental-manchester-test --dry-run --limit 25
 
+# Bounded production prospecting (disabled unless PROSPECT_DISCOVERY_ENABLED=true and ALLOW_PAID_READS=true)
+pnpm cli prospect-run --niche dentists --location "Berlin, Germany" --radius-km 10 --target-qualified 1 --max-candidates 5 --rank POPULARITY
+# Explicit coordinates bypass the one-request location resolver
+pnpm cli prospect-run --niche dentists --location "Berlin, Germany" --latitude 52.52 --longitude 13.405 --radius-km 10
+
 # Phase 3 — deterministic PRE_AUDIT qualification of collected leads
 pnpm cli qualify-leads --campaign dental-manchester-test
 
@@ -70,6 +75,11 @@ pnpm cli eval-audit [--models a,b] [--reviewers c] [--max-calls N] [--out dir]
 pnpm cli generate-demos --campaign dental-manchester-test [--limit N]
 pnpm cli preview-demo --lead <lead-id>   # serves the demo on http://127.0.0.1:<port>/ (loopback only)
 ```
+
+`prospect-run` never accepts arbitrary Google types, never requests more than one Nearby page, and uses an
+ID-only discovery field mask. `--continue-pipeline` additionally requires `PROSPECT_CONTINUE_PIPELINE=true`,
+passes only the first qualified lead into exact-lead existing stages, and stops before deployment, Gmail,
+scheduling, or sending. It does not change flags itself.
 
 Demos are written to `./demos/<leadId>/` (git-ignored), marked `GENERATED_PENDING_REVIEW`, and are
 never published in Phase 8 — a later phase handles human approval + Netlify deployment.

@@ -14,7 +14,7 @@ export interface QualificationResultWriter {
   save(result: QualificationResult): Promise<string>;
 }
 export interface SuppressionChecker {
-  isSuppressed(lead: Pick<Lead, 'normalizedDomain' | 'normalizedPhone' | 'placeId'>): Promise<boolean>;
+  isSuppressed(lead: Pick<Lead, 'normalizedDomain' | 'normalizedPhone' | 'placeId'> & Partial<Pick<Lead, 'id' | 'normalizedName'>>): Promise<boolean>;
 }
 
 /** Transaction-scoped repositories for a single atomic qualification. */

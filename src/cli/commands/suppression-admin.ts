@@ -5,7 +5,7 @@ import { PipelineRepository } from '../../persistence/repositories/pipeline.repo
 import { SuppressionRepository, type SuppressionScope } from '../../persistence/repositories/suppression.repo.js';
 import { type CliContext } from '../context.js';
 
-const scopes = new Set<SuppressionScope>(['email', 'domain', 'phone', 'place_id']);
+const scopes = new Set<SuppressionScope>(['email', 'domain', 'phone', 'place_id', 'business']);
 function scopeOf(value: string): SuppressionScope { if (!scopes.has(value as SuppressionScope)) throw new Error('invalid_suppression_scope'); return value as SuppressionScope; }
 function service(ctx: CliContext) { return new SuppressionAdminService(new SuppressionRepository(ctx.db), new PipelineRepository(ctx.db)); }
 

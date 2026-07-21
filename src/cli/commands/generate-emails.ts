@@ -12,6 +12,7 @@ import { type CliContext } from '../context.js';
 export interface GenerateEmailsOptions {
   campaign: string;
   limit?: string;
+  lead?: string;
 }
 
 export async function generateEmailsCommand(ctx: CliContext, cliOpts: GenerateEmailsOptions): Promise<void> {
@@ -33,7 +34,7 @@ export async function generateEmailsCommand(ctx: CliContext, cliOpts: GenerateEm
   const perLeadWorstCase = providerName === 'mock' ? 0 : (perCallW ?? 0) + (perCallR ?? 0);
 
   const all = await ctx.leads.list(1000);
-  let leads = all.filter((l) => l.status === 'DEMO_READY' || l.status === 'DEMO_DECIDED');
+  let leads = all.filter((l) => (l.status === 'DEMO_READY' || l.status === 'DEMO_DECIDED') && (!cliOpts.lead || l.id === cliOpts.lead));
   if (cliOpts.limit) leads = leads.slice(0, Number.parseInt(cliOpts.limit, 10));
 
   const items: EmailItem[] = [];

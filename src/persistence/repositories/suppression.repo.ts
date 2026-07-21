@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, or } from 'drizzle-orm';
 import { type Lead } from '../../domain/leads/lead.js';
+import { normalizeName } from '../../domain/leads/normalize.js';
 import { type DbExecutor } from '../db.js';
-import { suppressionList } from '../schema.js';
+import { leadFacts, suppressionList } from '../schema.js';
 
-export type SuppressionScope = 'domain' | 'phone' | 'place_id' | 'email';
+export type SuppressionScope = 'domain' | 'phone' | 'place_id' | 'email' | 'business';
 export interface SuppressionRecord { id: string; scope: SuppressionScope; value: string; reason: string | null; createdBy: string; createdAt: Date; revokedAt: Date | null; revokedBy: string | null; revokeReason: string | null }
 
 /**
@@ -32,14 +33,24 @@ export class SuppressionRepository {
     return rows.map((row) => ({ ...row, scope: row.scope as SuppressionScope }));
   }
 
-  async isSuppressed(lead: Pick<Lead, 'normalizedDomain' | 'normalizedPhone' | 'placeId'>): Promise<boolean> {
+  async isSuppressed(lead: Pick<Lead, 'normalizedDomain' | 'normalizedPhone' | 'placeId'> & Partial<Pick<Lead, 'id' | 'normalizedName'>>): Promise<boolean> {
     const checks: Array<{ scope: SuppressionScope; value: string }> = [];
+    if (lead.normalizedName) checks.push({ scope: 'business', value: lead.normalizedName });
     if (lead.normalizedDomain) checks.push({ scope: 'domain', value: lead.normalizedDomain });
     if (lead.normalizedPhone) checks.push({ scope: 'phone', value: lead.normalizedPhone });
     if (lead.placeId) checks.push({ scope: 'place_id', value: lead.placeId });
+    const factRows = lead.id ? await this.db.select({ factType: leadFacts.factType, value: leadFacts.value }).from(leadFacts)
+      .where(and(eq(leadFacts.leadId, lead.id), eq(leadFacts.isCurrent, true), or(eq(leadFacts.factType, 'business_name'), eq(leadFacts.factType, 'candidate_website_url'), eq(leadFacts.factType, 'official_domain')))) : [];
+    for (const fact of factRows) {
+      if (fact.factType === 'business_name') {
+        const name = normalizeName(fact.value); if (name) checks.push({ scope: 'business', value: name });
+      } else {
+        try { checks.push({ scope: 'domain', value: normalizeSuppressionValue('domain', fact.value) }) } catch { /* invalid candidate URLs cannot match a domain suppression */ }
+      }
+    }
     if (checks.length === 0) return false;
 
-    for (const scope of ['domain', 'phone', 'place_id'] as const) {
+    for (const scope of ['business', 'domain', 'phone', 'place_id'] as const) {
       const values = checks.filter((c) => c.scope === scope).map((c) => c.value);
       if (values.length === 0) continue;
       const rows = await this.db
@@ -47,6 +58,18 @@ export class SuppressionRepository {
         .from(suppressionList)
         .where(and(eq(suppressionList.scope, scope), inArray(suppressionList.value, values), isNull(suppressionList.revokedAt)))
         .limit(1);
+      if (rows.length > 0) return true;
+    }
+    return false;
+  }
+
+  async isIdentitySuppressed(input: { placeId?: string | null; businessName?: string | null; websiteUrl?: string | null }): Promise<boolean> {
+    const values: Array<{ scope: SuppressionScope; value: string }> = [];
+    if (input.placeId) values.push({ scope: 'place_id', value: normalizeSuppressionValue('place_id', input.placeId) });
+    if (input.businessName) { const value = normalizeName(input.businessName); if (value) values.push({ scope: 'business', value }) }
+    if (input.websiteUrl) { try { values.push({ scope: 'domain', value: normalizeSuppressionValue('domain', input.websiteUrl) }) } catch { /* handled as invalid URL by prospecting */ } }
+    for (const item of values) {
+      const rows = await this.db.select({ id: suppressionList.id }).from(suppressionList).where(and(eq(suppressionList.scope, item.scope), eq(suppressionList.value, item.value), isNull(suppressionList.revokedAt))).limit(1);
       if (rows.length > 0) return true;
     }
     return false;
@@ -79,6 +102,11 @@ export function normalizeSuppressionValue(scope: SuppressionScope, input: string
     const phone = value.replace(/[\s().-]/g, '');
     if (!/^\+?[0-9]{7,20}$/.test(phone)) throw new Error('invalid_suppression_phone');
     return phone;
+  }
+  if (scope === 'business') {
+    const business = normalizeName(value);
+    if (!business || business.length > 300) throw new Error('invalid_suppression_business');
+    return business;
   }
   if (!/^[A-Za-z0-9_-]{3,256}$/.test(value)) throw new Error('invalid_suppression_place_id');
   return value;

@@ -4,6 +4,26 @@ Every significant decision is recorded here in the required format. Newest first
 
 ---
 
+## D-0035 - Radius prospecting is bounded, ordered, and candidate-fault tolerant
+
+- **Date:** 2026-07-22
+- **Problem:** A single exact-name Places query cannot reliably meet a qualified-lead target when candidates
+  are duplicate, suppressed, closed, missing a website, unverifiable, or deterministically disqualified.
+- **Chosen option:** Map operator niches to an explicit Google type allowlist, resolve one location (or accept
+  validated manual coordinates), request one ordered ID-only Nearby page, then process at most 20 candidates
+  sequentially through the existing deduplication, Place Details persistence, website-verification, and
+  qualification services until the target or a budget/health stop is reached.
+- **Safety boundary:** The command and downstream continuation are off by default. Nearby discovery requests
+  only `places.id`; no retry is automatic. Candidate failures continue, while repeated identical/very-fast
+  verifier failures and provider/config/database failures trip a run-level circuit breaker. Existing SSRF,
+  suppression, paid-read, action, approval, Gmail, and sending gates are unchanged.
+- **Persistence:** Additive forward-only migration 0019 stores cache/run/candidate metadata and expands the
+  audited suppression scope to normalized business names. Exact candidate order, skip reason, and aggregate
+  external-call counts are durable.
+- **Status:** Accepted for implementation and offline/mock verification.
+
+---
+
 ## D-0034 - Place Details persistence is independent from website verification
 
 - **Date:** 2026-07-21

@@ -15,6 +15,7 @@ import { type CliContext } from '../context.js';
 export interface AuditCliOptions {
   campaign: string;
   limit?: string;
+  lead?: string;
 }
 
 export async function auditWebsitesCommand(ctx: CliContext, cliOpts: AuditCliOptions): Promise<void> {
@@ -39,7 +40,7 @@ export async function auditWebsitesCommand(ctx: CliContext, cliOpts: AuditCliOpt
   const storage = new LocalFsCaptureStorage(c.CAPTURE_ARTIFACT_DIR);
 
   const all = await ctx.leads.list(1000);
-  let leads = all.filter((l) => l.status === 'READY_FOR_AUDIT');
+  let leads = all.filter((l) => l.status === 'READY_FOR_AUDIT' && (!cliOpts.lead || l.id === cliOpts.lead));
   if (cliOpts.limit) leads = leads.slice(0, Number.parseInt(cliOpts.limit, 10));
   leads = leads.slice(0, c.MAX_WEBSITE_AUDITS_PER_RUN);
 

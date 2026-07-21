@@ -4,6 +4,22 @@ All notable changes per phase. Format loosely follows Keep a Changelog.
 
 ## [Unreleased] - 2026-07-21
 
+### Added
+
+- Bounded `prospect-run` CLI for validated niche + location/coordinates + radius discovery, ordered candidate
+  fallback, deterministic qualification, and optional exact-lead downstream continuation.
+- Deterministic mappings for dentists, lawyers, gyms, and real-estate agencies to approved Google Table A
+  included types; arbitrary types are rejected before any provider request.
+- One-request cached location resolution and one-page Nearby Search (New) with the `places.id` field mask only.
+- Durable prospect run/candidate bookkeeping, exact skip reasons and provider counters, plus a fail-closed
+  verifier/provider circuit breaker. Migration `0019_radius_prospecting.sql` is additive and forward-only.
+- Business-name suppression scope and Google-fact-aware qualification suppression checks.
+
+### Safety
+
+- Prospecting and continuation are disabled by default. Places reads require the separate paid-read gate;
+  standard tests use injected transports and make no network calls. Continuation never invokes Gmail send.
+
 ### Fixed
 
 - Successful Google Place Details identity facts now persist independently with field-level provenance before

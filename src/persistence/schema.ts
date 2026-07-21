@@ -162,6 +162,90 @@ export const sourceObservations = pgTable(
   }),
 );
 
+// --- Production prospecting: cached location resolution + ordered radius runs ---
+
+export const prospectLocationCache = pgTable(
+  'prospect_location_cache',
+  {
+    id: text('id').primaryKey(),
+    normalizedLocation: text('normalized_location').notNull(),
+    formattedLocation: text('formatted_location').notNull(),
+    latitude: doublePrecision('latitude').notNull(),
+    longitude: doublePrecision('longitude').notNull(),
+    provider: text('provider').notNull(),
+    resolvedAt: timestamp('resolved_at', { withTimezone: true }).notNull(),
+  },
+  (t) => ({
+    locationUk: uniqueIndex('prospect_location_cache_location_uk').on(t.normalizedLocation),
+    latitudeCk: check('prospect_location_cache_latitude_ck', sql`${t.latitude} >= -90 AND ${t.latitude} <= 90`),
+    longitudeCk: check('prospect_location_cache_longitude_ck', sql`${t.longitude} >= -180 AND ${t.longitude} <= 180`),
+    providerCk: check('prospect_location_cache_provider_ck', sql`${t.provider} IN ('google_places')`),
+  }),
+);
+
+export const prospectRuns = pgTable(
+  'prospect_runs',
+  {
+    id: text('id').primaryKey(),
+    pipelineRunId: text('pipeline_run_id').notNull().references(() => pipelineRuns.id, { onDelete: 'cascade' }),
+    operatorNiche: text('operator_niche').notNull(),
+    includedTypes: jsonb('included_types').notNull(),
+    requestedLocation: text('requested_location').notNull(),
+    formattedLocation: text('formatted_location').notNull(),
+    latitude: doublePrecision('latitude').notNull(),
+    longitude: doublePrecision('longitude').notNull(),
+    locationProvider: text('location_provider').notNull(),
+    radiusKm: doublePrecision('radius_km').notNull(),
+    rankPreference: text('rank_preference').notNull(),
+    targetQualified: integer('target_qualified').notNull(),
+    maxCandidates: integer('max_candidates').notNull(),
+    continuePipeline: boolean('continue_pipeline').notNull().default(false),
+    status: text('status').notNull().default('RUNNING'),
+    result: text('result'),
+    qualifiedCount: integer('qualified_count').notNull().default(0),
+    processedCount: integer('processed_count').notNull().default(0),
+    externalCalls: jsonb('external_calls').notNull(),
+    circuitBreakerReason: text('circuit_breaker_reason'),
+    discoveredAt: timestamp('discovered_at', { withTimezone: true }).notNull(),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+  },
+  (t) => ({
+    pipelineRunUk: uniqueIndex('prospect_runs_pipeline_run_uk').on(t.pipelineRunId),
+    statusIdx: index('prospect_runs_status_idx').on(t.status),
+    statusCk: check('prospect_runs_status_ck', sql`${t.status} IN ('RUNNING','COMPLETED','FAILED')`),
+    resultCk: check('prospect_runs_result_ck', sql`${t.result} IS NULL OR ${t.result} IN ('TARGET_REACHED','CANDIDATE_BUDGET_EXHAUSTED','EXTERNAL_BUDGET_EXHAUSTED','SYSTEMIC_FAILURE')`),
+    radiusCk: check('prospect_runs_radius_ck', sql`${t.radiusKm} > 0 AND ${t.radiusKm} <= 50`),
+    candidateCapCk: check('prospect_runs_candidate_cap_ck', sql`${t.maxCandidates} BETWEEN 1 AND 20`),
+    targetCk: check('prospect_runs_target_ck', sql`${t.targetQualified} >= 1 AND ${t.targetQualified} <= ${t.maxCandidates}`),
+    rankCk: check('prospect_runs_rank_ck', sql`${t.rankPreference} IN ('POPULARITY','DISTANCE')`),
+  }),
+);
+
+export const prospectCandidates = pgTable(
+  'prospect_candidates',
+  {
+    id: text('id').primaryKey(),
+    prospectRunId: text('prospect_run_id').notNull().references(() => prospectRuns.id, { onDelete: 'cascade' }),
+    placeId: text('place_id').notNull(),
+    position: integer('position').notNull(),
+    leadId: text('lead_id').references(() => leads.id, { onDelete: 'set null' }),
+    outcome: text('outcome').notNull().default('DISCOVERED'),
+    skipReason: text('skip_reason'),
+    websiteFailureStage: text('website_failure_stage'),
+    websiteFailureCode: text('website_failure_code'),
+    websiteFailureElapsedMs: integer('website_failure_elapsed_ms'),
+    processedAt: timestamp('processed_at', { withTimezone: true }),
+  },
+  (t) => ({
+    runPositionUk: uniqueIndex('prospect_candidates_run_position_uk').on(t.prospectRunId, t.position),
+    runPlaceUk: uniqueIndex('prospect_candidates_run_place_uk').on(t.prospectRunId, t.placeId),
+    placeIdx: index('prospect_candidates_place_idx').on(t.placeId),
+    outcomeCk: check('prospect_candidates_outcome_ck', sql`${t.outcome} IN ('DISCOVERED','QUALIFIED','DUPLICATE','SUPPRESSED','NO_WEBSITE','CLOSED','WEBSITE_TRANSIENT','WEBSITE_INVALID','DISQUALIFIED','MANUAL_REVIEW','SYSTEMIC_FAILURE')`),
+    positionCk: check('prospect_candidates_position_ck', sql`${t.position} >= 0`),
+    elapsedCk: check('prospect_candidates_elapsed_ck', sql`${t.websiteFailureElapsedMs} IS NULL OR ${t.websiteFailureElapsedMs} >= 0`),
+  }),
+);
+
 // --- Phase 3: per-fact provenance, qualification, suppression ---
 //
 // NOTE: leads.facts_source / facts_source_url / facts_captured_at are DEPRECATED as
@@ -303,7 +387,7 @@ export const suppressionList = pgTable(
   },
   (t) => ({
     scopeValueUk: uniqueIndex('suppression_list_scope_value_uk').on(t.scope, t.value),
-      scopeCk: check('suppression_scope_ck', sql`${t.scope} IN ('domain', 'phone', 'place_id', 'email')`),
+      scopeCk: check('suppression_scope_ck', sql`${t.scope} IN ('domain', 'phone', 'place_id', 'email', 'business')`),
       revocationCk: check('suppression_revocation_ck', sql`(${t.revokedAt} IS NULL AND ${t.revokedBy} IS NULL AND ${t.revokeReason} IS NULL) OR (${t.revokedAt} IS NOT NULL AND ${t.revokedBy} IS NOT NULL AND ${t.revokeReason} IS NOT NULL)`),
   }),
 );

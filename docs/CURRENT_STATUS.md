@@ -2,13 +2,15 @@
 
 ## Current phase
 
-Phase 16: production safety hardening. Implementation and local/mock verification are complete and uncommitted,
-awaiting commit review. No live Gmail operation, real-data restoration, credential-ACL change, readiness approval,
-schedule, or send was authorized or performed.
+Phase 16 is committed and tagged. A bounded niche + location + radius prospecting command is now implemented
+and undergoing offline verification. No Google, website, OpenAI, Playwright, Netlify, or Gmail request was made
+during implementation; all outbound/sending defaults remain disabled.
 
 ## Completed work
 
-- Phases 0-15 are committed and tagged through `phase-15-production-sending-readiness` (`5d15c50`).
+- Phases 0-16 are committed and tagged through `phase-16-production-safety-hardening` (`9092606`).
+- Database test isolation is committed (`68a6ab3`), and website-verification observability plus independent
+  Place Details persistence is committed (`6e3b591`).
 - Phase 13 persists inert, deterministic, timezone-aware schedules only; it never schedules with Gmail.
 - Phase 14 is the authoritative fail-closed safety controller for exactly one existing scheduled draft.
   It verifies immutable bindings twice, requires a valid expiring readiness approval and exact interactive
@@ -41,7 +43,23 @@ schedule, or send was authorized or performed.
 - No live Gmail call, OAuth reauthorization, real draft read or mutation, real schedule/seed/readiness
   restoration, or email send is permitted during implementation and tests.
 
-## Phase 16 implementation scope
+## Bounded prospecting implementation
+
+- `prospect-run` accepts an approved niche, location or explicit coordinates, radius up to 50 km, qualified
+  target, candidate cap up to 20, and POPULARITY/DISTANCE ranking.
+- Operator niches map deterministically to an allowlist of Google Table A types; arbitrary types fail before
+  provider construction.
+- Location resolution is a single bounded Places Text Search and is cached; explicit coordinates bypass it.
+- Nearby Search is one page/one request with `places.id` only and preserves provider order.
+- Candidates are processed sequentially with existing collection deduplication, suppression, Place Details
+  persistence, SSRF-hardened website verification, and deterministic qualification services.
+- Candidate-specific failures are recorded and skipped. Repeated matching/very-fast verifier failures and
+  provider/config/database failures stop the run as `SYSTEMIC_FAILURE`.
+- `PROSPECT_DISCOVERY_ENABLED=false` and `PROSPECT_CONTINUE_PIPELINE=false` by default. Optional continuation
+  delegates only the first qualified lead through existing exact-lead stages and stops before deployment,
+  Gmail, scheduling, or sending.
+
+## Phase 16 completed scope
 
 - Reply-To integrity in every approved/provider envelope and fingerprint.
 - A complete local-only dry-run readiness report and a separate structurally read-only Gmail verifier.
@@ -50,7 +68,7 @@ schedule, or send was authorized or performed.
 - Credential-file ACL inspection/remediation tooling, tested only on temporary fictional files.
 - Production retention, objection, complaint, bounce, reply, rollback, and uncertainty runbooks.
 
-## Phase 16 implemented controls (uncommitted)
+## Phase 16 implemented controls
 
 - Reply-To is normalized, exact-or-absent, included in approved/provider hashes, and rejected when unexpected,
   duplicated, multiple, or malformed.
