@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { assertControlledDraftRecipient, assertControlledExistingLeadPreflight, assertControlledTestPreflight, controlledEmailArtifactHash,
+import { assertControlledDraftRecipient, assertControlledExistingLeadPreflight, assertControlledGmailDraftBinding, assertControlledTestPreflight, controlledEmailArtifactHash,
   controlledRecipientFingerprint } from '../../src/domain/prospect/controlled-test.js';
 import { withControlledTestGates } from '../../src/cli/commands/prospect-controlled-test.js';
 
@@ -39,6 +39,15 @@ describe('controlled prospect test preflight', () => {
       .toThrow('controlled_test_recipient_changed_before_draft');
     expect(assertControlledDraftRecipient('Operator@Controlled.Example', 'operator@controlled.example'))
       .toBe('operator@controlled.example');
+  });
+
+  it('binds the persisted provider draft ID without comparing it to the local row ID', () => {
+    const draft = { id: 'local-row-id', providerDraftId: 'provider-draft-id', recipientEmail: 'Operator@Controlled.Example' };
+    expect(() => assertControlledGmailDraftBinding(draft, 'provider-draft-id', 'operator@controlled.example')).not.toThrow();
+    expect(() => assertControlledGmailDraftBinding(draft, 'different-provider-id', 'operator@controlled.example'))
+      .toThrow('controlled_test_gmail_draft_binding_mismatch');
+    expect(() => assertControlledGmailDraftBinding(draft, 'provider-draft-id', 'different@controlled.example'))
+      .toThrow('controlled_test_gmail_draft_binding_mismatch');
   });
 
   it('has no send invocation or live send-provider import in the coordinator', () => {

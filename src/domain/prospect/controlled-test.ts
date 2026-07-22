@@ -25,6 +25,19 @@ export function assertControlledDraftRecipient(configuredRecipient: string, prop
   return configured;
 }
 
+/** Bind the persisted draft row to the provider result without confusing its local
+ * database UUID with Gmail's provider draft ID. */
+export function assertControlledGmailDraftBinding(
+  draft: { providerDraftId: string | null; recipientEmail: string },
+  resultProviderDraftId: string | null,
+  expectedRecipient: string,
+): void {
+  if (!resultProviderDraftId || draft.providerDraftId !== resultProviderDraftId
+    || normalizeControlledRecipient(draft.recipientEmail) !== normalizeControlledRecipient(expectedRecipient)) {
+    throw new Error('controlled_test_gmail_draft_binding_mismatch');
+  }
+}
+
 export function controlledEmailArtifactHash(subject: string, body: string): string {
   return sha256Hex(`${subject.replace(/\r\n/g, '\n').trim()}\n${body.replace(/\r\n/g, '\n').trim()}`);
 }

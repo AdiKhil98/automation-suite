@@ -5,7 +5,8 @@ import { type SendInput } from '../../domain/send/send-service.js';
 import { type ProspectContinuation, type ProspectContinuationContext } from '../../domain/prospect/prospect-service.js';
 import { CONTROLLED_TEST_RECIPIENT_ENV, CONTROLLED_TEST_TTL_MS, controlledEmailArtifactHash,
   controlledRecipientFingerprint, normalizeControlledRecipient,
-  assertControlledDraftRecipient, assertControlledExistingLeadPreflight } from '../../domain/prospect/controlled-test.js';
+  assertControlledDraftRecipient, assertControlledExistingLeadPreflight,
+  assertControlledGmailDraftBinding } from '../../domain/prospect/controlled-test.js';
 import { MockSendProvider } from '../../integrations/send/mock-send.js';
 import { ControlledTestRepository } from '../../persistence/repositories/controlled-test.repo.js';
 import { SendInputRepository } from '../../persistence/repositories/send-input.repo.js';
@@ -146,9 +147,7 @@ export class ControlledTestContinuation implements ProspectContinuation {
       if (gmailResult.outcome !== 'DRAFT_CREATED') throw new Error(`controlled_test_gmail_draft_failed:${gmailResult.outcome}`);
 
       const draft = requireValue(await repo.latestGmailDraft(leadId), 'controlled_test_gmail_draft_record_missing');
-      if (draft.id !== gmailResult.draftId || normalizeControlledRecipient(draft.recipientEmail) !== recipient) {
-        throw new Error('controlled_test_gmail_draft_binding_mismatch');
-      }
+      assertControlledGmailDraftBinding(draft, gmailResult.draftId, recipient);
       const preflightInput: SendInput = {
         leadId, leadStatus: 'DRAFT_CREATED', schedule: null,
         currentGmailDraft: { id: draft.id, outcome: draft.outcome, providerDraftId: draft.providerDraftId,
