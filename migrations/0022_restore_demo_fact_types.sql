@@ -1,0 +1,2 @@
+ALTER TABLE "lead_facts" DROP CONSTRAINT IF EXISTS "lead_facts_fact_type_ck";--> statement-breakpoint
+ALTER TABLE "lead_facts" ADD CONSTRAINT "lead_facts_fact_type_ck" CHECK (fact_type IN ('business_name','official_domain','official_website_url','candidate_website_url','google_place_id','official_location_page_url','domain','phone','contact_email','contact_form_url','formatted_address','latitude','longitude','city','country','category','rating','review_count','business_status','ownership_type','services','opening_hours','booking_url','contact_timezone'));

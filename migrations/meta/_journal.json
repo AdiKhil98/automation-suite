@@ -155,6 +155,13 @@
       "when": 1784923200000,
       "tag": "0021_controlled_test_retry_index",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1785009600000,
+      "tag": "0022_restore_demo_fact_types",
+      "breakpoints": true
     }
   ]
 }

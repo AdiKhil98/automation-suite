@@ -273,6 +273,9 @@ const FACT_TYPES = [
   'review_count',
   'business_status',
   'ownership_type',
+  'services',
+  'opening_hours',
+  'booking_url',
   'contact_timezone',
 ] as const;
 
