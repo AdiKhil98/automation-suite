@@ -6,6 +6,7 @@ import { DemoInputRepository } from '../../persistence/repositories/demo-input.r
 import { EmailInputRepository } from '../../persistence/repositories/email-input.repo.js';
 import { LeadFactsRepository } from '../../persistence/repositories/lead-facts.repo.js';
 import { PipelineRunsRepository } from '../../persistence/repositories/runs.repo.js';
+import { ControlledTestRepository } from '../../persistence/repositories/controlled-test.repo.js';
 import { buildEmailService } from './email-build.js';
 import { type CliContext } from '../context.js';
 
@@ -13,6 +14,7 @@ export interface GenerateEmailsOptions {
   campaign: string;
   limit?: string;
   lead?: string;
+  controlledTestRunId?: string;
 }
 
 export async function generateEmailsCommand(ctx: CliContext, cliOpts: GenerateEmailsOptions): Promise<void> {
@@ -43,7 +45,16 @@ export async function generateEmailsCommand(ctx: CliContext, cliOpts: GenerateEm
     const audit = await auditRepo.latestAuditForComposer(lead.id);
     if (!audit) { skippedNoAudit += 1; continue; }
     const facts = await factsRepo.listCurrentFacts(lead.id);
-    const demo = await emailInputRepo.latestDemo(lead.id);
+    let demo = await emailInputRepo.latestDemo(lead.id);
+    if (cliOpts.controlledTestRunId) {
+      if (!demo?.contentHash) throw new Error('controlled_test_demo_hash_missing');
+      const approved = await new ControlledTestRepository(ctx.db).isArtifactApproved({
+        controlledTestRunId: cliOpts.controlledTestRunId, leadId: lead.id, artifactType: 'DEMO',
+        artifactId: demo.id, artifactHash: demo.contentHash,
+      });
+      if (!approved) throw new Error('controlled_test_demo_approval_invalid');
+      demo = { ...demo, status: 'APPROVED' };
+    }
     items.push({ input: { leadId: lead.id, facts, findings: audit.findings, demo, opportunityScore: audit.opportunityScore } });
   }
 

@@ -18,7 +18,7 @@ export interface BuiltGmail {
 
 /**
  * Build the Gmail draft service. A REAL Gmail draft requires GMAIL_DRAFTS_ENABLED=true AND
- * OUTBOUND_ACTIONS_ENABLED=true AND
+ * GMAIL_DRAFT_ACTIONS_ENABLED=true AND
  * OAuth client id/secret AND a stored refresh token (run `gmail-auth`) AND GMAIL_ACCOUNT_EMAIL
  * AND GMAIL_SENDER_NAME. Otherwise the mock provider is used (no network). Only drafts.create
  * is ever called; the token is never logged or persisted.
@@ -28,7 +28,7 @@ export function buildGmailService(ctx: CliContext): BuiltGmail {
   const store = new LocalGmailTokenStore(c.GMAIL_CREDENTIALS_FILE);
   const clientCreds = loadGmailClientCredentials({ clientFile: c.GMAIL_OAUTH_CLIENT_FILE, envClientId: c.GMAIL_OAUTH_CLIENT_ID, envClientSecret: c.GMAIL_OAUTH_CLIENT_SECRET });
   const credentialsConfigured = !!clientCreds && !!c.GMAIL_ACCOUNT_EMAIL && !!c.GMAIL_SENDER_NAME && store.exists();
-  const live = c.GMAIL_DRAFTS_ENABLED && c.OUTBOUND_ACTIONS_ENABLED && credentialsConfigured;
+  const live = c.GMAIL_DRAFTS_ENABLED && c.GMAIL_DRAFT_ACTIONS_ENABLED && credentialsConfigured;
 
   let provider: GmailDraftProvider;
   if (live && clientCreds) {
@@ -47,7 +47,7 @@ export function buildGmailService(ctx: CliContext): BuiltGmail {
       gmailAccount: c.GMAIL_ACCOUNT_EMAIL ?? 'mock@example.com',
       senderName: c.GMAIL_SENDER_NAME ?? null,
       featureEnabled: c.GMAIL_DRAFTS_ENABLED,
-      outboundActionsEnabled: c.OUTBOUND_ACTIONS_ENABLED,
+      draftActionsEnabled: c.GMAIL_DRAFT_ACTIONS_ENABLED,
       credentialsConfigured,
       maxPerDay: c.GMAIL_MAX_DRAFTS_PER_DAY,
       minIntervalMs: c.GMAIL_MIN_DRAFT_INTERVAL_MS,

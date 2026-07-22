@@ -10,7 +10,8 @@ import {
 export interface ProspectLocationResolver { resolve(location: string): Promise<ResolvedLocation> }
 export interface ProspectNearbySearch { discover(input: { includedTypes: string[]; location: ResolvedLocation; radiusKm: number; maxCandidates: number; rankPreference: ResolvedProspectInput['rankPreference'] }): Promise<{ placeIds: string[]; requests: 1 }> }
 export interface ProspectCandidateProcessor { process(input: { prospectRunId: string; pipelineRunId: string; sourceRequestId: string; campaign: string; niche: string; includedTypes: string[]; placeId: string; position: number }): Promise<ProspectCandidateResult> }
-export interface ProspectContinuation { continueFirstQualified(leadId: string): Promise<void> }
+export interface ProspectContinuationContext { prospectRunId: string; pipelineRunId: string }
+export interface ProspectContinuation { continueFirstQualified(leadId: string, context: ProspectContinuationContext): Promise<void> }
 
 export interface ProspectStore {
   start(input: { id: string; pipelineRunId: string; options: ResolvedProspectInput; location: ResolvedLocation; discoveredAt: Date }): Promise<void>;
@@ -71,7 +72,9 @@ export class ProspectService {
     }
     if (qualifiedLeadIds.length < options.targetQualified && result === 'CANDIDATE_BUDGET_EXHAUSTED' && processed < discovery.placeIds.length) result = 'EXTERNAL_BUDGET_EXHAUSTED';
     await this.deps.store.finish({ runId, result, qualifiedCount: qualifiedLeadIds.length, processedCount: processed, externalCalls, circuitBreakerReason, completedAt: now() });
-    if (options.continuePipeline && qualifiedLeadIds[0] && this.deps.continuation) await this.deps.continuation.continueFirstQualified(qualifiedLeadIds[0]);
+    if (options.continuePipeline && qualifiedLeadIds[0] && this.deps.continuation) {
+      await this.deps.continuation.continueFirstQualified(qualifiedLeadIds[0], { prospectRunId: runId, pipelineRunId });
+    }
     return { runId, result, discovered: discovery.placeIds.length, processed, qualifiedLeadIds, externalCalls, circuitBreakerReason };
   }
 }

@@ -4,6 +4,38 @@ Every significant decision is recorded here in the required format. Newest first
 
 ---
 
+## D-0036 - Controlled prospect validation is isolated, test-addressed, and non-sendable
+
+- **Date:** 2026-07-22
+- **Problem:** The bounded prospect command could exercise content generation but stopped before preview
+  deployment, Gmail draft creation, known-draft verification, scheduling, and readiness evaluation. Reusing
+  normal human or sending approvals would make a one-session production validation unsafe and reusable.
+- **Chosen option:** Add a separate `--controlled-test` continuation for exactly one qualified lead. It fails
+  before provider construction unless `DRY_RUN=true`, sending and outbound are disabled, the exact approved
+  `TEST_RECIPIENT_EMAIL` variable is present, and the operator explicitly requests continuation plus controlled
+  artifact approval. The delivery recipient is stored separately from business facts and asserted immediately
+  before drafting. Short-lived `SYSTEM_CONTROLLED_TEST` approvals bind the run, lead, artifact ID/hash, reason,
+  time, and recipient fingerprint. They can satisfy only the controlled demo/email/finalization stage invocation;
+  they never update ordinary human approvals or production sending readiness.
+- **Safety boundary:** Draft preparation now has its own default-false `GMAIL_DRAFT_ACTIONS_ENABLED` gate,
+  superseding D-0029's coupling of drafting to the outbound-send switch. Sending remains exclusively governed
+  by the Phase 14 controller and still requires `SENDING_ENABLED=true`, `OUTBOUND_ACTIONS_ENABLED=true`,
+  `DRY_RUN=false`, live provider selection, valid sending readiness, and interactive confirmation. The controlled
+  coordinator imports only the mock send provider for local readiness and never calls `SendService.send`.
+  Its readiness and dry-run records are database-constrained to `CONTROLLED_TEST_NOT_SENDABLE` and
+  `sendable=false`; no row is inserted into `sending_readiness_approvals`.
+- **Reason:** This permits an auditable real-provider preparation smoke test while keeping the irreversible
+  action structurally unreachable and ensuring the business's real contact address cannot become the draft
+  recipient.
+- **Tradeoffs:** Controlled runs can still incur bounded Places, browser, LLM, Netlify, and Gmail draft costs.
+  A failure may leave independently auditable preparation artifacts, but temporary gates always restore and
+  no automatic retry or send is attempted. Controlled schedules use UTC because they are explicitly non-sendable.
+- **Rollback path:** Keep all preparation gates false, remove the controlled CLI path, and leave historical
+  controlled records intact. Migration `0020` is forward-only; destructive rollback is not an incident response.
+- **Status:** Implemented for mock/local verification; no live provider call or email send occurred.
+
+---
+
 ## D-0035 - Radius prospecting is bounded, ordered, and candidate-fault tolerant
 
 - **Date:** 2026-07-22
@@ -639,6 +671,8 @@ Every significant decision is recorded here in the required format. Newest first
 - **Status:** Accepted (Phase 12). Live smoke created exactly one draft, confirmed it remained a draft,
   advanced the lead to `DRAFT_CREATED`, persisted the unique fingerprint, and restored the feature flag
   to false. Private recipient and Gmail identifiers are intentionally not recorded here.
+  The original outbound-coupled draft gate is superseded by the dedicated preparation gate in D-0036;
+  the Phase 14 sending gates are unchanged.
 
 ---
 

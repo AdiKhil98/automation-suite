@@ -64,7 +64,10 @@ describe('prospect candidate fallback', () => {
     const h = harness([result('QUALIFIED', { leadId: 'lead.one.example' })]);
     const service = new ProspectService({ locationResolver: h.locationResolver, nearby: h.nearby, processor: h.processor, store: h.store, limits: { maxDetails: 5, maxWebsiteVerifications: 5 }, continuation });
     await service.run({ ...base, continuePipeline: true }, 'pipeline.example');
-    expect(continuation.continueFirstQualified).toHaveBeenCalledOnce(); expect(continuation.continueFirstQualified).toHaveBeenCalledWith('lead.one.example');
+    expect(continuation.continueFirstQualified).toHaveBeenCalledOnce();
+    expect(continuation.continueFirstQualified).toHaveBeenCalledWith('lead.one.example', {
+      prospectRunId: expect.any(String), pipelineRunId: 'pipeline.example',
+    });
     expect(Object.keys(continuation)).not.toContain('send');
   });
 

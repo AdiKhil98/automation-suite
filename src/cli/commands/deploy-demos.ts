@@ -8,6 +8,8 @@ import { type CliContext } from '../context.js';
 
 export interface DeployDemosOptions {
   limit?: string;
+  lead?: string;
+  controlledTestRunId?: string;
 }
 
 export async function deployDemosCommand(ctx: CliContext, cliOpts: DeployDemosOptions): Promise<void> {
@@ -20,7 +22,7 @@ export async function deployDemosCommand(ctx: CliContext, cliOpts: DeployDemosOp
   const inputRepo = new DeployInputRepository(ctx.db);
 
   const all = await ctx.leads.list(1000);
-  let leads = all.filter((l) => l.status === 'WAITING_FOR_DEMO_URL');
+  let leads = all.filter((l) => l.status === 'WAITING_FOR_DEMO_URL' && (!cliOpts.lead || l.id === cliOpts.lead));
   const cap = c.NETLIFY_MAX_DEPLOYMENTS_PER_RUN;
   if (cliOpts.limit) leads = leads.slice(0, Number.parseInt(cliOpts.limit, 10));
   leads = leads.slice(0, cap);
@@ -36,7 +38,11 @@ export async function deployDemosCommand(ctx: CliContext, cliOpts: DeployDemosOp
     const data = await inputRepo.latest(lead.id);
     const demoDir = join(c.DEMO_OUTPUT_DIR, safePathSegment(lead.id));
     if (!data.demo) { ctx.logger.warn({ leadId: lead.id }, 'no demo for lead — skipped'); continue; }
-    const r = await service.deploy({ leadId: lead.id, leadStatus: lead.status, demoDir, demo: data.demo, email: data.email }, runId);
+    const controlled = cliOpts.controlledTestRunId
+      ? await inputRepo.controlledEligibility(cliOpts.controlledTestRunId, lead.id, data)
+      : null;
+    const r = await service.deploy({ leadId: lead.id, leadStatus: lead.status, demoDir,
+      demo: controlled?.demo ?? data.demo, email: controlled?.email ?? data.email }, runId);
     counts.set(r.outcome, (counts.get(r.outcome) ?? 0) + 1);
   }
   await runs.finish(runId, 'COMPLETED', JSON.stringify(Object.fromEntries(counts)));

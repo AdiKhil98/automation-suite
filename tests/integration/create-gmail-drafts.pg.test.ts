@@ -46,7 +46,7 @@ describe('createGmailDrafts (PostgreSQL)', () => {
     return lead.id;
   }
 
-  const config: GmailConfig = { gmailAccount: ACCOUNT, senderName: 'Example Sender', featureEnabled: true, outboundActionsEnabled: true, credentialsConfigured: true, maxPerDay: 20, minIntervalMs: 0 };
+  const config: GmailConfig = { gmailAccount: ACCOUNT, senderName: 'Example Sender', featureEnabled: true, draftActionsEnabled: true, credentialsConfigured: true, maxPerDay: 20, minIntervalMs: 0 };
   const service = (provider = new MockGmailDraftProvider(ACCOUNT)) => new GmailDraftService({ provider, store: new GmailRepository(handle.db), uow: new DrizzleGmailUnitOfWork(handle.db), logger, config });
 
   it('creates a draft, persists metadata, lead → DRAFT_CREATED; re-run reuses (no duplicate)', async () => {

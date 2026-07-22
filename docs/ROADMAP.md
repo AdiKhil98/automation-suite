@@ -1,9 +1,9 @@
 # Roadmap
 
-**Status:** Phase 15 complete, committed and tagged (`5d15c50`,
-`phase-15-production-sending-readiness`). Phase 16 (production safety hardening) is approved for
-implementation and testing only; it must make no live Gmail calls or sends.
-**Last updated:** 2026-07-21
+**Status:** Phases 0-16 are complete, committed and tagged through
+`phase-16-production-safety-hardening` (`9092606`). Bounded radius prospecting is committed (`2fe45de`).
+A post-Phase-16 controlled validation orchestrator is implemented for review; it remains non-sendable.
+**Last updated:** 2026-07-22
 
 One phase at a time. Each phase ends with tests, a commit, an annotated tag, and an explicit approval gate.
 No phase begins before the previous one is approved with `APPROVE PHASE X`.
@@ -26,7 +26,15 @@ No phase begins before the previous one is approved with `APPROVE PHASE X`.
 | 13 | Scheduling & daily operations | `phase-13-daily-operations` | complete; committed + tagged |
 | 14 | Controlled sending (only on explicit request) | `phase-14-sending` | complete; committed + tagged |
 | 15 | Production sending readiness and live Gmail provider integration | `phase-15-production-sending-readiness` | complete; committed + tagged |
-| 16 | Production safety hardening | `phase-16-production-safety-hardening` | implemented + verified; uncommitted; no live use |
+| 16 | Production safety hardening | `phase-16-production-safety-hardening` | complete; committed + tagged; no live send |
+
+> **Controlled prospect validation extension:** the normal prospect continuation remains conservative.
+> An explicit `--controlled-test` mode may process exactly one qualified lead through the existing capture,
+> audit, composition, preview-deploy, draft, read-only preflight, schedule, and local-readiness stages. It
+> requires the configured test-recipient environment variable, safe sending kill switches, and short-lived
+> run/hash-bound controlled approvals. These approvals are not human or sending approvals. The resulting
+> readiness/dry-run records are database-constrained to `CONTROLLED_TEST_NOT_SENDABLE`; no send method is
+> reachable from the coordinator. See D-0036.
 
 > **Phase 16 objective:** close the production-readiness blockers found after Phase 15 without any
 > live Gmail operation or send. Reconcile operations documentation; bind and verify Reply-To; make

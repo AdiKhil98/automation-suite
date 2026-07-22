@@ -37,7 +37,7 @@ describe('gmail eligibility', () => {
   const base = (): GmailEligibilitySnapshot => ({
     leadStatus: 'HUMAN_APPROVED',
     finalization: { finalHumanDecision: 'APPROVED', resolvedBody: BODY },
-    recipientEmail: RECIP, featureEnabled: true, outboundActionsEnabled: true, credentialsConfigured: true, existingDraftForFingerprint: false,
+    recipientEmail: RECIP, featureEnabled: true, draftActionsEnabled: true, credentialsConfigured: true, existingDraftForFingerprint: false,
   });
   it('passes when all conditions hold (only {{SENDER_NAME}} remains)', () => {
     expect(checkGmailEligibility(base()).eligible).toBe(true);
@@ -50,7 +50,7 @@ describe('gmail eligibility', () => {
     expect(checkGmailEligibility({ ...base(), recipientEmail: null }).reasons).toContain('no_verified_recipient');
     expect(checkGmailEligibility({ ...base(), recipientEmail: 'not-an-email' }).reasons).toContain('recipient_not_valid_email');
     expect(checkGmailEligibility({ ...base(), featureEnabled: false }).eligible).toBe(false);
-    expect(checkGmailEligibility({ ...base(), outboundActionsEnabled: false }).reasons).toContain('outbound_actions_disabled');
+    expect(checkGmailEligibility({ ...base(), draftActionsEnabled: false }).reasons).toContain('gmail_draft_actions_disabled');
   });
   it('flags a reusable duplicate instead of failing', () => {
     const r = checkGmailEligibility({ ...base(), existingDraftForFingerprint: true });
@@ -62,7 +62,7 @@ describe('gmail eligibility', () => {
 
 const logger = pino({ level: 'silent' });
 const cfg = (over: Partial<GmailConfig> = {}): GmailConfig => ({
-  gmailAccount: ACCOUNT, senderName: 'Example Sender', featureEnabled: true, outboundActionsEnabled: true, credentialsConfigured: true, maxPerDay: 20, minIntervalMs: 0, ...over,
+  gmailAccount: ACCOUNT, senderName: 'Example Sender', featureEnabled: true, draftActionsEnabled: true, credentialsConfigured: true, maxPerDay: 20, minIntervalMs: 0, ...over,
 });
 interface Cap { transitions: string[]; completes: { id: string; patch: Partial<GmailDraftRecord> }[]; }
 function fakeUow(cap: Cap, leadStatus = 'HUMAN_APPROVED'): GmailUnitOfWork {

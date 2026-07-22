@@ -14,8 +14,8 @@ export async function createGmailDraftsCommand(ctx: CliContext, cliOpts: CreateG
     console.log('Gmail draft creation is disabled (GMAIL_DRAFTS_ENABLED=false).');
     return;
   }
-  if (!c.OUTBOUND_ACTIONS_ENABLED) {
-    console.log('Gmail draft creation is blocked (OUTBOUND_ACTIONS_ENABLED=false).');
+  if (!c.GMAIL_DRAFT_ACTIONS_ENABLED) {
+    console.log('Gmail draft creation is blocked (GMAIL_DRAFT_ACTIONS_ENABLED=false).');
     return;
   }
   const { service, providerName, live } = buildGmailService(ctx);

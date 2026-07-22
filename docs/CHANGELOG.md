@@ -2,7 +2,7 @@
 
 All notable changes per phase. Format loosely follows Keep a Changelog.
 
-## [Unreleased] - 2026-07-21
+## [Unreleased] - 2026-07-22
 
 ### Added
 
@@ -14,11 +14,24 @@ All notable changes per phase. Format loosely follows Keep a Changelog.
 - Durable prospect run/candidate bookkeeping, exact skip reasons and provider counters, plus a fail-closed
   verifier/provider circuit breaker. Migration `0019_radius_prospecting.sql` is additive and forward-only.
 - Business-name suppression scope and Google-fact-aware qualification suppression checks.
+- Explicit controlled-test prospect continuation through one verified preview, one test-addressed Gmail
+  draft, read-only exact-draft preflight, one inert schedule, and non-sendable readiness/dry-run evaluation.
+- `TEST_RECIPIENT_EMAIL` remains separate from business facts. Controlled artifact approvals use the fixed
+  `SYSTEM_CONTROLLED_TEST` actor/reason and expire after being bound to run, lead, artifact ID/hash, and
+  recipient fingerprint.
+- Migration `0020_controlled_test_orchestration.sql` adds database-constrained non-sendable controlled-run,
+  artifact-approval, and evaluation records. It does not add or alter a send path.
 
 ### Safety
 
 - Prospecting and continuation are disabled by default. Places reads require the separate paid-read gate;
   standard tests use injected transports and make no network calls. Continuation never invokes Gmail send.
+- Gmail draft creation now requires the dedicated default-false `GMAIL_DRAFT_ACTIONS_ENABLED` gate instead
+  of the irreversible outbound-send gate. Sending still requires `SENDING_ENABLED=true`,
+  `OUTBOUND_ACTIONS_ENABLED=true`, and `DRY_RUN=false` through the Phase 14 controller.
+- Controlled mode fails before provider construction unless the test recipient, exact-one target, continuation
+  approval, dry-run, and disabled sending/outbound switches all match. Temporary preparation gates are restored
+  in `finally` on success or failure.
 
 ### Fixed
 

@@ -1191,3 +1191,80 @@ export const sendAttempts = pgTable(
     reconciliationCk: check('send_attempt_reconciliation_ck', sql`(${t.reconciledOutcome} IS NULL AND ${t.reconciledBy} IS NULL AND ${t.reconciledAt} IS NULL AND ${t.reconciliationNote} IS NULL) OR (${t.reconciledOutcome} IN ('CONFIRMED_SENT','CONFIRMED_NOT_SENT') AND ${t.reconciledBy} IS NOT NULL AND ${t.reconciledAt} IS NOT NULL AND ${t.reconciliationNote} IS NOT NULL)`),
   }),
 );
+
+// --- Controlled end-to-end validation (explicitly non-sendable) ---
+
+export const controlledTestRuns = pgTable(
+  'controlled_test_runs',
+  {
+    id: text('id').primaryKey(),
+    prospectRunId: text('prospect_run_id').notNull().references(() => prospectRuns.id, { onDelete: 'cascade' }),
+    pipelineRunId: text('pipeline_run_id').notNull().references(() => pipelineRuns.id, { onDelete: 'cascade' }),
+    leadId: text('lead_id').notNull().references(() => leads.id, { onDelete: 'cascade' }),
+    recipientEmail: text('recipient_email').notNull(),
+    recipientFingerprint: text('recipient_fingerprint').notNull(),
+    recipientEnvName: text('recipient_env_name').notNull(),
+    actor: text('actor').notNull().default('SYSTEM_CONTROLLED_TEST'),
+    reason: text('reason').notNull(),
+    status: text('status').notNull().default('RUNNING'),
+    sendable: boolean('sendable').notNull().default(false),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+  },
+  (t) => ({
+    prospectRunUk: uniqueIndex('controlled_test_runs_prospect_run_uk').on(t.prospectRunId),
+    leadIdx: index('controlled_test_runs_lead_idx').on(t.leadId),
+    statusCk: check('controlled_test_runs_status_ck', sql`${t.status} IN ('RUNNING','COMPLETED','FAILED')`),
+    actorCk: check('controlled_test_runs_actor_ck', sql`${t.actor} = 'SYSTEM_CONTROLLED_TEST'`),
+    reasonCk: check('controlled_test_runs_reason_ck', sql`${t.reason} = 'operator-controlled end-to-end validation'`),
+    notSendableCk: check('controlled_test_runs_not_sendable_ck', sql`${t.sendable} = false`),
+    recipientEnvCk: check('controlled_test_runs_recipient_env_ck', sql`${t.recipientEnvName} = 'TEST_RECIPIENT_EMAIL'`),
+  }),
+);
+
+export const controlledTestArtifactApprovals = pgTable(
+  'controlled_test_artifact_approvals',
+  {
+    id: text('id').primaryKey(),
+    controlledTestRunId: text('controlled_test_run_id').notNull().references(() => controlledTestRuns.id, { onDelete: 'cascade' }),
+    leadId: text('lead_id').notNull().references(() => leads.id, { onDelete: 'cascade' }),
+    artifactType: text('artifact_type').notNull(),
+    artifactId: text('artifact_id').notNull(),
+    artifactHash: text('artifact_hash').notNull(),
+    actor: text('actor').notNull().default('SYSTEM_CONTROLLED_TEST'),
+    reason: text('reason').notNull(),
+    recipientFingerprint: text('recipient_fingerprint').notNull(),
+    approvedAt: timestamp('approved_at', { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  },
+  (t) => ({
+    artifactUk: uniqueIndex('controlled_test_artifact_approvals_artifact_uk').on(t.controlledTestRunId, t.artifactType, t.artifactId),
+    runIdx: index('controlled_test_artifact_approvals_run_idx').on(t.controlledTestRunId),
+    typeCk: check('controlled_test_artifact_approvals_type_ck', sql`${t.artifactType} IN ('DEMO','EMAIL_DRAFT','FINALIZED_EMAIL')`),
+    actorCk: check('controlled_test_artifact_approvals_actor_ck', sql`${t.actor} = 'SYSTEM_CONTROLLED_TEST'`),
+    reasonCk: check('controlled_test_artifact_approvals_reason_ck', sql`${t.reason} = 'operator-controlled end-to-end validation'`),
+  }),
+);
+
+export const controlledTestEvaluations = pgTable(
+  'controlled_test_evaluations',
+  {
+    id: text('id').primaryKey(),
+    controlledTestRunId: text('controlled_test_run_id').notNull().references(() => controlledTestRuns.id, { onDelete: 'cascade' }),
+    leadId: text('lead_id').notNull().references(() => leads.id, { onDelete: 'cascade' }),
+    gmailDraftId: text('gmail_draft_id').references(() => gmailDrafts.id, { onDelete: 'set null' }),
+    scheduleId: text('schedule_id').references(() => sendSchedules.id, { onDelete: 'set null' }),
+    evaluationType: text('evaluation_type').notNull(),
+    outcome: text('outcome').notNull().default('CONTROLLED_TEST_NOT_SENDABLE'),
+    report: jsonb('report').notNull(),
+    sendable: boolean('sendable').notNull().default(false),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    runTypeUk: uniqueIndex('controlled_test_evaluations_run_type_uk').on(t.controlledTestRunId, t.evaluationType),
+    typeCk: check('controlled_test_evaluations_type_ck', sql`${t.evaluationType} IN ('READINESS','DRY_RUN')`),
+    outcomeCk: check('controlled_test_evaluations_outcome_ck', sql`${t.outcome} = 'CONTROLLED_TEST_NOT_SENDABLE'`),
+    notSendableCk: check('controlled_test_evaluations_not_sendable_ck', sql`${t.sendable} = false`),
+  }),
+);

@@ -27,6 +27,9 @@ const envSchema = z.object({
   // Global safety switches. Default-safe: dry-run on, outbound off.
   DRY_RUN: boolString(true),
   OUTBOUND_ACTIONS_ENABLED: boolString(false),
+  // Operator-controlled end-to-end validation recipient. It is never copied into
+  // business facts and is only read when --controlled-test explicitly names it.
+  TEST_RECIPIENT_EMAIL: z.string().email().optional(),
 
   // Cost & rate limits (used from later phases; validated here so config is complete).
   MAX_LEADS_PER_RUN: z.coerce.number().int().positive().default(50),
@@ -203,6 +206,9 @@ const envSchema = z.object({
   // Fixed API/OAuth origins live in the adapters. Refresh token is stored in a git-ignored
   // 0600 credential file — NEVER in env, DB, logs, or git.
   GMAIL_DRAFTS_ENABLED: boolString(false),
+  // Draft creation is a reversible preparation action, independently gated from
+  // irreversible outbound sending. Sending still requires OUTBOUND_ACTIONS_ENABLED.
+  GMAIL_DRAFT_ACTIONS_ENABLED: boolString(false),
   // Preferred: the downloaded Google Cloud OAuth client JSON (Desktop app → `installed` key).
   // Git-ignored; avoids putting the secret in .env. Falls back to the two vars below.
   GMAIL_OAUTH_CLIENT_FILE: z.string().default('./.gmail-oauth-client.json'),

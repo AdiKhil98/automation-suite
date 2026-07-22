@@ -11,6 +11,7 @@ export async function truncateAll(db: Database, permit: DestructiveTestDatabaseP
   assertDestructiveTestDatabasePermit(permit);
   await db.execute(
     sql`TRUNCATE TABLE
+      controlled_test_evaluations, controlled_test_artifact_approvals, controlled_test_runs,
       prospect_candidates, prospect_runs, prospect_location_cache,
       send_attempts, sending_readiness_approvals, send_schedules, gmail_drafts,
       email_draft_finalizations, demo_deployment_runs, email_finding_inputs, email_fact_inputs, email_drafts,

@@ -16,10 +16,13 @@ import { buildEnrichmentService } from './enrichment-build.js';
 import { generateDemosCommand } from './generate-demos.js';
 import { generateEmailsCommand } from './generate-emails.js';
 import { type CliContext } from '../context.js';
+import { assertControlledTestPreflight } from '../../domain/prospect/controlled-test.js';
+import { ControlledTestContinuation, assertControlledProviderConfig, withControlledTestGates } from './prospect-controlled-test.js';
 
 export interface ProspectRunCliOptions {
   niche: string; location?: string; radiusKm: string; targetQualified?: string; maxCandidates?: string;
   rank?: string; latitude?: string; longitude?: string; continuePipeline?: boolean;
+  controlledTest?: boolean; testRecipientEnv?: string; autoApproveTestArtifacts?: boolean;
 }
 
 function numberOf(value: string | undefined, fallback: number): number { return value === undefined ? fallback : Number(value) }
@@ -37,6 +40,21 @@ class ExistingPipelineContinuation implements ProspectContinuation {
 }
 
 export async function prospectRunCommand(ctx: CliContext, cli: ProspectRunCliOptions): Promise<void> {
+  const c = ctx.config;
+  const targetQualified = numberOf(cli.targetQualified, c.PROSPECT_TARGET_QUALIFIED_PER_RUN);
+  if (cli.controlledTest) {
+    const recipient = assertControlledTestPreflight({ controlledTest: true,
+      continuePipeline: Boolean(cli.continuePipeline), autoApproveTestArtifacts: Boolean(cli.autoApproveTestArtifacts),
+      recipientEnvName: cli.testRecipientEnv, recipientValue: c.TEST_RECIPIENT_EMAIL,
+      targetQualified, dryRun: c.DRY_RUN, sendingEnabled: c.SENDING_ENABLED,
+      outboundActionsEnabled: c.OUTBOUND_ACTIONS_ENABLED });
+    assertControlledProviderConfig(c);
+    return withControlledTestGates(c, () => runProspect(ctx, cli, recipient));
+  }
+  return runProspect(ctx, cli, null);
+}
+
+async function runProspect(ctx: CliContext, cli: ProspectRunCliOptions, controlledRecipient: string | null): Promise<void> {
   const c = ctx.config;
   if (!c.PROSPECT_DISCOVERY_ENABLED) { console.log('Prospect discovery is disabled (PROSPECT_DISCOVERY_ENABLED=false).'); return }
   if (!c.ALLOW_PAID_READS) { console.log('Prospect discovery is blocked (ALLOW_PAID_READS=false).'); return }
@@ -57,7 +75,10 @@ export async function prospectRunCommand(ctx: CliContext, cli: ProspectRunCliOpt
     const store = new ProspectRepository(ctx.db);
     const builtEnrichment = buildEnrichmentService(ctx, true);
     const processor = new ProductionProspectCandidateProcessor({ db: ctx.db, details: new GooglePlacesDetailsClient(c.GOOGLE_PLACES_API_KEY, c.ENRICH_HTTP_TIMEOUT_MS, ctx.logger), enrichment: builtEnrichment.service, verify: builtEnrichment.verify, qualification: new QualificationService(new DrizzleQualificationUnitOfWork(ctx.db)), nearMeters: c.DEDUP_NEAR_ADDRESS_METERS, logger: ctx.logger });
-    const service = new ProspectService({ locationResolver: new GoogleLocationResolver(transport, store), nearby: new GoogleNearbySearch(transport), processor, store, limits: { maxDetails: c.PROSPECT_MAX_PLACE_DETAILS_PER_RUN, maxWebsiteVerifications: c.PROSPECT_MAX_WEBSITE_VERIFICATIONS_PER_RUN }, continuation: input.continuePipeline ? new ExistingPipelineContinuation(ctx) : undefined });
+    const continuation = input.continuePipeline
+      ? (controlledRecipient ? new ControlledTestContinuation(ctx, controlledRecipient) : new ExistingPipelineContinuation(ctx))
+      : undefined;
+    const service = new ProspectService({ locationResolver: new GoogleLocationResolver(transport, store), nearby: new GoogleNearbySearch(transport), processor, store, limits: { maxDetails: c.PROSPECT_MAX_PLACE_DETAILS_PER_RUN, maxWebsiteVerifications: c.PROSPECT_MAX_WEBSITE_VERIFICATIONS_PER_RUN }, continuation });
     const summary = await service.run(input, pipelineRunId);
     await runs.finish(pipelineRunId, summary.result === 'SYSTEMIC_FAILURE' ? 'FAILED' : 'COMPLETED', JSON.stringify(summary));
     console.log(`\nProspect run ${summary.runId}:`);

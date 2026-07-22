@@ -8,8 +8,8 @@ export interface GmailEligibilitySnapshot {
   /** Verified recipient address (from a contact_email fact), or null — NEVER guessed. */
   recipientEmail: string | null;
   featureEnabled: boolean;
-  /** Repository-wide outbound kill switch; draft creation is blocked unless explicitly armed. */
-  outboundActionsEnabled: boolean;
+  /** Dedicated draft-action gate; it never authorizes sending. */
+  draftActionsEnabled: boolean;
   credentialsConfigured: boolean;
   /** True if a Gmail draft already exists for this (account + finalized email + recipient). */
   existingDraftForFingerprint: boolean;
@@ -34,7 +34,7 @@ export function checkGmailEligibility(s: GmailEligibilitySnapshot): GmailEligibi
   const reasons: string[] = [];
 
   if (!s.featureEnabled) reasons.push('feature_disabled');
-  if (!s.outboundActionsEnabled) reasons.push('outbound_actions_disabled');
+  if (!s.draftActionsEnabled) reasons.push('gmail_draft_actions_disabled');
   if (!s.credentialsConfigured) reasons.push('credentials_missing');
   if (s.leadStatus !== 'HUMAN_APPROVED') reasons.push(`lead_not_human_approved:${s.leadStatus}`);
 

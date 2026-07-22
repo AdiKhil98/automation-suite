@@ -26,7 +26,7 @@ export interface GmailConfig {
   gmailAccount: string;
   senderName: string | null;
   featureEnabled: boolean;
-  outboundActionsEnabled: boolean;
+  draftActionsEnabled: boolean;
   credentialsConfigured: boolean;
   maxPerDay: number;
   minIntervalMs: number;
@@ -116,7 +116,7 @@ export class GmailDraftService {
       finalization: input.finalization ? { finalHumanDecision: input.finalization.finalHumanDecision, resolvedBody: input.finalization.resolvedBody } : null,
       recipientEmail: input.recipientEmail,
       featureEnabled: c.featureEnabled,
-      outboundActionsEnabled: c.outboundActionsEnabled,
+      draftActionsEnabled: c.draftActionsEnabled,
       credentialsConfigured: c.credentialsConfigured,
       existingDraftForFingerprint: existingDraft,
     };

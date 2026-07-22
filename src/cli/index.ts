@@ -94,6 +94,9 @@ program
   .option('--latitude <n>', 'manual latitude; requires longitude and bypasses location resolution')
   .option('--longitude <n>', 'manual longitude; requires latitude and bypasses location resolution')
   .option('--continue-pipeline', 'continue only the first qualified lead through existing guarded stages')
+  .option('--controlled-test', 'run the one-lead non-sendable controlled validation path')
+  .option('--test-recipient-env <name>', 'approved test-recipient environment variable name')
+  .option('--auto-approve-test-artifacts', 'record short-lived run/hash-bound controlled artifact approvals')
   .action((opts: { niche: string; location?: string; radiusKm: string; targetQualified?: string; maxCandidates?: string; rank?: string; latitude?: string; longitude?: string; continuePipeline?: boolean }) => withContext((ctx) => prospectRunCommand(ctx, opts)));
 
 program

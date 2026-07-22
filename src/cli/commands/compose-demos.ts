@@ -13,6 +13,7 @@ import { type CliContext } from '../context.js';
 export interface ComposeDemosOptions {
   campaign: string;
   limit?: string;
+  lead?: string;
 }
 
 export async function composeDemosCommand(ctx: CliContext, cliOpts: ComposeDemosOptions): Promise<void> {
@@ -36,7 +37,7 @@ export async function composeDemosCommand(ctx: CliContext, cliOpts: ComposeDemos
   const perDemoWorstCase = providerName === 'mock' ? 0 : (perCallGen ?? 0) + (perCallRev ?? 0);
 
   const all = await ctx.leads.list(1000);
-  let leads = all.filter((l) => l.status === 'OPPORTUNITY_READY');
+  let leads = all.filter((l) => l.status === 'OPPORTUNITY_READY' && (!cliOpts.lead || l.id === cliOpts.lead));
   if (cliOpts.limit) leads = leads.slice(0, Number.parseInt(cliOpts.limit, 10));
   leads = leads.slice(0, c.MAX_BRANDED_DEMOS_PER_RUN);
 

@@ -2,9 +2,10 @@
 
 ## Current phase
 
-Phase 16 is committed and tagged. A bounded niche + location + radius prospecting command is now implemented
-and undergoing offline verification. No Google, website, OpenAI, Playwright, Netlify, or Gmail request was made
-during implementation; all outbound/sending defaults remain disabled.
+Phase 16 is committed and tagged. Bounded niche + location + radius prospecting is committed, and a
+non-sendable controlled end-to-end validation mode is implemented for final review. No Google, website,
+OpenAI, Playwright, Netlify, or Gmail request was made during implementation; all outbound/sending defaults
+remain disabled.
 
 ## Completed work
 
@@ -40,6 +41,7 @@ during implementation; all outbound/sending defaults remain disabled.
 - `OUTBOUND_ACTIONS_ENABLED=false`
 - `SENDING_PROVIDER=mock`
 - `DRY_RUN=true`
+- `GMAIL_DRAFT_ACTIONS_ENABLED=false`
 - No live Gmail call, OAuth reauthorization, real draft read or mutation, real schedule/seed/readiness
   restoration, or email send is permitted during implementation and tests.
 
@@ -55,9 +57,15 @@ during implementation; all outbound/sending defaults remain disabled.
   persistence, SSRF-hardened website verification, and deterministic qualification services.
 - Candidate-specific failures are recorded and skipped. Repeated matching/very-fast verifier failures and
   provider/config/database failures stop the run as `SYSTEMIC_FAILURE`.
-- `PROSPECT_DISCOVERY_ENABLED=false` and `PROSPECT_CONTINUE_PIPELINE=false` by default. Optional continuation
-  delegates only the first qualified lead through existing exact-lead stages and stops before deployment,
-  Gmail, scheduling, or sending.
+- `PROSPECT_DISCOVERY_ENABLED=false` and `PROSPECT_CONTINUE_PIPELINE=false` by default.
+- Normal continuation still stops before deployment, Gmail, scheduling, or sending.
+- `--controlled-test --test-recipient-env TEST_RECIPIENT_EMAIL --auto-approve-test-artifacts` is a separate
+  exact-one-lead path that can continue through a verified preview, one test-addressed Gmail draft, read-only
+  known-draft preflight, one inert schedule, and non-sendable readiness/dry-run records. It never calls send.
+- Controlled approvals are short-lived and bound to run, lead, exact artifact ID/hash, and test-recipient
+  fingerprint. They do not update normal human approvals or `sending_readiness_approvals`.
+- The recipient override is stored separately from business facts and asserted again immediately before draft
+  creation. The prospect's real email is never selected for the controlled draft.
 
 ## Phase 16 completed scope
 

@@ -8,10 +8,10 @@ import { demos } from '../schema.js';
 export class EmailInputRepository {
   constructor(private readonly db: DbExecutor) {}
 
-  async latestDemo(leadId: string): Promise<EmailDemoMeta | null> {
+  async latestDemo(leadId: string): Promise<(EmailDemoMeta & { contentHash: string | null }) | null> {
     const rows = await this.db.select().from(demos).where(eq(demos.leadId, leadId)).orderBy(desc(demos.createdAt)).limit(1);
     const d = rows[0];
     if (!d) return null;
-    return { id: d.id, status: d.status, ctaKind: d.ctaKind };
+    return { id: d.id, status: d.status, ctaKind: d.ctaKind, contentHash: d.contentHash };
   }
 }
