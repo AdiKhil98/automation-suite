@@ -1213,7 +1213,10 @@ export const controlledTestRuns = pgTable(
     completedAt: timestamp('completed_at', { withTimezone: true }),
   },
   (t) => ({
-    prospectRunUk: uniqueIndex('controlled_test_runs_prospect_run_uk').on(t.prospectRunId),
+    // Preserve failed attempt history while permitting an explicit retry. A prospect
+    // run may still have at most one active or successfully completed controlled run.
+    prospectRunUk: uniqueIndex('controlled_test_runs_prospect_run_uk').on(t.prospectRunId)
+      .where(sql`${t.status} IN ('RUNNING','COMPLETED')`),
     leadIdx: index('controlled_test_runs_lead_idx').on(t.leadId),
     statusCk: check('controlled_test_runs_status_ck', sql`${t.status} IN ('RUNNING','COMPLETED','FAILED')`),
     actorCk: check('controlled_test_runs_actor_ck', sql`${t.actor} = 'SYSTEM_CONTROLLED_TEST'`),

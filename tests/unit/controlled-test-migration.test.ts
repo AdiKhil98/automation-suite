@@ -8,12 +8,12 @@ const journal = JSON.parse(readFileSync(new URL('../../migrations/meta/_journal.
 const schema = readFileSync(new URL('../../src/persistence/schema.ts', import.meta.url), 'utf8');
 
 describe('migration 0020 metadata and safety', () => {
-  it('is registered exactly once as the monotonic final entry', () => {
+  it('is registered exactly once at its monotonic journal position', () => {
     const matching = journal.entries.filter((entry) => entry.tag === '0020_controlled_test_orchestration');
     expect(matching).toHaveLength(1);
     expect(matching[0]?.idx).toBe(20);
-    expect(journal.entries.at(-1)?.tag).toBe('0020_controlled_test_orchestration');
-    expect((matching[0]?.when ?? 0) > (journal.entries.at(-2)?.when ?? Number.MAX_SAFE_INTEGER)).toBe(true);
+    expect(journal.entries[20]?.tag).toBe('0020_controlled_test_orchestration');
+    expect((matching[0]?.when ?? 0) > (journal.entries[19]?.when ?? Number.MAX_SAFE_INTEGER)).toBe(true);
   });
 
   it('is additive and defines the three non-sendable controlled tables', () => {
