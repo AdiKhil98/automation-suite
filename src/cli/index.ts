@@ -25,6 +25,7 @@ import { approveSendingReadinessCommand, reconcileSendAttemptCommand, recoverSta
 import { previewDemoCommand } from './commands/preview-demo.js';
 import { qualifyLeadsCommand } from './commands/qualify-leads.js';
 import { prospectRunCommand } from './commands/prospect-run.js';
+import { controlledExistingLeadCommand } from './commands/prospect-controlled-test.js';
 import { createSampleLeads } from './commands/create-sample-leads.js';
 import { leadState } from './commands/lead-state.js';
 import { listLeads } from './commands/list-leads.js';
@@ -98,6 +99,16 @@ program
   .option('--test-recipient-env <name>', 'approved test-recipient environment variable name')
   .option('--auto-approve-test-artifacts', 'record short-lived run/hash-bound controlled artifact approvals')
   .action((opts: { niche: string; location?: string; radiusKm: string; targetQualified?: string; maxCandidates?: string; rank?: string; latitude?: string; longitude?: string; continuePipeline?: boolean }) => withContext((ctx) => prospectRunCommand(ctx, opts)));
+
+program
+  .command('controlled-test-existing-lead')
+  .description('Continue one already-qualified prospect lead through controlled artifacts and stop after draft read-back')
+  .requiredOption('--lead <id>', 'existing qualified prospect lead id')
+  .requiredOption('--stop-after-draft', 'hard stop after one draft and read-only exact-draft preflight')
+  .requiredOption('--test-recipient-env <name>', 'approved controlled recipient environment variable name')
+  .requiredOption('--auto-approve-test-artifacts', 'record short-lived run/hash-bound controlled artifact approvals')
+  .action((opts: { lead: string; stopAfterDraft: boolean; testRecipientEnv?: string; autoApproveTestArtifacts: boolean }) =>
+    withContext((ctx) => controlledExistingLeadCommand(ctx, opts)));
 
 program
   .command('qualify-leads')

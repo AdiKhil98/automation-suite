@@ -5,10 +5,18 @@ import { CONTROLLED_TEST_ACTOR, CONTROLLED_TEST_OUTCOME, CONTROLLED_TEST_REASON,
 import { type LocalSendReadinessReport } from '../../domain/send/send-service.js';
 import { type DbExecutor } from '../db.js';
 import { controlledTestArtifactApprovals, controlledTestEvaluations, controlledTestRuns,
-  demos, emailDraftFinalizations, emailDrafts, gmailDrafts, sendSchedules } from '../schema.js';
+  demos, emailDraftFinalizations, emailDrafts, gmailDrafts, prospectCandidates, prospectRuns,
+  sendSchedules } from '../schema.js';
 
 export class ControlledTestRepository {
   constructor(private readonly db: DbExecutor) {}
+
+  async prospectContextForLead(leadId: string): Promise<{ prospectRunId: string; pipelineRunId: string } | null> {
+    return (await this.db.select({ prospectRunId: prospectCandidates.prospectRunId,
+      pipelineRunId: prospectRuns.pipelineRunId }).from(prospectCandidates)
+      .innerJoin(prospectRuns, eq(prospectRuns.id, prospectCandidates.prospectRunId))
+      .where(eq(prospectCandidates.leadId, leadId)).orderBy(desc(prospectRuns.completedAt)).limit(1))[0] ?? null;
+  }
 
   async start(input: { id: string; prospectRunId: string; pipelineRunId: string; leadId: string;
     recipientEmail: string; recipientFingerprint: string; recipientEnvName: string; expiresAt: Date }): Promise<void> {

@@ -45,3 +45,20 @@ export function assertControlledTestPreflight(input: {
   if (input.targetQualified !== 1) throw new Error('controlled_test_requires_one_qualified_lead');
   return normalizeControlledRecipient(input.recipientValue);
 }
+
+export function assertControlledExistingLeadPreflight(input: {
+  stopAfterDraft: boolean; autoApproveTestArtifacts: boolean;
+  recipientEnvName: string | undefined; recipientValue: string | undefined;
+  dryRun: boolean; sendingEnabled: boolean; outboundActionsEnabled: boolean;
+  schedulingEnabled: boolean;
+}): string {
+  if (!input.stopAfterDraft) throw new Error('controlled_existing_lead_requires_stop_after_draft');
+  if (!input.autoApproveTestArtifacts) throw new Error('controlled_test_requires_auto_approve_test_artifacts');
+  if (input.recipientEnvName !== CONTROLLED_TEST_RECIPIENT_ENV) throw new Error('controlled_test_recipient_env_not_allowed');
+  if (!input.recipientValue) throw new Error('controlled_test_recipient_missing');
+  if (input.dryRun) throw new Error('controlled_existing_lead_requires_live_artifact_mode');
+  if (input.sendingEnabled) throw new Error('controlled_test_requires_sending_disabled');
+  if (input.outboundActionsEnabled) throw new Error('controlled_test_requires_outbound_disabled');
+  if (input.schedulingEnabled) throw new Error('controlled_existing_lead_requires_scheduling_disabled');
+  return normalizeControlledRecipient(input.recipientValue);
+}

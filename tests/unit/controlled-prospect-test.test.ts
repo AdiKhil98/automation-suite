@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { assertControlledDraftRecipient, assertControlledTestPreflight, controlledEmailArtifactHash,
+import { assertControlledDraftRecipient, assertControlledExistingLeadPreflight, assertControlledTestPreflight, controlledEmailArtifactHash,
   controlledRecipientFingerprint } from '../../src/domain/prospect/controlled-test.js';
 import { withControlledTestGates } from '../../src/cli/commands/prospect-controlled-test.js';
 
@@ -47,6 +47,32 @@ describe('controlled prospect test preflight', () => {
     expect(source).not.toContain('HttpGmailSendProvider');
     expect(source).not.toContain('buildSendProvider');
   });
+
+  it('allows live artifacts only for the explicit scheduling-disabled stop-after-draft mode', () => {
+    expect(assertControlledExistingLeadPreflight({ stopAfterDraft: true, autoApproveTestArtifacts: true,
+      recipientEnvName: 'TEST_RECIPIENT_EMAIL', recipientValue: 'operator@controlled.example', dryRun: false,
+      sendingEnabled: false, outboundActionsEnabled: false, schedulingEnabled: false }))
+      .toBe('operator@controlled.example');
+  });
+
+  it.each([
+    [{ stopAfterDraft: false }, 'controlled_existing_lead_requires_stop_after_draft'],
+    [{ dryRun: true }, 'controlled_existing_lead_requires_live_artifact_mode'],
+    [{ schedulingEnabled: true }, 'controlled_existing_lead_requires_scheduling_disabled'],
+    [{ sendingEnabled: true }, 'controlled_test_requires_sending_disabled'],
+    [{ outboundActionsEnabled: true }, 'controlled_test_requires_outbound_disabled'],
+  ] as const)('fails closed for existing-lead patch %j', (patch, reason) => {
+    expect(() => assertControlledExistingLeadPreflight({ stopAfterDraft: true,
+      autoApproveTestArtifacts: true, recipientEnvName: 'TEST_RECIPIENT_EMAIL',
+      recipientValue: 'operator@controlled.example', dryRun: false, sendingEnabled: false,
+      outboundActionsEnabled: false, schedulingEnabled: false, ...patch })).toThrow(reason);
+  });
+
+  it('places the draft-only hard stop before scheduling code', () => {
+    const source = readFileSync(new URL('../../src/cli/commands/prospect-controlled-test.ts', import.meta.url), 'utf8');
+    expect(source.indexOf('if (this.options.stopAfterDraft)')).toBeGreaterThan(-1);
+    expect(source.indexOf('if (this.options.stopAfterDraft)')).toBeLessThan(source.indexOf('const scheduled ='));
+  });
 });
 
 describe('controlled test temporary gates', () => {
@@ -76,6 +102,20 @@ describe('controlled test temporary gates', () => {
     const before = structuredClone(config);
     await expect(withControlledTestGates(config as never, async () => { throw new Error('stage_failed'); }))
       .rejects.toThrow('stage_failed');
+    expect(config).toEqual(before);
+  });
+
+  it('keeps discovery and scheduling off in live stop-after-draft mode and restores all gates', async () => {
+    const config = { ...base(), DRY_RUN: false };
+    const before = structuredClone(config);
+    await withControlledTestGates(config as never, async () => {
+      expect(config.PROSPECT_DISCOVERY_ENABLED).toBe(false);
+      expect(config.SCHEDULING_ENABLED).toBe(false);
+      expect(config.NETLIFY_DEPLOYMENT_ENABLED).toBe(true);
+      expect(config.GMAIL_DRAFT_ACTIONS_ENABLED).toBe(true);
+      expect(config.SENDING_ENABLED).toBe(false);
+      expect(config.OUTBOUND_ACTIONS_ENABLED).toBe(false);
+    }, { stopAfterDraft: true });
     expect(config).toEqual(before);
   });
 });

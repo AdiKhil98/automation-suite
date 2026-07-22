@@ -5,7 +5,7 @@ import { type SendInput } from '../../domain/send/send-service.js';
 import { type ProspectContinuation, type ProspectContinuationContext } from '../../domain/prospect/prospect-service.js';
 import { CONTROLLED_TEST_RECIPIENT_ENV, CONTROLLED_TEST_TTL_MS, controlledEmailArtifactHash,
   controlledRecipientFingerprint, normalizeControlledRecipient,
-  assertControlledDraftRecipient } from '../../domain/prospect/controlled-test.js';
+  assertControlledDraftRecipient, assertControlledExistingLeadPreflight } from '../../domain/prospect/controlled-test.js';
 import { MockSendProvider } from '../../integrations/send/mock-send.js';
 import { ControlledTestRepository } from '../../persistence/repositories/controlled-test.repo.js';
 import { SendInputRepository } from '../../persistence/repositories/send-input.repo.js';
@@ -40,13 +40,23 @@ const CONTROLLED_GATES: Record<ControlledGate, boolean | string> = {
   PROSPECT_CONTINUE_PIPELINE: true,
 };
 
+const DRAFT_ONLY_GATES: Record<ControlledGate, boolean | string> = {
+  ...CONTROLLED_GATES,
+  PROSPECT_DISCOVERY_ENABLED: false,
+  SCHEDULING_ENABLED: false,
+};
+
 /** Process-local gate changes only. The caller's environment and .env are never modified. */
-export async function withControlledTestGates<T>(config: CliContext['config'], fn: () => Promise<T>): Promise<T> {
+export async function withControlledTestGates<T>(config: CliContext['config'], fn: () => Promise<T>,
+  options: { stopAfterDraft?: boolean } = {}): Promise<T> {
   const mutable = config as unknown as Record<string, unknown>;
   const before = new Map<string, unknown>();
-  for (const [key, value] of Object.entries(CONTROLLED_GATES)) { before.set(key, mutable[key]); mutable[key] = value; }
+  const gates = options.stopAfterDraft ? DRAFT_ONLY_GATES : CONTROLLED_GATES;
+  for (const [key, value] of Object.entries(gates)) { before.set(key, mutable[key]); mutable[key] = value; }
   try {
-    if (config.SENDING_ENABLED || config.OUTBOUND_ACTIONS_ENABLED || !config.DRY_RUN) throw new Error('controlled_test_kill_switch_changed');
+    if (config.SENDING_ENABLED || config.OUTBOUND_ACTIONS_ENABLED) throw new Error('controlled_test_kill_switch_changed');
+    if (options.stopAfterDraft ? config.DRY_RUN : !config.DRY_RUN) throw new Error('controlled_test_dry_run_mode_changed');
+    if (options.stopAfterDraft && config.SCHEDULING_ENABLED) throw new Error('controlled_test_scheduling_enabled');
     return await fn();
   } finally {
     for (const [key, value] of before) mutable[key] = value;
@@ -79,7 +89,8 @@ function requireValue<T>(value: T | null | undefined, reason: string): T {
  * but it has no send-provider reference and records no production sending readiness approval.
  */
 export class ControlledTestContinuation implements ProspectContinuation {
-  constructor(private readonly ctx: CliContext, private readonly recipient: string) {}
+  constructor(private readonly ctx: CliContext, private readonly recipient: string,
+    private readonly options: { stopAfterDraft?: boolean } = {}) {}
 
   async continueFirstQualified(leadId: string, context: ProspectContinuationContext): Promise<void> {
     const repo = new ControlledTestRepository(this.ctx.db);
@@ -148,6 +159,13 @@ export class ControlledTestContinuation implements ProspectContinuation {
       }).verify(preflightInput);
       if (!preflight.ok) throw new Error(`controlled_test_gmail_preflight_failed:${preflight.outcome}`);
 
+      if (this.options.stopAfterDraft) {
+        await repo.finish(controlledTestRunId, 'COMPLETED');
+        console.log('  Controlled continuation stopped after one Gmail draft and exact read-only preflight.');
+        console.log('  Scheduling, readiness, send attempts, and sending remain disabled.');
+        return;
+      }
+
       const scheduled = await buildScheduleService(this.ctx).schedule({ leadId, leadStatus: 'DRAFT_CREATED',
         gmailDraft: { id: draft.id, outcome: draft.outcome, providerDraftId: draft.providerDraftId },
         finalizedContentHash: finalized.finalization.resolvedBodyHash, recipientEmail: recipient,
@@ -175,4 +193,29 @@ export class ControlledTestContinuation implements ProspectContinuation {
       throw error;
     }
   }
+}
+
+export async function controlledExistingLeadCommand(ctx: CliContext, opts: {
+  lead: string; stopAfterDraft: boolean; testRecipientEnv?: string; autoApproveTestArtifacts: boolean;
+}): Promise<void> {
+  const recipient = assertControlledExistingLeadPreflight({
+    stopAfterDraft: opts.stopAfterDraft,
+    autoApproveTestArtifacts: opts.autoApproveTestArtifacts,
+    recipientEnvName: opts.testRecipientEnv,
+    recipientValue: ctx.config.TEST_RECIPIENT_EMAIL,
+    dryRun: ctx.config.DRY_RUN,
+    sendingEnabled: ctx.config.SENDING_ENABLED,
+    outboundActionsEnabled: ctx.config.OUTBOUND_ACTIONS_ENABLED,
+    schedulingEnabled: ctx.config.SCHEDULING_ENABLED,
+  });
+  assertControlledProviderConfig(ctx.config);
+  const lead = await ctx.leads.getById(opts.lead);
+  if (!lead) throw new Error('controlled_existing_lead_not_found');
+  if (lead.status !== 'QUALIFIED') throw new Error(`controlled_existing_lead_not_qualified:${lead.status}`);
+  const context = await new ControlledTestRepository(ctx.db).prospectContextForLead(lead.id);
+  if (!context) throw new Error('controlled_existing_lead_missing_prospect_context');
+  await withControlledTestGates(ctx.config,
+    () => new ControlledTestContinuation(ctx, recipient, { stopAfterDraft: true })
+      .continueFirstQualified(lead.id, context),
+    { stopAfterDraft: true });
 }
