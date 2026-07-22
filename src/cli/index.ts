@@ -115,8 +115,9 @@ program
   .description('Deterministically qualify (PRE_AUDIT) collected leads for a campaign')
   .requiredOption('--campaign <name>', 'campaign name (see src/config/campaigns.ts)')
   .option('--limit <n>', 'max leads to qualify this run')
-  .action((opts: { campaign: string; limit?: string }) =>
-    withContext((ctx) => qualifyLeadsCommand(ctx, { campaign: opts.campaign, limit: opts.limit })),
+  .option('--lead <id>', 'qualify exactly one lead id; overrides list ordering and limit')
+  .action((opts: { campaign: string; limit?: string; lead?: string }) =>
+    withContext((ctx) => qualifyLeadsCommand(ctx, opts)),
   );
 
 program

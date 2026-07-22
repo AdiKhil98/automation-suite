@@ -1,5 +1,6 @@
 import { getCampaign } from '../../config/campaigns.js';
 import { QUALIFICATION_RULES } from '../../config/qualification-rules.js';
+import { type Lead } from '../../domain/leads/lead.js';
 import { QualificationService } from '../../domain/qualification/qualification-service.js';
 import { qualifyLeads } from '../../pipeline/qualify-leads.js';
 import { DrizzleQualificationUnitOfWork } from '../../persistence/qualification-unit-of-work.js';
@@ -8,6 +9,25 @@ import { type CliContext } from '../context.js';
 export interface QualifyLeadsCliOptions {
   campaign: string;
   limit?: string;
+  lead?: string;
+}
+
+export function selectQualifiableLeads<T extends Pick<Lead, 'id' | 'status'>>(
+  all: T[],
+  options: Pick<QualifyLeadsCliOptions, 'lead' | 'limit'>,
+): T[] {
+  if (options.lead) {
+    const selected = all.find((lead) => lead.id === options.lead);
+    if (!selected) throw new Error('qualification_lead_not_found');
+    if (!QualificationService.isQualifiable(selected.status)) {
+      throw new Error(`qualification_lead_not_qualifiable:${selected.status}`);
+    }
+    return [selected];
+  }
+
+  let selected = all.filter((lead) => QualificationService.isQualifiable(lead.status));
+  if (options.limit) selected = selected.slice(0, Number.parseInt(options.limit, 10));
+  return selected;
 }
 
 export async function qualifyLeadsCommand(
@@ -19,8 +39,7 @@ export async function qualifyLeadsCommand(
   const service = new QualificationService(new DrizzleQualificationUnitOfWork(ctx.db));
 
   const all = await ctx.leads.list(1000);
-  let leads = all.filter((l) => QualificationService.isQualifiable(l.status));
-  if (cliOpts.limit) leads = leads.slice(0, Number.parseInt(cliOpts.limit, 10));
+  const leads = selectQualifiableLeads(all, cliOpts);
 
   const summary = await qualifyLeads(
     { service, logger: ctx.logger },
