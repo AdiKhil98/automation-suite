@@ -1,7 +1,7 @@
 import { lookup as dnsLookup } from 'node:dns';
 import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
-import { isIP } from 'node:net';
+import { isIP, type LookupFunction } from 'node:net';
 import { AppError } from './errors.js';
 import { isBlockedIp } from './ip-guard.js';
 import {
@@ -55,6 +55,43 @@ export const dnsResolveAll: Resolver = (hostname) =>
       else resolve(addresses.map((a) => a.address));
     });
   });
+
+function addressFamily(address: string): 4 | 6 {
+  return address.includes(':') ? 6 : 4;
+}
+
+/**
+ * Build a connect-time DNS lookup that returns only addresses resolved and
+ * validated for this connection attempt. Returning the complete array when
+ * Node requests `all: true` preserves its IPv6/IPv4 fallback behavior without
+ * allowing an unvalidated address to enter the connection race.
+ */
+export function createValidatedLookup(resolve: Resolver): LookupFunction {
+  return (hostname, options, callback) => {
+    resolve(hostname)
+      .then((addresses) => {
+        const blocked = addresses.find((address) => isBlockedIp(address));
+        if (blocked) {
+          callback(new PolicyBlockedError(`blocked address ${blocked} at connect for ${hostname}`), '', 4);
+          return;
+        }
+        const approved = addresses.map((address) => ({ address, family: addressFamily(address) }));
+        const first = approved[0];
+        if (!first) {
+          callback(new PolicyBlockedError(`no address for ${hostname}`), '', 4);
+          return;
+        }
+        if (options.all) {
+          callback(null, approved);
+          return;
+        }
+        callback(null, first.address, first.family);
+      })
+      .catch((error: unknown) =>
+        callback(error instanceof Error ? error : new Error(String(error)), '', 4),
+      );
+  };
+}
 
 /**
  * Validate a URL for fetching: scheme allowlist, no embedded credentials, and every
@@ -210,25 +247,15 @@ function fetchHop(url: URL, resolve: Resolver, timeoutMs: number, maxBytes: numb
       {
         method: 'GET',
         timeout: timeoutMs,
-        headers: { 'User-Agent': 'automation-suite-enrichment/0.1 (+contact via operator)', Accept: 'text/html' },
-        // Connect-time re-validation (DNS rebinding mitigation).
-        lookup: (hostname, _o, cb) => {
-          resolve(hostname)
-            .then((addresses) => {
-              const blocked = addresses.find((a) => isBlockedIp(a));
-              if (blocked) {
-                cb(new PolicyBlockedError(`blocked address ${blocked} at connect for ${hostname}`), '', 4);
-                return;
-              }
-              const first = addresses[0];
-              if (!first) {
-                cb(new PolicyBlockedError(`no address for ${hostname}`), '', 4);
-                return;
-              }
-              cb(null, first, first.includes(':') ? 6 : 4);
-            })
-            .catch((e: unknown) => cb(e instanceof Error ? e : new Error(String(e)), '', 4));
+        servername: url.protocol === 'https:' ? url.hostname : undefined,
+        headers: {
+          Host: url.host,
+          'User-Agent': 'automation-suite-enrichment/0.1 (+contact via operator)',
+          Accept: 'text/html',
         },
+        // Connect-time re-resolution + validation prevents DNS rebinding while
+        // retaining Node's safe IPv6/IPv4 fallback across approved addresses.
+        lookup: createValidatedLookup(resolve),
       },
       (res) => {
         const status = res.statusCode ?? 0;

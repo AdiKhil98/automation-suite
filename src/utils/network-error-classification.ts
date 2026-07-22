@@ -40,6 +40,7 @@ const TLS_CODES = new Set([
   'UNABLE_TO_GET_ISSUER_CERT_LOCALLY',
   'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
 ]);
+const GENERIC_WRAPPER_CODES = new Set(['TRANSIENT_FETCH']);
 
 function safeCode(value: unknown): string | null {
   if (typeof value !== 'string') return null;
@@ -72,7 +73,10 @@ export function classifyNetworkError(error: unknown): NetworkErrorClassification
     .map((entry) => safeCode((entry as { code?: unknown }).code))
     .filter((code): code is string => code !== null);
 
-  const firstMatching = (set: Set<string>): string | null => codes.find((code) => set.has(code)) ?? null;
+  const detailedCodes = codes.filter((code) => !GENERIC_WRAPPER_CODES.has(code));
+  const classifiedCodes = detailedCodes.length > 0 ? detailedCodes : codes;
+
+  const firstMatching = (set: Set<string>): string | null => classifiedCodes.find((code) => set.has(code)) ?? null;
   const timeout = firstMatching(TIMEOUT_CODES);
   if (timeout) return { stage: 'TIMEOUT', errorCode: timeout, retryable: true };
   const dns = firstMatching(DNS_CODES);
@@ -81,7 +85,11 @@ export function classifyNetworkError(error: unknown): NetworkErrorClassification
   if (tls) return { stage: 'TLS', errorCode: tls, retryable: false };
   const connect = firstMatching(CONNECT_CODES);
   if (connect) return { stage: 'TCP_CONNECT', errorCode: connect, retryable: true };
-  return { stage: 'UNKNOWN', errorCode: codes[0] ?? null, retryable: true };
+  const tlsLike = classifiedCodes.find(
+    (code) => code.startsWith('ERR_TLS_') || code.includes('CERTIFICATE') || code.startsWith('CERT_'),
+  );
+  if (tlsLike) return { stage: 'TLS', errorCode: tlsLike, retryable: false };
+  return { stage: 'UNKNOWN', errorCode: classifiedCodes[0] ?? null, retryable: true };
 }
 
 export function classifyHttpStatus(status: number): HttpErrorClassification | null {

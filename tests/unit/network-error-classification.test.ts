@@ -25,6 +25,27 @@ describe('sanitized website verification error classification', () => {
     expect(classifyNetworkError(outer)).toEqual({ stage: 'DNS', errorCode: 'EAI_AGAIN', retryable: true });
   });
 
+  it('retains a sanitized nested code instead of a generic fetch wrapper', () => {
+    const nested = Object.assign(new Error('private runtime detail'), { code: 'ERR_INVALID_IP_ADDRESS' });
+    const wrapper = Object.assign(new Error('generic wrapper'), { code: 'TRANSIENT_FETCH', cause: nested });
+    expect(classifyNetworkError(wrapper)).toEqual({
+      stage: 'UNKNOWN',
+      errorCode: 'ERR_INVALID_IP_ADDRESS',
+      retryable: true,
+    });
+  });
+
+  it('classifies previously unseen TLS certificate codes without retaining messages', () => {
+    const error = Object.assign(new Error('private certificate detail'), {
+      code: 'ERR_TLS_CERTIFICATE_REQUIRED',
+    });
+    expect(classifyNetworkError(error)).toEqual({
+      stage: 'TLS',
+      errorCode: 'ERR_TLS_CERTIFICATE_REQUIRED',
+      retryable: false,
+    });
+  });
+
   it('classifies redirect exhaustion deterministically', () => {
     expect(classifyRedirectLimit()).toEqual({
       stage: 'REDIRECT',
