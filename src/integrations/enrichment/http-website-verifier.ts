@@ -56,7 +56,13 @@ function attemptFor(rawUrl: string, outcome: FetchOutcome): WebsiteVerificationA
     hostname,
     attemptedAt: d?.attemptedAt ?? new Date(),
     finalClassification,
-    failureStage: d?.failureStage ?? (outcome.kind === 'policy_blocked' ? 'POLICY' : 'UNKNOWN'),
+    failureStage: d
+      ? d.failureStage
+      : outcome.kind === 'ok'
+        ? null
+        : outcome.kind === 'policy_blocked'
+          ? 'POLICY'
+          : 'UNKNOWN',
     errorCode: d?.errorCode ?? null,
     httpStatus: d?.httpStatus ?? (outcome.kind === 'ok' ? outcome.status : null),
     redirectCount: d?.redirectCount ?? 0,

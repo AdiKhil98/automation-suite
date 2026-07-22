@@ -94,4 +94,29 @@ describe('Place Details persistence boundary', () => {
     expect(serialized).not.toContain('secret');
     expect(serialized).not.toContain('private');
   });
+
+  it('keeps successful verification diagnostics persistence-safe', async () => {
+    const url = 'https://clinic.example/';
+    const verifier = new HttpWebsiteVerifier(
+      new MockPageFetcher(
+        new Map([
+          [url, { kind: 'ok' as const, finalUrl: url, host: 'clinic.example', status: 200, html: '<html><body>Example Dental</body></html>' }],
+        ]),
+      ),
+      { minConfidence: 0.6, ambiguousMargin: 0.1, maxPages: 1 },
+    );
+
+    const report = await verifier.verify(
+      [{ url, discoverySource: 'manual' }],
+      { businessName: 'Example Dental', candidateUrls: [url] },
+    );
+
+    expect(report.fetchAttempts[0]).toMatchObject({
+      finalClassification: 'OK',
+      failureStage: null,
+      errorCode: null,
+      httpStatus: 200,
+      retryable: false,
+    });
+  });
 });
