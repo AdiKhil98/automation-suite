@@ -1,5 +1,8 @@
 import { getCampaign } from '../../config/campaigns.js';
+import { auditGeneratorOutputSchema } from '../../domain/audit/audit-schema.js';
+import { auditInputFingerprint } from '../../domain/audit/audit-service.js';
 import { buildEvidencePackage, type EvidenceImage, type PackageFacts } from '../../domain/audit/evidence-package.js';
+import { LeadService } from '../../domain/leads/lead-service.js';
 import { recoverEnvelopes } from '../../domain/audit/envelope-recovery.js';
 import { worstCaseInputTokensForCall } from '../../domain/audit/token-budget.js';
 import { estimateImageTokens } from '../../integrations/llm/image-tokens.js';
@@ -9,6 +12,8 @@ import { auditWebsites, type AuditItem } from '../../pipeline/audit-websites.js'
 import { AuditInputRepository } from '../../persistence/repositories/audit-input.repo.js';
 import { LeadFactsRepository } from '../../persistence/repositories/lead-facts.repo.js';
 import { PipelineRunsRepository } from '../../persistence/repositories/runs.repo.js';
+import { LeadsRepository } from '../../persistence/repositories/leads.repo.js';
+import { PipelineRepository } from '../../persistence/repositories/pipeline.repo.js';
 import { buildAuditService } from './audit-build.js';
 import { type CliContext } from '../context.js';
 
@@ -16,12 +21,13 @@ export interface AuditCliOptions {
   campaign: string;
   limit?: string;
   lead?: string;
+  resumeValidation?: boolean;
 }
 
 export async function auditWebsitesCommand(ctx: CliContext, cliOpts: AuditCliOptions): Promise<void> {
   const campaign = getCampaign(cliOpts.campaign);
   const c = ctx.config;
-  const { service, envelopes, uow, providerName } = buildAuditService(ctx);
+  const { service, envelopes, uow, debug, providerName } = buildAuditService(ctx);
 
   // Startup recovery scan: replay any paid results whose DB write previously failed
   // BEFORE spending anything new (amendment 9).
@@ -40,12 +46,32 @@ export async function auditWebsitesCommand(ctx: CliContext, cliOpts: AuditCliOpt
   const storage = new LocalFsCaptureStorage(c.CAPTURE_ARTIFACT_DIR);
 
   const all = await ctx.leads.list(1000);
-  let leads = all.filter((l) => l.status === 'READY_FOR_AUDIT' && (!cliOpts.lead || l.id === cliOpts.lead));
+  if (cliOpts.resumeValidation && !cliOpts.lead) throw new Error('audit_validation_resume_requires_lead');
+  const eligibleStatus = cliOpts.resumeValidation ? 'NEEDS_MANUAL_REVIEW' : 'READY_FOR_AUDIT';
+  let leads = all.filter((l) => l.status === eligibleStatus && (!cliOpts.lead || l.id === cliOpts.lead));
   if (cliOpts.limit) leads = leads.slice(0, Number.parseInt(cliOpts.limit, 10));
   leads = leads.slice(0, c.MAX_WEBSITE_AUDITS_PER_RUN);
 
   const items: AuditItem[] = [];
   let skippedNoCapture = 0;
+  let repairSource: Awaited<ReturnType<AuditInputRepository['latestValidationRepair']>> = null;
+  let repairEnvelope: Awaited<ReturnType<typeof debug.readActive>> = null;
+  if (cliOpts.resumeValidation && cliOpts.lead) {
+    if (c.LLM_MAX_GENERATOR_ATTEMPTS !== 2) throw new Error('audit_validation_resume_requires_two_generator_attempts');
+    repairSource = await inputRepo.latestValidationRepair(cliOpts.lead);
+    if (!repairSource) throw new Error('audit_validation_resume_source_not_eligible');
+    repairEnvelope = await debug.readActive(repairSource.auditRunId, repairSource.generatorRetryNumber);
+    if (!repairEnvelope || repairEnvelope.leadId !== cliOpts.lead || new Date(repairEnvelope.expiresAt) <= new Date()) {
+      throw new Error('audit_validation_resume_debug_envelope_invalid');
+    }
+    const envelopeViolations = repairEnvelope.violations.map((item) => item.code).sort();
+    if (JSON.stringify(envelopeViolations) !== JSON.stringify([...repairSource.validationViolations].sort())) {
+      throw new Error('audit_validation_resume_violation_mismatch');
+    }
+    if (!auditGeneratorOutputSchema.safeParse(repairEnvelope.rawOutput).success) {
+      throw new Error('audit_validation_resume_output_not_schema_valid');
+    }
+  }
   for (const lead of leads) {
     const source = await inputRepo.latestAuditCapture(lead.id);
     if (!source) {
@@ -124,8 +150,27 @@ export async function auditWebsitesCommand(ctx: CliContext, cliOpts: AuditCliOpt
     // Per-lead worst-case input tokens (actual bounded image dims + capped evidence).
     // null when any image was undeterminable → the service blocks all paid calls.
     const worstCaseInputTokensPerCall = worstCaseInputTokensForCall({ evidenceItems: pkg.evidence.length, imageTokens });
-    items.push({
-      input: { leadId: lead.id, captureRunId: source.captureRunId, package: pkg, severeCaptureLimitations, worstCaseInputTokensPerCall },
+    const input: AuditItem['input'] = { leadId: lead.id, captureRunId: source.captureRunId, package: pkg,
+      severeCaptureLimitations, worstCaseInputTokensPerCall };
+    if (repairSource && repairEnvelope) {
+      if (source.captureRunId !== repairSource.captureRunId || auditInputFingerprint(input) !== repairSource.inputFingerprint) {
+        throw new Error('audit_validation_resume_capture_or_fingerprint_changed');
+      }
+      input.generatorRepair = {
+        priorAuditRunId: repairSource.auditRunId,
+        priorInputFingerprint: repairSource.inputFingerprint,
+        priorAttempt: repairSource.generatorRetryNumber,
+        originalInvalidOutput: repairEnvelope.rawOutput,
+        validationViolations: repairSource.validationViolations,
+      };
+    }
+    items.push({ input });
+  }
+
+  if (cliOpts.resumeValidation) {
+    if (items.length !== 1 || !cliOpts.lead) throw new Error('audit_validation_resume_lead_not_eligible');
+    await ctx.db.transaction(async (tx) => {
+      await new LeadService(new LeadsRepository(tx), new PipelineRepository(tx)).transition(cliOpts.lead as string, 'READY_FOR_AUDIT');
     });
   }
 

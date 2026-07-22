@@ -107,7 +107,8 @@ program
   .requiredOption('--stop-after-draft', 'hard stop after one draft and read-only exact-draft preflight')
   .requiredOption('--test-recipient-env <name>', 'approved controlled recipient environment variable name')
   .requiredOption('--auto-approve-test-artifacts', 'record short-lived run/hash-bound controlled artifact approvals')
-  .action((opts: { lead: string; stopAfterDraft: boolean; testRecipientEnv?: string; autoApproveTestArtifacts: boolean }) =>
+  .option('--resume-after-audit', 'skip capture/audit and require an opportunity-ready lead')
+  .action((opts: { lead: string; stopAfterDraft: boolean; testRecipientEnv?: string; autoApproveTestArtifacts: boolean; resumeAfterAudit?: boolean }) =>
     withContext((ctx) => controlledExistingLeadCommand(ctx, opts)));
 
 program
@@ -154,7 +155,9 @@ program
   .description('AI website audit of READY_FOR_AUDIT leads (mock by default; paid calls hard-gated)')
   .requiredOption('--campaign <name>', 'campaign name (see src/config/campaigns.ts)')
   .option('--limit <n>', 'max leads to audit this run')
-  .action((opts: { campaign: string; limit?: string }) =>
+  .option('--lead <id>', 'audit exactly one lead id')
+  .option('--resume-validation', 'resume one failed generator validation at its next attempt')
+  .action((opts: { campaign: string; limit?: string; lead?: string; resumeValidation?: boolean }) =>
     withContext((ctx) => auditWebsitesCommand(ctx, opts)),
   );
 

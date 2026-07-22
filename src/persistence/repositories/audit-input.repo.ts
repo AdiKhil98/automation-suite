@@ -1,7 +1,15 @@
 import { and, desc, eq, inArray } from 'drizzle-orm';
 import { type EvidenceRef } from '../../domain/audit/evidence-package.js';
 import { type DbExecutor } from '../db.js';
-import { captureArtifacts, captureEvidence, capturedPages, websiteCaptureRuns } from '../schema.js';
+import { auditRuns, captureArtifacts, captureEvidence, capturedPages, modelCalls, websiteCaptureRuns } from '../schema.js';
+
+export interface AuditValidationRepairSource {
+  auditRunId: string;
+  captureRunId: string;
+  inputFingerprint: string;
+  generatorRetryNumber: number;
+  validationViolations: string[];
+}
 
 export interface AuditCaptureSource {
   captureRunId: string;
@@ -84,6 +92,31 @@ export class AuditInputRepository {
       pageSelectionPolicyVersion: run.pageSelectionPolicyVersion,
       evidence,
       primaryViewportArtifacts,
+    };
+  }
+
+  /** A single attempt-0 validation failure eligible for exactly one bounded repair. */
+  async latestValidationRepair(leadId: string): Promise<AuditValidationRepairSource | null> {
+    const run = (await this.db.select().from(auditRuns)
+      .where(and(eq(auditRuns.leadId, leadId), eq(auditRuns.outcome, 'VALIDATION_FAILED')))
+      .orderBy(desc(auditRuns.startedAt)).limit(1))[0];
+    if (!run) return null;
+    const calls = await this.db.select().from(modelCalls).where(eq(modelCalls.auditRunId, run.id))
+      .orderBy(modelCalls.createdAt);
+    const generators = calls.filter((call) => call.purpose === 'website_audit');
+    if (generators.length !== 1 || calls.some((call) => call.purpose === 'audit_review')) return null;
+    const generator = generators[0];
+    if (!generator || generator.retryNumber !== 0 || !run.inputFingerprint || !run.captureRunId) return null;
+    const violations = Array.isArray(generator.validationViolations)
+      ? generator.validationViolations.filter((item): item is string => typeof item === 'string')
+      : [];
+    if (violations.length === 0) return null;
+    return {
+      auditRunId: run.id,
+      captureRunId: run.captureRunId,
+      inputFingerprint: run.inputFingerprint,
+      generatorRetryNumber: generator.retryNumber,
+      validationViolations: violations,
     };
   }
 }

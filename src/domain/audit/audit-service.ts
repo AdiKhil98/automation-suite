@@ -5,6 +5,7 @@ import {
   buildReviewerMessages,
   AUDIT_RUBRIC_VERSION,
   GENERATOR_PROMPT_VERSION,
+  GENERATOR_REPAIR_PROMPT_VERSION,
   REVIEWER_PROMPT_VERSION,
 } from '../../prompts/website-audit/index.js';
 import {
@@ -171,6 +172,13 @@ export interface AuditInput {
    * cost could not be determined → all paid calls are blocked. `undefined` falls back
    * to the config-level estimate. */
   worstCaseInputTokensPerCall?: number | null;
+  generatorRepair?: {
+    priorAuditRunId: string;
+    priorInputFingerprint: string;
+    priorAttempt: number;
+    originalInvalidOutput: unknown;
+    validationViolations: string[];
+  };
 }
 
 export interface AuditResult {
@@ -193,6 +201,16 @@ function extractFindingRefs(raw: unknown): string[] {
     .filter((r): r is string => typeof r === 'string');
 }
 
+export function auditInputFingerprint(input: Pick<AuditInput, 'leadId' | 'captureRunId' | 'package'>): string {
+  return hashCanonical({
+    lead: input.leadId,
+    capture: input.captureRunId,
+    evidence: input.package.evidence.map((e) => e.id).sort(),
+    images: input.package.images.map((i) => i.sha256).sort(),
+    versions: [AUDIT_RUBRIC_VERSION, GENERATOR_PROMPT_VERSION, REVIEWER_PROMPT_VERSION, AUDIT_SCHEMA_VERSION, OPPORTUNITY_RULES.version],
+  });
+}
+
 export class AuditService {
   constructor(private readonly deps: AuditServiceDeps) {}
 
@@ -207,13 +225,15 @@ export class AuditService {
     // (unknown model price or undeterminable context tier). Blocks all further calls.
     let costUnaccountable = false;
 
-    const inputFingerprint = hashCanonical({
-      lead: input.leadId,
-      capture: input.captureRunId,
-      evidence: input.package.evidence.map((e) => e.id).sort(),
-      images: input.package.images.map((i) => i.sha256).sort(),
-      versions: [AUDIT_RUBRIC_VERSION, GENERATOR_PROMPT_VERSION, REVIEWER_PROMPT_VERSION, AUDIT_SCHEMA_VERSION, OPPORTUNITY_RULES.version],
-    });
+    const inputFingerprint = auditInputFingerprint(input);
+    const repair = input.generatorRepair;
+    if (repair) {
+      if (inputFingerprint !== repair.priorInputFingerprint) throw new Error('audit_repair_input_fingerprint_changed');
+      if (repair.priorAttempt !== 0 || c.maxGeneratorAttempts - (repair.priorAttempt + 1) !== 1) {
+        throw new Error('audit_repair_attempt_budget_invalid');
+      }
+      if (repair.validationViolations.length === 0) throw new Error('audit_repair_violations_missing');
+    }
 
     const isRealProvider = this.deps.provider.name !== 'mock';
     // Per-lead worst-case input tokens (from actual bounded image dims) when supplied,
@@ -311,7 +331,7 @@ export class AuditService {
       await this.deps.envelopes.save({
         idempotencyKey: persist.auditRun.id,
         inputFingerprint,
-        versions: { rubric: AUDIT_RUBRIC_VERSION, generatorPrompt: GENERATOR_PROMPT_VERSION, reviewerPrompt: REVIEWER_PROMPT_VERSION, schema: AUDIT_SCHEMA_VERSION, opportunityRules: OPPORTUNITY_RULES.version },
+        versions: { rubric: AUDIT_RUBRIC_VERSION, generatorPrompt: repair ? GENERATOR_REPAIR_PROMPT_VERSION : GENERATOR_PROMPT_VERSION, reviewerPrompt: REVIEWER_PROMPT_VERSION, schema: AUDIT_SCHEMA_VERSION, opportunityRules: OPPORTUNITY_RULES.version },
         stage: 'scored',
         persist,
         computedCostUsd: cost,
@@ -343,6 +363,7 @@ export class AuditService {
       // (kept only for runs that ultimately fail, so `.audit-debug` shows real problems).
       if (outcome === 'AUDITED' || outcome === 'AUDITED_NO_ACTIONABLE_FINDINGS') {
         await this.deps.debug?.archiveForRun(auditRunId);
+        if (repair) await this.deps.debug?.archiveForRun(repair.priorAuditRunId);
       }
       return { leadId: input.leadId, outcome, acceptedFindings: persist.accepted.length, overallScore: persist.opportunity?.scores.overall ?? null, callsMade };
     };
@@ -354,7 +375,7 @@ export class AuditService {
       captureRunId: input.captureRunId,
       outcome: 'MANUAL_REVIEW_REQUIRED',
       rubricVersion: AUDIT_RUBRIC_VERSION,
-      generatorPromptVersion: GENERATOR_PROMPT_VERSION,
+      generatorPromptVersion: repair ? GENERATOR_REPAIR_PROMPT_VERSION : GENERATOR_PROMPT_VERSION,
       reviewerPromptVersion: REVIEWER_PROMPT_VERSION,
       schemaVersion: AUDIT_SCHEMA_VERSION,
       opportunityRulesVersion: OPPORTUNITY_RULES.version,
@@ -387,12 +408,19 @@ export class AuditService {
     // ---- Generator (up to maxGeneratorAttempts) ----
     let generatorOutput: AuditGeneratorOutput | null = null;
     let generatorResponseId: string | null = null;
-    let genRepairHint: string | null = null;
-    for (let attempt = 0; attempt < c.maxGeneratorAttempts; attempt += 1) {
+    let genRepairHint: string | null = repair
+      ? `Fix these evidence/claim problems: ${repair.validationViolations.slice(0, 8).join('; ')}`
+      : null;
+    let previousInvalidOutput: unknown = repair?.originalInvalidOutput ?? null;
+    let previousViolations: string[] = repair?.validationViolations ?? [];
+    const firstGeneratorAttempt = repair ? repair.priorAttempt + 1 : 0;
+    for (let attempt = firstGeneratorAttempt; attempt < c.maxGeneratorAttempts; attempt += 1) {
       if (!canCall(c.auditModel)) return finish('BUDGET_BLOCKED', emptyPersist('BUDGET_BLOCKED'));
-      const msgs = buildGeneratorMessages(input.package, genRepairHint);
+      const msgs = buildGeneratorMessages(input.package, genRepairHint, previousInvalidOutput === null ? undefined : {
+        previousInvalidOutput, validationErrors: previousViolations, attemptNumber: attempt + 1,
+      });
       const res = await this.deps.provider.generate(this.req('website_audit', msgs, GENERATOR_JSON_SCHEMA, 'audit', c, input.package));
-      const rec = record('website_audit', GENERATOR_PROMPT_VERSION, res, attempt);
+      const rec = record('website_audit', attempt > 0 ? GENERATOR_REPAIR_PROMPT_VERSION : GENERATOR_PROMPT_VERSION, res, attempt);
       if (res.status === 'refusal') { if (attempt + 1 < c.maxGeneratorAttempts) continue; return finish('MODEL_REFUSAL', emptyPersist('MODEL_REFUSAL')); }
       if (res.status === 'incomplete' || res.status === 'input_too_large') { genRepairHint = 'Return a smaller, complete result.'; continue; }
       if (res.status === 'rate_limited') return finish('RATE_LIMITED', emptyPersist('RATE_LIMITED'));
@@ -403,12 +431,16 @@ export class AuditService {
         const refs = extractFindingRefs(res.rawJson);
         await recordValidationFailure(rec, res, attempt, 'schema_invalid', codes.length ? codes : ['schema_invalid'], res.rawJson, refs);
         genRepairHint = 'Your previous output did not match the schema. Return valid JSON only.';
+        previousInvalidOutput = res.rawJson;
+        previousViolations = codes.length ? codes : ['schema_invalid'];
         continue;
       }
       const validation = validateGeneratorOutput(parsed.data, input.package);
       if (!validation.ok) {
         await recordValidationFailure(rec, res, attempt, 'validation_failed', validation.violations, parsed.data, parsed.data.findings.map((f) => f.findingRef));
         genRepairHint = `Fix these evidence/claim problems: ${validation.violations.slice(0, 8).join('; ')}`;
+        previousInvalidOutput = parsed.data;
+        previousViolations = validation.violations;
         continue;
       }
       generatorOutput = parsed.data;

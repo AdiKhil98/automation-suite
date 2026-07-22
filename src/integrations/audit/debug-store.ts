@@ -72,6 +72,21 @@ export class LocalAuditDebugStore implements AuditDebugStore {
     }
   }
 
+  /** Read one active sanitized validation envelope. Never returns screenshots, HTML, or secrets. */
+  async readActive(auditRunId: string, attempt: number): Promise<AuditDebugEnvelope | null> {
+    if (!existsSync(this.dir)) return null;
+    const expected = `${auditRunId}-a${String(attempt)}-validation_failed.json`;
+    if (!(await readdir(this.dir)).includes(expected)) return null;
+    try {
+      const parsed = JSON.parse(await readFile(join(this.dir, expected), 'utf8')) as AuditDebugEnvelope;
+      return parsed.auditRunId === auditRunId && parsed.attempt === attempt && parsed.stage === 'validation_failed'
+        ? parsed
+        : null;
+    } catch {
+      return null;
+    }
+  }
+
   /** Remove expired records from active + archive dirs. Returns the count removed. */
   async cleanupExpired(now: Date = new Date()): Promise<number> {
     let removed = 0;

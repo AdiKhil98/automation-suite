@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { LocalAuditDebugStore } from '../../src/integrations/audit/debug-store.js';
 import {
   AuditService,
+  auditInputFingerprint,
   type AuditConfig,
   type AuditEnvelope,
   type AuditInput,
@@ -499,5 +500,41 @@ describe('AuditService validation-debug envelope', () => {
     expect((await readdir(dir)).filter((f) => f.endsWith('.json'))).toHaveLength(0);
     expect(existsSync(join(dir, 'archive'))).toBe(true);
     expect((await readdir(join(dir, 'archive'))).filter((f) => f.endsWith('.json'))).toHaveLength(1);
+  });
+
+  it('resumes at attempt 2 with prior output, errors, valid IDs, and only one additional generator call', async () => {
+    let validId = '';
+    const h = harness(
+      (req) => req.task === 'website_audit' ? { rawJson: goodGenerator(validId) } : { rawJson: approveReview },
+      { maxGeneratorAttempts: 2, maxReviewerAttempts: 1, maxCallsPerLead: 2 },
+    );
+    validId = h.input.package.evidence[0]?.id ?? '';
+    const result = await h.service.audit({
+      ...h.input,
+      generatorRepair: {
+        priorAuditRunId: 'prior-run',
+        priorInputFingerprint: auditInputFingerprint(h.input),
+        priorAttempt: 0,
+        originalInvalidOutput: goodGenerator('invented-id'),
+        validationViolations: ['evidence_outside_package:F1:invented-id'],
+      },
+    }, 'run-1');
+    expect(result.outcome).toBe('AUDITED');
+    expect(h.provider.calls).toHaveLength(2); // one repair generator + one independent reviewer
+    expect(h.provider.calls[0]?.user).toContain('REPAIR ATTEMPT 2');
+    expect(h.provider.calls[0]?.user).toContain('PREVIOUS INVALID OUTPUT');
+    expect(h.provider.calls[0]?.user).toContain('invented-id');
+    expect(h.provider.calls[0]?.user).toContain(validId);
+    expect(h.persisted[0]?.modelCalls[0]?.retryNumber).toBe(1);
+  });
+
+  it('rejects a repair configuration that could make more than one additional generator call', async () => {
+    const h = harness(() => ({ rawJson: goodGenerator('unused') }), { maxGeneratorAttempts: 3 });
+    await expect(h.service.audit({ ...h.input, generatorRepair: { priorAuditRunId: 'prior-run',
+      priorInputFingerprint: auditInputFingerprint(h.input), priorAttempt: 0,
+      originalInvalidOutput: goodGenerator('invented-id'),
+      validationViolations: ['evidence_outside_package:F1:invented-id'] } }, 'run-1'))
+      .rejects.toThrow('audit_repair_attempt_budget_invalid');
+    expect(h.provider.calls).toHaveLength(0);
   });
 });

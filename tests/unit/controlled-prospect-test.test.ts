@@ -73,6 +73,13 @@ describe('controlled prospect test preflight', () => {
     expect(source.indexOf('if (this.options.stopAfterDraft)')).toBeGreaterThan(-1);
     expect(source.indexOf('if (this.options.stopAfterDraft)')).toBeLessThan(source.indexOf('const scheduled ='));
   });
+
+  it('resume-after-audit skips earlier stages only behind an opportunity-ready check', () => {
+    const source = readFileSync(new URL('../../src/cli/commands/prospect-controlled-test.ts', import.meta.url), 'utf8');
+    expect(source).toContain('if (!this.options.resumeAfterAudit)');
+    expect(source).toContain("lead?.status !== 'OPPORTUNITY_READY'");
+    expect(source.indexOf('if (!this.options.resumeAfterAudit)')).toBeLessThan(source.indexOf('await composeDemosCommand'));
+  });
 });
 
 describe('controlled test temporary gates', () => {

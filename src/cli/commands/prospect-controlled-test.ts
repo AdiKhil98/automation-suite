@@ -90,7 +90,7 @@ function requireValue<T>(value: T | null | undefined, reason: string): T {
  */
 export class ControlledTestContinuation implements ProspectContinuation {
   constructor(private readonly ctx: CliContext, private readonly recipient: string,
-    private readonly options: { stopAfterDraft?: boolean } = {}) {}
+    private readonly options: { stopAfterDraft?: boolean; resumeAfterAudit?: boolean } = {}) {}
 
   async continueFirstQualified(leadId: string, context: ProspectContinuationContext): Promise<void> {
     const repo = new ControlledTestRepository(this.ctx.db);
@@ -103,8 +103,15 @@ export class ControlledTestContinuation implements ProspectContinuation {
       recipientEnvName: CONTROLLED_TEST_RECIPIENT_ENV, expiresAt });
     try {
       const exact = { campaign: 'prospect-runtime', limit: '1', lead: leadId };
-      await captureWebsitesCommand(this.ctx, exact);
-      await auditWebsitesCommand(this.ctx, exact);
+      if (!this.options.resumeAfterAudit) {
+        await captureWebsitesCommand(this.ctx, exact);
+        await auditWebsitesCommand(this.ctx, exact);
+      } else {
+        const lead = await this.ctx.leads.getById(leadId);
+        if (lead?.status !== 'OPPORTUNITY_READY') {
+          throw new Error(`controlled_resume_after_audit_not_ready:${lead?.status ?? 'missing'}`);
+        }
+      }
       await composeDemosCommand(this.ctx, exact);
 
       const demo = requireValue(await repo.latestDemo(leadId), 'controlled_test_demo_missing');
@@ -197,6 +204,7 @@ export class ControlledTestContinuation implements ProspectContinuation {
 
 export async function controlledExistingLeadCommand(ctx: CliContext, opts: {
   lead: string; stopAfterDraft: boolean; testRecipientEnv?: string; autoApproveTestArtifacts: boolean;
+  resumeAfterAudit?: boolean;
 }): Promise<void> {
   const recipient = assertControlledExistingLeadPreflight({
     stopAfterDraft: opts.stopAfterDraft,
@@ -211,11 +219,17 @@ export async function controlledExistingLeadCommand(ctx: CliContext, opts: {
   assertControlledProviderConfig(ctx.config);
   const lead = await ctx.leads.getById(opts.lead);
   if (!lead) throw new Error('controlled_existing_lead_not_found');
-  if (lead.status !== 'QUALIFIED') throw new Error(`controlled_existing_lead_not_qualified:${lead.status}`);
+  const requiredStatus = opts.resumeAfterAudit ? 'OPPORTUNITY_READY' : 'QUALIFIED';
+  if (lead.status !== requiredStatus) {
+    throw new Error(`controlled_existing_lead_wrong_status:${lead.status}:required:${requiredStatus}`);
+  }
   const context = await new ControlledTestRepository(ctx.db).prospectContextForLead(lead.id);
   if (!context) throw new Error('controlled_existing_lead_missing_prospect_context');
   await withControlledTestGates(ctx.config,
-    () => new ControlledTestContinuation(ctx, recipient, { stopAfterDraft: true })
+    () => new ControlledTestContinuation(ctx, recipient, {
+      stopAfterDraft: true,
+      resumeAfterAudit: opts.resumeAfterAudit,
+    })
       .continueFirstQualified(lead.id, context),
     { stopAfterDraft: true });
 }
