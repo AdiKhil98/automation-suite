@@ -162,6 +162,13 @@
       "when": 1785009600000,
       "tag": "0022_restore_demo_fact_types",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1785096000000,
+      "tag": "0023_demo_engine_v2_foundation",
+      "breakpoints": true
     }
   ]
 }

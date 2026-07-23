@@ -14,5 +14,5 @@ export async function resetTestData(): Promise<void> {
   } finally {
     await pool.end();
   }
-  console.log('Local test data cleared (leads, evidence, pipeline_runs, pipeline_events).');
+  console.log('All local integration-test pipeline data cleared.');
 }

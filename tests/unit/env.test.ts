@@ -11,6 +11,11 @@ describe('loadConfig', () => {
     expect(config.OUTBOUND_ACTIONS_ENABLED).toBe(false);
     expect(config.NODE_ENV).toBe('development');
     expect(config.LLM_PROVIDER).toBe('mock');
+    expect(config.DEMO_ENGINE_VERSION).toBe('v1');
+    expect(config.DEMO_V2_ENABLED).toBe(false);
+    expect(config.DEMO_V2_CREATIVE_PROVIDER).toBe('mock');
+    expect(config.DEMO_V2_TRANSLATION_PROVIDER).toBe('mock');
+    expect(config.DEMO_V2_VISUAL_REVIEW_PROVIDER).toBe('mock');
   });
 
   it('parses explicit boolean strings', () => {
@@ -30,5 +35,11 @@ describe('loadConfig', () => {
 
   it('rejects non-boolean flag values', () => {
     expect(() => loadConfig({ ...base, DRY_RUN: 'yes' })).toThrow(EnvValidationError);
+  });
+
+  it('requires the v2 engine selector before the V2 enable flag can be armed', () => {
+    expect(() => loadConfig({ ...base, DEMO_V2_ENABLED: 'true' })).toThrow(EnvValidationError);
+    expect(loadConfig({ ...base, DEMO_ENGINE_VERSION: 'v2', DEMO_V2_ENABLED: 'true' }).DEMO_V2_ENABLED)
+      .toBe(true);
   });
 });

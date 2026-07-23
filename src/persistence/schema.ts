@@ -1274,3 +1274,655 @@ export const controlledTestEvaluations = pgTable(
     notSendableCk: check('controlled_test_evaluations_not_sendable_ck', sql`${t.sendable} = false`),
   }),
 );
+
+// --- Demo Engine V2 Milestone 1: inert, additive foundation only. ---
+// These tables have no relationship to the V1 `demos` table or any deployment,
+// email, Gmail, scheduling, or sending table.
+
+const DEMO_V2_HASH_SQL = "^[a-f0-9]{64}$";
+const DEMO_V2_LANGUAGE_SQL = "'de','en','fr','he','ar'";
+const DEMO_V2_DIRECTION_SQL = "'LTR','RTL'";
+
+export const demoV2Artifacts = pgTable(
+  'demo_v2_artifacts',
+  {
+    id: text('id').primaryKey(),
+    leadId: text('lead_id').notNull().references(() => leads.id, { onDelete: 'cascade' }),
+    demoDecisionId: text('demo_decision_id').notNull().references(() => demoDecisions.id, { onDelete: 'cascade' }),
+    runId: text('run_id').references(() => pipelineRuns.id, { onDelete: 'set null' }),
+    engineVersion: text('engine_version').notNull().default('v2'),
+    schemaVersion: text('schema_version').notNull(),
+    status: text('status').notNull().default('INTELLIGENCE_PENDING'),
+    isCurrent: boolean('is_current').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    currentLeadUk: uniqueIndex('demo_v2_artifacts_current_lead_uk').on(t.leadId).where(sql`${t.isCurrent}`),
+    leadIdx: index('demo_v2_artifacts_lead_idx').on(t.leadId),
+    decisionIdx: index('demo_v2_artifacts_decision_idx').on(t.demoDecisionId),
+    statusIdx: index('demo_v2_artifacts_status_idx').on(t.status, t.isCurrent),
+    engineCk: check('demo_v2_artifacts_engine_ck', sql`${t.engineVersion} = 'v2'`),
+    statusCk: check('demo_v2_artifacts_status_ck', sql`${t.status} IN (
+      'INTELLIGENCE_PENDING','INTELLIGENCE_READY','CONTENT_PENDING','CONTENT_READY',
+      'ASSET_REVIEW_PENDING','FOUNDATION_READY','BRIEF_READY','PLAN_READY','RENDERING',
+      'RENDERED','AUTO_REVIEW_PENDING','AUTO_REVIEW_PASSED','REVISION_REQUIRED',
+      'HUMAN_REVIEW_REQUIRED','HUMAN_APPROVED','REJECTED','BLOCKED','SUPERSEDED')`),
+  }),
+);
+
+export const demoV2ClinicIntelligencePackages = pgTable(
+  'demo_v2_clinic_intelligence_packages',
+  {
+    id: text('id').primaryKey(),
+    artifactId: text('artifact_id').notNull().references(() => demoV2Artifacts.id, { onDelete: 'cascade' }),
+    version: integer('version').notNull(),
+    schemaVersion: text('schema_version').notNull(),
+    status: text('status').notNull(),
+    primaryLanguage: text('primary_language').notNull(),
+    primaryDirection: text('primary_direction').notNull(),
+    supportedLanguages: jsonb('supported_languages').notNull(),
+    package: jsonb('package').notNull(),
+    inputFingerprint: text('input_fingerprint').notNull(),
+    packageHash: text('package_hash').notNull(),
+    isCurrent: boolean('is_current').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    finalizedAt: timestamp('finalized_at', { withTimezone: true }),
+  },
+  (t) => ({
+    versionUk: uniqueIndex('demo_v2_intelligence_artifact_version_uk').on(t.artifactId, t.version),
+    currentUk: uniqueIndex('demo_v2_intelligence_current_uk').on(t.artifactId).where(sql`${t.isCurrent}`),
+    statusIdx: index('demo_v2_intelligence_status_idx').on(t.artifactId, t.status),
+    hashIdx: index('demo_v2_intelligence_hash_idx').on(t.packageHash),
+    versionCk: check('demo_v2_intelligence_version_ck', sql`${t.version} > 0`),
+    statusCk: check('demo_v2_intelligence_status_ck', sql`${t.status} IN ('DRAFT','READY','STALE','BLOCKED')`),
+    languageCk: check('demo_v2_intelligence_language_ck', sql.raw(`primary_language IN (${DEMO_V2_LANGUAGE_SQL})`)),
+    directionCk: check('demo_v2_intelligence_direction_ck', sql.raw(`primary_direction IN (${DEMO_V2_DIRECTION_SQL})`)),
+    languagesJsonCk: check('demo_v2_intelligence_languages_json_ck', sql`jsonb_typeof(${t.supportedLanguages}) = 'array'`),
+    hashCk: check('demo_v2_intelligence_hash_ck', sql.raw(`input_fingerprint ~ '${DEMO_V2_HASH_SQL}' AND package_hash ~ '${DEMO_V2_HASH_SQL}'`)),
+    finalizedCk: check('demo_v2_intelligence_finalized_ck', sql`${t.status} <> 'READY' OR ${t.finalizedAt} IS NOT NULL`),
+  }),
+);
+
+export const demoV2ClinicIntelligenceSources = pgTable(
+  'demo_v2_clinic_intelligence_sources',
+  {
+    id: text('id').primaryKey(),
+    clinicIntelligencePackageId: text('clinic_intelligence_package_id').notNull()
+      .references(() => demoV2ClinicIntelligencePackages.id, { onDelete: 'cascade' }),
+    sourceKind: text('source_kind').notNull(),
+    sourceRole: text('source_role').notNull(),
+    leadFactId: text('lead_fact_id').references(() => leadFacts.id, { onDelete: 'restrict' }),
+    auditFindingId: text('audit_finding_id').references(() => auditFindings.id, { onDelete: 'restrict' }),
+    captureEvidenceId: text('capture_evidence_id').references(() => captureEvidence.id, { onDelete: 'restrict' }),
+    evidenceId: text('evidence_id').references(() => evidence.id, { onDelete: 'restrict' }),
+    sourceRecordHash: text('source_record_hash').notNull(),
+    sourceCapturedAt: timestamp('source_captured_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    packageIdx: index('demo_v2_intelligence_sources_package_idx').on(t.clinicIntelligencePackageId),
+    leadFactIdx: index('demo_v2_intelligence_sources_lead_fact_idx').on(t.leadFactId),
+    findingIdx: index('demo_v2_intelligence_sources_finding_idx').on(t.auditFindingId),
+    captureIdx: index('demo_v2_intelligence_sources_capture_idx').on(t.captureEvidenceId),
+    evidenceIdx: index('demo_v2_intelligence_sources_evidence_idx').on(t.evidenceId),
+    leadFactUk: uniqueIndex('demo_v2_intelligence_sources_lead_fact_uk')
+      .on(t.clinicIntelligencePackageId, t.leadFactId).where(sql`${t.leadFactId} IS NOT NULL`),
+    findingUk: uniqueIndex('demo_v2_intelligence_sources_finding_uk')
+      .on(t.clinicIntelligencePackageId, t.auditFindingId).where(sql`${t.auditFindingId} IS NOT NULL`),
+    captureUk: uniqueIndex('demo_v2_intelligence_sources_capture_uk')
+      .on(t.clinicIntelligencePackageId, t.captureEvidenceId).where(sql`${t.captureEvidenceId} IS NOT NULL`),
+    evidenceUk: uniqueIndex('demo_v2_intelligence_sources_evidence_uk')
+      .on(t.clinicIntelligencePackageId, t.evidenceId).where(sql`${t.evidenceId} IS NOT NULL`),
+    kindCk: check('demo_v2_intelligence_sources_kind_ck', sql`${t.sourceKind} IN ('LEAD_FACT','AUDIT_FINDING','CAPTURE_EVIDENCE','EVIDENCE')`),
+    roleCk: check('demo_v2_intelligence_sources_role_ck', sql`${t.sourceRole} IN ('IDENTITY','CONTENT','CLAIM','AUDIT','LANGUAGE','ASSET_CONTEXT','CONTACT','CONSTRAINT','OTHER')`),
+    exactSourceCk: check('demo_v2_intelligence_sources_exact_source_ck', sql`
+      num_nonnulls(${t.leadFactId}, ${t.auditFindingId}, ${t.captureEvidenceId}, ${t.evidenceId}) = 1
+      AND ((${t.sourceKind} = 'LEAD_FACT' AND ${t.leadFactId} IS NOT NULL)
+        OR (${t.sourceKind} = 'AUDIT_FINDING' AND ${t.auditFindingId} IS NOT NULL)
+        OR (${t.sourceKind} = 'CAPTURE_EVIDENCE' AND ${t.captureEvidenceId} IS NOT NULL)
+        OR (${t.sourceKind} = 'EVIDENCE' AND ${t.evidenceId} IS NOT NULL))`),
+    hashCk: check('demo_v2_intelligence_sources_hash_ck', sql.raw(`source_record_hash ~ '${DEMO_V2_HASH_SQL}'`)),
+  }),
+);
+
+export const demoV2PrimaryContentPackages = pgTable(
+  'demo_v2_primary_content_packages',
+  {
+    id: text('id').primaryKey(),
+    artifactId: text('artifact_id').notNull().references(() => demoV2Artifacts.id, { onDelete: 'cascade' }),
+    clinicIntelligencePackageId: text('clinic_intelligence_package_id').notNull()
+      .references(() => demoV2ClinicIntelligencePackages.id, { onDelete: 'restrict' }),
+    version: integer('version').notNull(),
+    schemaVersion: text('schema_version').notNull(),
+    language: text('language').notNull(),
+    direction: text('direction').notNull(),
+    status: text('status').notNull(),
+    sourceFingerprint: text('source_fingerprint').notNull(),
+    contentHash: text('content_hash').notNull(),
+    isCurrent: boolean('is_current').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    finalizedAt: timestamp('finalized_at', { withTimezone: true }),
+  },
+  (t) => ({
+    versionUk: uniqueIndex('demo_v2_primary_content_artifact_version_uk').on(t.artifactId, t.version),
+    currentUk: uniqueIndex('demo_v2_primary_content_current_uk').on(t.artifactId).where(sql`${t.isCurrent}`),
+    intelligenceIdx: index('demo_v2_primary_content_intelligence_idx').on(t.clinicIntelligencePackageId),
+    hashIdx: index('demo_v2_primary_content_hash_idx').on(t.contentHash),
+    versionCk: check('demo_v2_primary_content_version_ck', sql`${t.version} > 0`),
+    statusCk: check('demo_v2_primary_content_status_ck', sql`${t.status} IN ('DRAFT','READY','STALE','REJECTED')`),
+    languageCk: check('demo_v2_primary_content_language_ck', sql.raw(`language IN (${DEMO_V2_LANGUAGE_SQL})`)),
+    directionCk: check('demo_v2_primary_content_direction_ck', sql.raw(`direction IN (${DEMO_V2_DIRECTION_SQL})`)),
+    hashCk: check('demo_v2_primary_content_hash_ck', sql.raw(`source_fingerprint ~ '${DEMO_V2_HASH_SQL}' AND content_hash ~ '${DEMO_V2_HASH_SQL}'`)),
+    finalizedCk: check('demo_v2_primary_content_finalized_ck', sql`${t.status} <> 'READY' OR ${t.finalizedAt} IS NOT NULL`),
+  }),
+);
+
+export const demoV2ContentItems = pgTable(
+  'demo_v2_content_items',
+  {
+    id: text('id').primaryKey(),
+    contentPackageId: text('content_package_id').notNull()
+      .references(() => demoV2PrimaryContentPackages.id, { onDelete: 'cascade' }),
+    contentKey: text('content_key').notNull(),
+    contentKind: text('content_kind').notNull(),
+    claimClass: text('claim_class').notNull(),
+    textValue: text('text_value'),
+    structuredValue: jsonb('structured_value'),
+    translatable: boolean('translatable').notNull().default(true),
+    position: integer('position').notNull().default(0),
+    itemHash: text('item_hash').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    keyUk: uniqueIndex('demo_v2_content_items_package_key_uk').on(t.contentPackageId, t.contentKey),
+    packageIdx: index('demo_v2_content_items_package_idx').on(t.contentPackageId),
+    hashIdx: index('demo_v2_content_items_hash_idx').on(t.itemHash),
+    kindCk: check('demo_v2_content_items_kind_ck', sql`${t.contentKind} IN ('LABEL','NAV_LABEL','HEADING','BODY','CTA_LABEL','SERVICE_NAME','FAQ_QUESTION','FAQ_ANSWER','ALT_TEXT','CONTACT','HOURS','LEGAL','STRUCTURED')`),
+    claimCk: check('demo_v2_content_items_claim_ck', sql`${t.claimClass} IN ('VERBATIM_FACT','EVIDENCE_BOUND_DERIVATION','UI_LABEL','LEGAL_DISCLOSURE')`),
+    valueCk: check('demo_v2_content_items_value_ck', sql`num_nonnulls(${t.textValue}, ${t.structuredValue}) = 1`),
+    positionCk: check('demo_v2_content_items_position_ck', sql`${t.position} >= 0`),
+    hashCk: check('demo_v2_content_items_hash_ck', sql.raw(`item_hash ~ '${DEMO_V2_HASH_SQL}'`)),
+  }),
+);
+
+export const demoV2ContentItemSources = pgTable(
+  'demo_v2_content_item_sources',
+  {
+    contentItemId: text('content_item_id').notNull().references(() => demoV2ContentItems.id, { onDelete: 'cascade' }),
+    intelligenceSourceId: text('intelligence_source_id').notNull()
+      .references(() => demoV2ClinicIntelligenceSources.id, { onDelete: 'restrict' }),
+    relationship: text('relationship').notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.contentItemId, t.intelligenceSourceId] }),
+    sourceIdx: index('demo_v2_content_item_sources_source_idx').on(t.intelligenceSourceId),
+    relationshipCk: check('demo_v2_content_item_sources_relationship_ck', sql`${t.relationship} IN ('SUPPORTS','CONSTRAINS','SOURCE_TEXT')`),
+  }),
+);
+
+export const demoV2TranslationPackages = pgTable(
+  'demo_v2_translation_packages',
+  {
+    id: text('id').primaryKey(),
+    artifactId: text('artifact_id').notNull().references(() => demoV2Artifacts.id, { onDelete: 'cascade' }),
+    sourceContentPackageId: text('source_content_package_id').notNull()
+      .references(() => demoV2PrimaryContentPackages.id, { onDelete: 'restrict' }),
+    version: integer('version').notNull(),
+    language: text('language').notNull(),
+    direction: text('direction').notNull(),
+    status: text('status').notNull(),
+    sourceContentHash: text('source_content_hash').notNull(),
+    sourceFingerprint: text('source_fingerprint').notNull(),
+    translationHash: text('translation_hash'),
+    reviewStatus: text('review_status').notNull().default('NOT_REVIEWED'),
+    reviewActorType: text('review_actor_type'),
+    reviewActorId: text('review_actor_id'),
+    reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
+    reviewNotes: text('review_notes'),
+    isCurrent: boolean('is_current').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    finalizedAt: timestamp('finalized_at', { withTimezone: true }),
+  },
+  (t) => ({
+    versionUk: uniqueIndex('demo_v2_translations_artifact_language_version_uk').on(t.artifactId, t.language, t.version),
+    currentUk: uniqueIndex('demo_v2_translations_current_uk').on(t.artifactId, t.language).where(sql`${t.isCurrent}`),
+    sourceIdx: index('demo_v2_translations_source_idx').on(t.sourceContentPackageId),
+    statusIdx: index('demo_v2_translations_status_idx').on(t.status, t.reviewStatus),
+    hashIdx: index('demo_v2_translations_hash_idx').on(t.translationHash),
+    versionCk: check('demo_v2_translations_version_ck', sql`${t.version} > 0`),
+    languageCk: check('demo_v2_translations_language_ck', sql.raw(`language IN (${DEMO_V2_LANGUAGE_SQL})`)),
+    directionCk: check('demo_v2_translations_direction_ck', sql.raw(`direction IN (${DEMO_V2_DIRECTION_SQL})`)),
+    statusCk: check('demo_v2_translations_status_ck', sql`${t.status} IN ('DRAFT','INCOMPLETE','READY_FOR_REVIEW','REVIEWED','STALE','REJECTED')`),
+    reviewStatusCk: check('demo_v2_translations_review_status_ck', sql`${t.reviewStatus} IN ('NOT_REVIEWED','APPROVED','REJECTED')`),
+    actorCk: check('demo_v2_translations_actor_ck', sql`${t.reviewActorType} IS NULL OR ${t.reviewActorType} IN ('MODEL','HUMAN','SYSTEM')`),
+    hashCk: check('demo_v2_translations_hash_ck', sql.raw(`source_content_hash ~ '${DEMO_V2_HASH_SQL}' AND source_fingerprint ~ '${DEMO_V2_HASH_SQL}' AND (translation_hash IS NULL OR translation_hash ~ '${DEMO_V2_HASH_SQL}')`)),
+    humanApprovalCk: check('demo_v2_translations_human_approval_ck', sql`
+      ${t.reviewStatus} <> 'APPROVED'
+      OR (${t.status} = 'REVIEWED' AND ${t.reviewActorType} = 'HUMAN'
+        AND length(trim(${t.reviewActorId})) > 0 AND ${t.reviewedAt} IS NOT NULL
+        AND ${t.translationHash} IS NOT NULL AND ${t.finalizedAt} IS NOT NULL)`),
+  }),
+);
+
+export const demoV2TranslationRecords = pgTable(
+  'demo_v2_translation_records',
+  {
+    id: text('id').primaryKey(),
+    translationPackageId: text('translation_package_id').notNull()
+      .references(() => demoV2TranslationPackages.id, { onDelete: 'cascade' }),
+    sourceContentItemId: text('source_content_item_id').notNull()
+      .references(() => demoV2ContentItems.id, { onDelete: 'restrict' }),
+    sourceItemHash: text('source_item_hash').notNull(),
+    translatedText: text('translated_text'),
+    translatedStructuredValue: jsonb('translated_structured_value'),
+    translationItemHash: text('translation_item_hash'),
+    status: text('status').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    itemUk: uniqueIndex('demo_v2_translation_records_item_uk').on(t.translationPackageId, t.sourceContentItemId),
+    statusIdx: index('demo_v2_translation_records_status_idx').on(t.translationPackageId, t.status),
+    sourceIdx: index('demo_v2_translation_records_source_idx').on(t.sourceContentItemId),
+    statusCk: check('demo_v2_translation_records_status_ck', sql`${t.status} IN ('MISSING','TRANSLATED','REVIEWED','STALE','REJECTED')`),
+    valueCk: check('demo_v2_translation_records_value_ck', sql`
+      (${t.status} = 'MISSING' AND num_nonnulls(${t.translatedText}, ${t.translatedStructuredValue}, ${t.translationItemHash}) = 0)
+      OR (${t.status} IN ('TRANSLATED','REVIEWED') AND num_nonnulls(${t.translatedText}, ${t.translatedStructuredValue}) = 1 AND ${t.translationItemHash} IS NOT NULL)
+      OR (${t.status} IN ('STALE','REJECTED'))`),
+    hashCk: check('demo_v2_translation_records_hash_ck', sql.raw(`source_item_hash ~ '${DEMO_V2_HASH_SQL}' AND (translation_item_hash IS NULL OR translation_item_hash ~ '${DEMO_V2_HASH_SQL}')`)),
+  }),
+);
+
+export const demoV2AssetCatalogs = pgTable(
+  'demo_v2_asset_catalogs',
+  {
+    id: text('id').primaryKey(),
+    artifactId: text('artifact_id').notNull().references(() => demoV2Artifacts.id, { onDelete: 'cascade' }),
+    clinicIntelligencePackageId: text('clinic_intelligence_package_id').notNull()
+      .references(() => demoV2ClinicIntelligencePackages.id, { onDelete: 'restrict' }),
+    version: integer('version').notNull(),
+    schemaVersion: text('schema_version').notNull(),
+    status: text('status').notNull(),
+    sourceFingerprint: text('source_fingerprint').notNull(),
+    catalogHash: text('catalog_hash').notNull(),
+    isCurrent: boolean('is_current').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    finalizedAt: timestamp('finalized_at', { withTimezone: true }),
+  },
+  (t) => ({
+    versionUk: uniqueIndex('demo_v2_asset_catalogs_artifact_version_uk').on(t.artifactId, t.version),
+    currentUk: uniqueIndex('demo_v2_asset_catalogs_current_uk').on(t.artifactId).where(sql`${t.isCurrent}`),
+    intelligenceIdx: index('demo_v2_asset_catalogs_intelligence_idx').on(t.clinicIntelligencePackageId),
+    hashIdx: index('demo_v2_asset_catalogs_hash_idx').on(t.catalogHash),
+    versionCk: check('demo_v2_asset_catalogs_version_ck', sql`${t.version} > 0`),
+    statusCk: check('demo_v2_asset_catalogs_status_ck', sql`${t.status} IN ('DRAFT','READY_FOR_REVIEW','READY','BLOCKED','STALE')`),
+    hashCk: check('demo_v2_asset_catalogs_hash_ck', sql.raw(`source_fingerprint ~ '${DEMO_V2_HASH_SQL}' AND catalog_hash ~ '${DEMO_V2_HASH_SQL}'`)),
+  }),
+);
+
+export const demoV2Assets = pgTable(
+  'demo_v2_assets',
+  {
+    id: text('id').primaryKey(),
+    assetCatalogId: text('asset_catalog_id').notNull().references(() => demoV2AssetCatalogs.id, { onDelete: 'cascade' }),
+    sourceCapturedPageId: text('source_captured_page_id').references(() => capturedPages.id, { onDelete: 'restrict' }),
+    sourceCaptureEvidenceId: text('source_capture_evidence_id').references(() => captureEvidence.id, { onDelete: 'restrict' }),
+    sourcePageUrl: text('source_page_url').notNull(),
+    directUrl: text('direct_url'),
+    finalUrl: text('final_url'),
+    contentHash: text('content_hash'),
+    mimeType: text('mime_type'),
+    byteSize: integer('byte_size'),
+    width: integer('width'),
+    height: integer('height'),
+    aspectRatio: doublePrecision('aspect_ratio'),
+    altText: text('alt_text'),
+    nearbyCaption: text('nearby_caption'),
+    nearbyHeading: text('nearby_heading'),
+    category: text('category').notNull(),
+    availabilityStatus: text('availability_status').notNull(),
+    firstPartyStatus: text('first_party_status').notNull(),
+    qualityStatus: text('quality_status').notNull(),
+    metadata: jsonb('metadata').notNull().default(sql`'{}'::jsonb`),
+    recordHash: text('record_hash').notNull(),
+    capturedAt: timestamp('captured_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    recordUk: uniqueIndex('demo_v2_assets_catalog_record_uk').on(t.assetCatalogId, t.recordHash),
+    contentUk: uniqueIndex('demo_v2_assets_catalog_content_uk').on(t.assetCatalogId, t.contentHash)
+      .where(sql`${t.contentHash} IS NOT NULL`),
+    categoryIdx: index('demo_v2_assets_category_idx').on(t.assetCatalogId, t.category),
+    availabilityIdx: index('demo_v2_assets_availability_idx').on(t.assetCatalogId, t.availabilityStatus),
+    pageIdx: index('demo_v2_assets_page_idx').on(t.sourceCapturedPageId),
+    evidenceIdx: index('demo_v2_assets_evidence_idx').on(t.sourceCaptureEvidenceId),
+    categoryCk: check('demo_v2_assets_category_ck', sql`${t.category} IN ('HERO','CLINIC_INTERIOR','EXTERIOR','TEAM','DOCTOR','TREATMENT','EQUIPMENT','LOCATION','LOGO','DECORATIVE','UNSUITABLE')`),
+    availabilityCk: check('demo_v2_assets_availability_ck', sql`${t.availabilityStatus} IN ('DISCOVERED','AVAILABLE','UNAVAILABLE','BLOCKED','UNKNOWN')`),
+    ownershipCk: check('demo_v2_assets_ownership_ck', sql`${t.firstPartyStatus} IN ('FIRST_PARTY','APPROVED_FIRST_PARTY_CDN','THIRD_PARTY','UNKNOWN')`),
+    qualityCk: check('demo_v2_assets_quality_ck', sql`${t.qualityStatus} IN ('UNASSESSED','SUITABLE','UNSUITABLE')`),
+    dimensionsCk: check('demo_v2_assets_dimensions_ck', sql`
+      (${t.byteSize} IS NULL OR ${t.byteSize} >= 0) AND (${t.width} IS NULL OR ${t.width} >= 0)
+      AND (${t.height} IS NULL OR ${t.height} >= 0) AND (${t.aspectRatio} IS NULL OR ${t.aspectRatio} > 0)`),
+    hashCk: check('demo_v2_assets_hash_ck', sql.raw(`record_hash ~ '${DEMO_V2_HASH_SQL}' AND (content_hash IS NULL OR content_hash ~ '${DEMO_V2_HASH_SQL}')`)),
+  }),
+);
+
+export const demoV2AssetSelections = pgTable(
+  'demo_v2_asset_selections',
+  {
+    id: text('id').primaryKey(),
+    artifactId: text('artifact_id').notNull().references(() => demoV2Artifacts.id, { onDelete: 'cascade' }),
+    assetId: text('asset_id').notNull().references(() => demoV2Assets.id, { onDelete: 'restrict' }),
+    selectionKey: text('selection_key').notNull(),
+    version: integer('version').notNull(),
+    intendedSection: text('intended_section').notNull(),
+    intendedUse: text('intended_use').notNull(),
+    desktopCrop: jsonb('desktop_crop'),
+    mobileCrop: jsonb('mobile_crop'),
+    focalPoint: jsonb('focal_point'),
+    overlay: jsonb('overlay'),
+    contrastResult: jsonb('contrast_result'),
+    fallback: jsonb('fallback'),
+    sourceAttribution: text('source_attribution'),
+    status: text('status').notNull(),
+    boundAssetRecordHash: text('bound_asset_record_hash').notNull(),
+    selectionHash: text('selection_hash').notNull(),
+    isCurrent: boolean('is_current').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    versionUk: uniqueIndex('demo_v2_asset_selections_artifact_key_version_uk').on(t.artifactId, t.selectionKey, t.version),
+    currentUk: uniqueIndex('demo_v2_asset_selections_current_uk').on(t.artifactId, t.selectionKey).where(sql`${t.isCurrent}`),
+    assetIdx: index('demo_v2_asset_selections_asset_idx').on(t.assetId),
+    statusIdx: index('demo_v2_asset_selections_status_idx').on(t.artifactId, t.status),
+    hashIdx: index('demo_v2_asset_selections_hash_idx').on(t.selectionHash),
+    versionCk: check('demo_v2_asset_selections_version_ck', sql`${t.version} > 0`),
+    statusCk: check('demo_v2_asset_selections_status_ck', sql`${t.status} IN ('PROPOSED','REUSE_REVIEW_REQUIRED','SELECTED','REJECTED','STALE')`),
+    hashCk: check('demo_v2_asset_selections_hash_ck', sql.raw(`bound_asset_record_hash ~ '${DEMO_V2_HASH_SQL}' AND selection_hash ~ '${DEMO_V2_HASH_SQL}'`)),
+  }),
+);
+
+export const demoV2AssetReuseReviews = pgTable(
+  'demo_v2_asset_reuse_reviews',
+  {
+    id: text('id').primaryKey(),
+    assetSelectionId: text('asset_selection_id').notNull()
+      .references(() => demoV2AssetSelections.id, { onDelete: 'cascade' }),
+    version: integer('version').notNull(),
+    decision: text('decision').notNull(),
+    actorType: text('actor_type').notNull(),
+    actorId: text('actor_id').notNull(),
+    reviewedAt: timestamp('reviewed_at', { withTimezone: true }).notNull().defaultNow(),
+    evidenceNote: text('evidence_note').notNull(),
+    boundAssetRecordHash: text('bound_asset_record_hash').notNull(),
+    boundSelectionHash: text('bound_selection_hash').notNull(),
+    reviewHash: text('review_hash').notNull(),
+    isCurrent: boolean('is_current').notNull().default(true),
+  },
+  (t) => ({
+    versionUk: uniqueIndex('demo_v2_asset_reuse_reviews_selection_version_uk').on(t.assetSelectionId, t.version),
+    currentUk: uniqueIndex('demo_v2_asset_reuse_reviews_current_uk').on(t.assetSelectionId).where(sql`${t.isCurrent}`),
+    decisionIdx: index('demo_v2_asset_reuse_reviews_decision_idx').on(t.decision),
+    versionCk: check('demo_v2_asset_reuse_reviews_version_ck', sql`${t.version} > 0`),
+    decisionCk: check('demo_v2_asset_reuse_reviews_decision_ck', sql`${t.decision} IN ('APPROVED_CONCEPT_USE','NEEDS_RIGHTS_REVIEW','REJECTED')`),
+    actorCk: check('demo_v2_asset_reuse_reviews_actor_ck', sql`${t.actorType} IN ('MODEL','HUMAN','SYSTEM') AND length(trim(${t.actorId})) > 0`),
+    humanDecisionCk: check('demo_v2_asset_reuse_reviews_human_decision_ck', sql`
+      ${t.decision} NOT IN ('APPROVED_CONCEPT_USE','REJECTED') OR ${t.actorType} = 'HUMAN'`),
+    noteCk: check('demo_v2_asset_reuse_reviews_note_ck', sql`length(trim(${t.evidenceNote})) > 0`),
+    hashCk: check('demo_v2_asset_reuse_reviews_hash_ck', sql.raw(`bound_asset_record_hash ~ '${DEMO_V2_HASH_SQL}' AND bound_selection_hash ~ '${DEMO_V2_HASH_SQL}' AND review_hash ~ '${DEMO_V2_HASH_SQL}'`)),
+  }),
+);
+
+export const demoV2CreativeBriefs = pgTable(
+  'demo_v2_creative_briefs',
+  {
+    id: text('id').primaryKey(),
+    artifactId: text('artifact_id').notNull().references(() => demoV2Artifacts.id, { onDelete: 'cascade' }),
+    clinicIntelligencePackageId: text('clinic_intelligence_package_id').notNull()
+      .references(() => demoV2ClinicIntelligencePackages.id, { onDelete: 'restrict' }),
+    primaryContentPackageId: text('primary_content_package_id').notNull()
+      .references(() => demoV2PrimaryContentPackages.id, { onDelete: 'restrict' }),
+    assetCatalogId: text('asset_catalog_id').notNull().references(() => demoV2AssetCatalogs.id, { onDelete: 'restrict' }),
+    version: integer('version').notNull(),
+    schemaVersion: text('schema_version').notNull(),
+    status: text('status').notNull(),
+    brief: jsonb('brief').notNull(),
+    inputFingerprint: text('input_fingerprint').notNull(),
+    briefHash: text('brief_hash').notNull(),
+    isCurrent: boolean('is_current').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    finalizedAt: timestamp('finalized_at', { withTimezone: true }),
+  },
+  (t) => ({
+    versionUk: uniqueIndex('demo_v2_creative_briefs_artifact_version_uk').on(t.artifactId, t.version),
+    currentUk: uniqueIndex('demo_v2_creative_briefs_current_uk').on(t.artifactId).where(sql`${t.isCurrent}`),
+    intelligenceIdx: index('demo_v2_creative_briefs_intelligence_idx').on(t.clinicIntelligencePackageId),
+    contentIdx: index('demo_v2_creative_briefs_content_idx').on(t.primaryContentPackageId),
+    catalogIdx: index('demo_v2_creative_briefs_catalog_idx').on(t.assetCatalogId),
+    hashIdx: index('demo_v2_creative_briefs_hash_idx').on(t.briefHash),
+    versionCk: check('demo_v2_creative_briefs_version_ck', sql`${t.version} > 0`),
+    statusCk: check('demo_v2_creative_briefs_status_ck', sql`${t.status} IN ('DRAFT','VALIDATED','STALE','REJECTED')`),
+    hashCk: check('demo_v2_creative_briefs_hash_ck', sql.raw(`input_fingerprint ~ '${DEMO_V2_HASH_SQL}' AND brief_hash ~ '${DEMO_V2_HASH_SQL}'`)),
+  }),
+);
+
+export const demoV2ExperiencePlans = pgTable(
+  'demo_v2_experience_plans',
+  {
+    id: text('id').primaryKey(),
+    artifactId: text('artifact_id').notNull().references(() => demoV2Artifacts.id, { onDelete: 'cascade' }),
+    creativeBriefId: text('creative_brief_id').notNull().references(() => demoV2CreativeBriefs.id, { onDelete: 'restrict' }),
+    primaryContentPackageId: text('primary_content_package_id').notNull()
+      .references(() => demoV2PrimaryContentPackages.id, { onDelete: 'restrict' }),
+    version: integer('version').notNull(),
+    schemaVersion: text('schema_version').notNull(),
+    status: text('status').notNull(),
+    primaryLanguage: text('primary_language').notNull(),
+    primaryDirection: text('primary_direction').notNull(),
+    supportedLanguages: jsonb('supported_languages').notNull(),
+    componentRegistryVersion: text('component_registry_version').notNull(),
+    componentRegistryHash: text('component_registry_hash').notNull(),
+    referenceLibraryVersion: text('reference_library_version').notNull(),
+    referenceLibraryHash: text('reference_library_hash').notNull(),
+    plan: jsonb('plan').notNull(),
+    inputFingerprint: text('input_fingerprint').notNull(),
+    planHash: text('plan_hash').notNull(),
+    isCurrent: boolean('is_current').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    finalizedAt: timestamp('finalized_at', { withTimezone: true }),
+  },
+  (t) => ({
+    versionUk: uniqueIndex('demo_v2_experience_plans_artifact_version_uk').on(t.artifactId, t.version),
+    currentUk: uniqueIndex('demo_v2_experience_plans_current_uk').on(t.artifactId).where(sql`${t.isCurrent}`),
+    briefIdx: index('demo_v2_experience_plans_brief_idx').on(t.creativeBriefId),
+    contentIdx: index('demo_v2_experience_plans_content_idx').on(t.primaryContentPackageId),
+    hashIdx: index('demo_v2_experience_plans_hash_idx').on(t.planHash),
+    registryIdx: index('demo_v2_experience_plans_registry_idx').on(t.componentRegistryHash),
+    versionCk: check('demo_v2_experience_plans_version_ck', sql`${t.version} > 0`),
+    statusCk: check('demo_v2_experience_plans_status_ck', sql`${t.status} IN ('DRAFT','VALIDATED','STALE','REJECTED')`),
+    languageCk: check('demo_v2_experience_plans_language_ck', sql.raw(`primary_language IN (${DEMO_V2_LANGUAGE_SQL})`)),
+    directionCk: check('demo_v2_experience_plans_direction_ck', sql.raw(`primary_direction IN (${DEMO_V2_DIRECTION_SQL})`)),
+    languagesJsonCk: check('demo_v2_experience_plans_languages_json_ck', sql`jsonb_typeof(${t.supportedLanguages}) = 'array'`),
+    hashCk: check('demo_v2_experience_plans_hash_ck', sql.raw(`component_registry_hash ~ '${DEMO_V2_HASH_SQL}' AND reference_library_hash ~ '${DEMO_V2_HASH_SQL}' AND input_fingerprint ~ '${DEMO_V2_HASH_SQL}' AND plan_hash ~ '${DEMO_V2_HASH_SQL}'`)),
+  }),
+);
+
+export const demoV2ExperiencePlanTranslations = pgTable(
+  'demo_v2_experience_plan_translations',
+  {
+    experiencePlanId: text('experience_plan_id').notNull().references(() => demoV2ExperiencePlans.id, { onDelete: 'cascade' }),
+    translationPackageId: text('translation_package_id').notNull()
+      .references(() => demoV2TranslationPackages.id, { onDelete: 'restrict' }),
+    boundTranslationHash: text('bound_translation_hash').notNull(),
+    boundSourceContentHash: text('bound_source_content_hash').notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.experiencePlanId, t.translationPackageId] }),
+    translationIdx: index('demo_v2_plan_translations_translation_idx').on(t.translationPackageId),
+    hashCk: check('demo_v2_plan_translations_hash_ck', sql.raw(`bound_translation_hash ~ '${DEMO_V2_HASH_SQL}' AND bound_source_content_hash ~ '${DEMO_V2_HASH_SQL}'`)),
+  }),
+);
+
+export const demoV2ExperiencePlanAssets = pgTable(
+  'demo_v2_experience_plan_assets',
+  {
+    experiencePlanId: text('experience_plan_id').notNull().references(() => demoV2ExperiencePlans.id, { onDelete: 'cascade' }),
+    assetSelectionId: text('asset_selection_id').notNull().references(() => demoV2AssetSelections.id, { onDelete: 'restrict' }),
+    reuseReviewId: text('reuse_review_id').notNull().references(() => demoV2AssetReuseReviews.id, { onDelete: 'restrict' }),
+    boundAssetRecordHash: text('bound_asset_record_hash').notNull(),
+    boundSelectionHash: text('bound_selection_hash').notNull(),
+    boundReuseReviewHash: text('bound_reuse_review_hash').notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.experiencePlanId, t.assetSelectionId] }),
+    selectionIdx: index('demo_v2_plan_assets_selection_idx').on(t.assetSelectionId),
+    reviewIdx: index('demo_v2_plan_assets_review_idx').on(t.reuseReviewId),
+    hashCk: check('demo_v2_plan_assets_hash_ck', sql.raw(`bound_asset_record_hash ~ '${DEMO_V2_HASH_SQL}' AND bound_selection_hash ~ '${DEMO_V2_HASH_SQL}' AND bound_reuse_review_hash ~ '${DEMO_V2_HASH_SQL}'`)),
+  }),
+);
+
+export const demoV2ApprovalPackages = pgTable(
+  'demo_v2_approval_packages',
+  {
+    id: text('id').primaryKey(),
+    artifactId: text('artifact_id').notNull().references(() => demoV2Artifacts.id, { onDelete: 'cascade' }),
+    clinicIntelligencePackageId: text('clinic_intelligence_package_id').notNull()
+      .references(() => demoV2ClinicIntelligencePackages.id, { onDelete: 'restrict' }),
+    primaryContentPackageId: text('primary_content_package_id').notNull()
+      .references(() => demoV2PrimaryContentPackages.id, { onDelete: 'restrict' }),
+    assetCatalogId: text('asset_catalog_id').notNull().references(() => demoV2AssetCatalogs.id, { onDelete: 'restrict' }),
+    creativeBriefId: text('creative_brief_id').notNull().references(() => demoV2CreativeBriefs.id, { onDelete: 'restrict' }),
+    experiencePlanId: text('experience_plan_id').notNull().references(() => demoV2ExperiencePlans.id, { onDelete: 'restrict' }),
+    schemaVersion: text('schema_version').notNull(),
+    intelligenceHash: text('intelligence_hash').notNull(),
+    primaryContentHash: text('primary_content_hash').notNull(),
+    translationSetHash: text('translation_set_hash').notNull(),
+    assetCatalogHash: text('asset_catalog_hash').notNull(),
+    assetSelectionSetHash: text('asset_selection_set_hash').notNull(),
+    creativeBriefHash: text('creative_brief_hash').notNull(),
+    experiencePlanHash: text('experience_plan_hash').notNull(),
+    componentRegistryVersion: text('component_registry_version').notNull(),
+    componentRegistryHash: text('component_registry_hash').notNull(),
+    referenceLibraryVersion: text('reference_library_version').notNull(),
+    referenceLibraryHash: text('reference_library_hash').notNull(),
+    renderHash: text('render_hash').notNull(),
+    screenshotSetHash: text('screenshot_set_hash').notNull(),
+    qualityRubricVersion: text('quality_rubric_version').notNull(),
+    qualityRubricHash: text('quality_rubric_hash').notNull(),
+    visualReviewSetHash: text('visual_review_set_hash').notNull(),
+    approvalPackageHash: text('approval_package_hash').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    packageUk: uniqueIndex('demo_v2_approval_packages_artifact_hash_uk').on(t.artifactId, t.approvalPackageHash),
+    planIdx: index('demo_v2_approval_packages_plan_idx').on(t.experiencePlanId),
+    renderIdx: index('demo_v2_approval_packages_render_idx').on(t.renderHash),
+    hashIdx: index('demo_v2_approval_packages_hash_idx').on(t.approvalPackageHash),
+    hashesCk: check('demo_v2_approval_packages_hashes_ck', sql.raw(`
+      intelligence_hash ~ '${DEMO_V2_HASH_SQL}' AND primary_content_hash ~ '${DEMO_V2_HASH_SQL}'
+      AND translation_set_hash ~ '${DEMO_V2_HASH_SQL}' AND asset_catalog_hash ~ '${DEMO_V2_HASH_SQL}'
+      AND asset_selection_set_hash ~ '${DEMO_V2_HASH_SQL}' AND creative_brief_hash ~ '${DEMO_V2_HASH_SQL}'
+      AND experience_plan_hash ~ '${DEMO_V2_HASH_SQL}' AND component_registry_hash ~ '${DEMO_V2_HASH_SQL}'
+      AND reference_library_hash ~ '${DEMO_V2_HASH_SQL}' AND render_hash ~ '${DEMO_V2_HASH_SQL}'
+      AND screenshot_set_hash ~ '${DEMO_V2_HASH_SQL}' AND quality_rubric_hash ~ '${DEMO_V2_HASH_SQL}'
+      AND visual_review_set_hash ~ '${DEMO_V2_HASH_SQL}' AND approval_package_hash ~ '${DEMO_V2_HASH_SQL}'`)),
+    rubricCk: check('demo_v2_approval_packages_rubric_ck', sql`length(trim(${t.qualityRubricVersion})) > 0`),
+  }),
+);
+
+export const demoV2ApprovalTranslationInputs = pgTable(
+  'demo_v2_approval_translation_inputs',
+  {
+    approvalPackageId: text('approval_package_id').notNull().references(() => demoV2ApprovalPackages.id, { onDelete: 'cascade' }),
+    translationPackageId: text('translation_package_id').notNull()
+      .references(() => demoV2TranslationPackages.id, { onDelete: 'restrict' }),
+    boundSourceContentHash: text('bound_source_content_hash').notNull(),
+    boundTranslationHash: text('bound_translation_hash').notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.approvalPackageId, t.translationPackageId] }),
+    hashCk: check('demo_v2_approval_translations_hash_ck', sql.raw(`bound_source_content_hash ~ '${DEMO_V2_HASH_SQL}' AND bound_translation_hash ~ '${DEMO_V2_HASH_SQL}'`)),
+  }),
+);
+
+export const demoV2ApprovalAssetInputs = pgTable(
+  'demo_v2_approval_asset_inputs',
+  {
+    approvalPackageId: text('approval_package_id').notNull().references(() => demoV2ApprovalPackages.id, { onDelete: 'cascade' }),
+    assetSelectionId: text('asset_selection_id').notNull().references(() => demoV2AssetSelections.id, { onDelete: 'restrict' }),
+    reuseReviewId: text('reuse_review_id').notNull().references(() => demoV2AssetReuseReviews.id, { onDelete: 'restrict' }),
+    boundAssetRecordHash: text('bound_asset_record_hash').notNull(),
+    boundSelectionHash: text('bound_selection_hash').notNull(),
+    boundReuseReviewHash: text('bound_reuse_review_hash').notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.approvalPackageId, t.assetSelectionId] }),
+    hashCk: check('demo_v2_approval_assets_hash_ck', sql.raw(`bound_asset_record_hash ~ '${DEMO_V2_HASH_SQL}' AND bound_selection_hash ~ '${DEMO_V2_HASH_SQL}' AND bound_reuse_review_hash ~ '${DEMO_V2_HASH_SQL}'`)),
+  }),
+);
+
+export const demoV2ApprovalDecisions = pgTable(
+  'demo_v2_approval_decisions',
+  {
+    id: text('id').primaryKey(),
+    approvalPackageId: text('approval_package_id').notNull().references(() => demoV2ApprovalPackages.id, { onDelete: 'cascade' }),
+    decision: text('decision').notNull(),
+    actorType: text('actor_type').notNull(),
+    actorId: text('actor_id').notNull(),
+    reviewCycle: integer('review_cycle'),
+    score: doublePrecision('score'),
+    blockerCount: integer('blocker_count'),
+    categoryScores: jsonb('category_scores').notNull(),
+    notes: text('notes'),
+    boundApprovalPackageHash: text('bound_approval_package_hash').notNull(),
+    boundVisualReviewSetHash: text('bound_visual_review_set_hash').notNull(),
+    boundQualityRubricHash: text('bound_quality_rubric_hash').notNull(),
+    decidedAt: timestamp('decided_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    packageTimeIdx: index('demo_v2_approval_decisions_package_time_idx').on(t.approvalPackageId, t.decidedAt),
+    cycleUk: uniqueIndex('demo_v2_approval_decisions_cycle_uk').on(t.approvalPackageId, t.decision, t.reviewCycle)
+      .where(sql`${t.reviewCycle} IS NOT NULL`),
+    humanUk: uniqueIndex('demo_v2_approval_decisions_human_uk').on(t.approvalPackageId)
+      .where(sql`${t.decision} IN ('HUMAN_APPROVED','HUMAN_REJECTED')`),
+    decisionCk: check('demo_v2_approval_decisions_decision_ck', sql`${t.decision} IN ('AUTO_REVIEW_PASSED','AUTO_REVIEW_FAILED','HUMAN_APPROVED','HUMAN_REJECTED')`),
+    actorCk: check('demo_v2_approval_decisions_actor_ck', sql`${t.actorType} IN ('MODEL','HUMAN','SYSTEM') AND length(trim(${t.actorId})) > 0`),
+    cycleCk: check('demo_v2_approval_decisions_cycle_ck', sql`${t.reviewCycle} IS NULL OR ${t.reviewCycle} BETWEEN 1 AND 3`),
+    scoreCk: check('demo_v2_approval_decisions_score_ck', sql`${t.score} IS NULL OR ${t.score} BETWEEN 0 AND 100`),
+    blockersCk: check('demo_v2_approval_decisions_blockers_ck', sql`${t.blockerCount} IS NULL OR ${t.blockerCount} >= 0`),
+    categoryJsonCk: check('demo_v2_approval_decisions_categories_json_ck', sql`jsonb_typeof(${t.categoryScores}) = 'object'`),
+    autoPassCk: check('demo_v2_approval_decisions_auto_pass_ck', sql`
+      ${t.decision} <> 'AUTO_REVIEW_PASSED'
+      OR (${t.actorType} IN ('MODEL','SYSTEM') AND ${t.score} >= 85 AND ${t.blockerCount} = 0
+        AND ${t.categoryScores} <> '{}'::jsonb)`),
+    actorDecisionCk: check('demo_v2_approval_decisions_actor_decision_ck', sql`
+      (${t.decision} IN ('AUTO_REVIEW_PASSED','AUTO_REVIEW_FAILED') AND ${t.actorType} IN ('MODEL','SYSTEM'))
+      OR (${t.decision} IN ('HUMAN_APPROVED','HUMAN_REJECTED') AND ${t.actorType} = 'HUMAN')`),
+    hashCk: check('demo_v2_approval_decisions_hash_ck', sql.raw(`bound_approval_package_hash ~ '${DEMO_V2_HASH_SQL}' AND bound_visual_review_set_hash ~ '${DEMO_V2_HASH_SQL}' AND bound_quality_rubric_hash ~ '${DEMO_V2_HASH_SQL}'`)),
+  }),
+);
+
+export const demoV2ApprovalInvalidations = pgTable(
+  'demo_v2_approval_invalidations',
+  {
+    id: text('id').primaryKey(),
+    approvalPackageId: text('approval_package_id').notNull().references(() => demoV2ApprovalPackages.id, { onDelete: 'cascade' }),
+    reasonCode: text('reason_code').notNull(),
+    changedBindings: jsonb('changed_bindings').notNull(),
+    previousPackageHash: text('previous_package_hash').notNull(),
+    observedFingerprint: text('observed_fingerprint').notNull(),
+    actorType: text('actor_type').notNull().default('SYSTEM'),
+    invalidatedAt: timestamp('invalidated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    packageUk: uniqueIndex('demo_v2_approval_invalidations_package_uk').on(t.approvalPackageId),
+    timeIdx: index('demo_v2_approval_invalidations_time_idx').on(t.invalidatedAt),
+    reasonCk: check('demo_v2_approval_invalidations_reason_ck', sql`${t.reasonCode} IN (
+      'INTELLIGENCE_CHANGED','PRIMARY_CONTENT_CHANGED','TRANSLATION_CHANGED','ASSET_CATALOG_CHANGED',
+      'ASSET_SELECTION_CHANGED','REUSE_REVIEW_CHANGED','CREATIVE_BRIEF_CHANGED','EXPERIENCE_PLAN_CHANGED',
+      'COMPONENT_REGISTRY_CHANGED','REFERENCE_LIBRARY_CHANGED','RENDER_CHANGED','SCREENSHOT_SET_CHANGED',
+      'QUALITY_RUBRIC_CHANGED','VISUAL_REVIEW_SET_CHANGED','MANUAL_INVALIDATION')`),
+    actorCk: check('demo_v2_approval_invalidations_actor_ck', sql`${t.actorType} IN ('SYSTEM','HUMAN')`),
+    hashCk: check('demo_v2_approval_invalidations_hash_ck', sql.raw(`previous_package_hash ~ '${DEMO_V2_HASH_SQL}' AND observed_fingerprint ~ '${DEMO_V2_HASH_SQL}'`)),
+  }),
+);

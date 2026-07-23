@@ -1,0 +1,17 @@
+{
+  "version": "component-registry-v1",
+  "components": [
+    {
+      "id": "hero-editorial",
+      "version": "1",
+      "supportedDirections": ["LTR", "RTL"],
+      "contentSlots": ["eyebrow", "heading", "body", "primaryCta"]
+    },
+    {
+      "id": "services-grid",
+      "version": "1",
+      "supportedDirections": ["LTR", "RTL"],
+      "contentSlots": ["heading", "services"]
+    }
+  ]
+}

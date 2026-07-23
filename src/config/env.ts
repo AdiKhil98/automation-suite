@@ -169,6 +169,26 @@ const envSchema = z.object({
   // Git-ignored diagnostics dir: every run's spec + reviewer verdict (no secrets/reasoning).
   COMPOSER_DEBUG_DIR: z.string().default('./.composer-debug'),
 
+  // --- Demo Engine V2 Milestone 1: inert foundation only ---
+  // V1 remains authoritative. Future V2 commands must require both gates.
+  DEMO_ENGINE_VERSION: z.enum(['v1', 'v2']).default('v1'),
+  DEMO_V2_ENABLED: boolString(false),
+  DEMO_V2_CREATIVE_PROVIDER: z.enum(['mock', 'openai']).default('mock'),
+  DEMO_V2_CREATIVE_MODEL: z.string().default('gpt-5.6-sol'),
+  DEMO_V2_CREATIVE_EFFORT: z.enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']).default('high'),
+  DEMO_V2_TRANSLATION_PROVIDER: z.enum(['mock', 'openai']).default('mock'),
+  DEMO_V2_TRANSLATION_MODEL: z.string().default('gpt-5.6-terra'),
+  DEMO_V2_TRANSLATION_EFFORT: z.enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']).default('medium'),
+  DEMO_V2_VISUAL_REVIEW_PROVIDER: z.enum(['mock', 'openai']).default('mock'),
+  DEMO_V2_VISUAL_REVIEW_MODEL: z.string().default('gpt-5.6-sol'),
+  DEMO_V2_VISUAL_REVIEW_EFFORT: z.enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']).default('high'),
+  DEMO_V2_MAX_RENDERED_VERSIONS: z.coerce.number().int().min(1).max(3).default(3),
+  DEMO_V2_MAX_SCREENSHOT_REVIEW_CALLS: z.coerce.number().int().min(1).max(3).default(3),
+  DEMO_V2_MAX_IMPLEMENTATION_REVISIONS: z.coerce.number().int().min(0).max(2).default(2),
+  DEMO_V2_MAX_COST_USD_PER_DEMO: z.coerce.number().nonnegative().default(3),
+  DEMO_V2_COMPONENT_REGISTRY_PATH: z.string().default('./design-library/component-registry.v1.json'),
+  DEMO_V2_REFERENCE_LIBRARY_PATH: z.string().default('./design-library/reference-library.v1.json'),
+
   // --- Phase 9: cold email writer (local only; no sending, no Gmail, no deploy) ---
   EMAIL_GENERATION_ENABLED: boolString(false),
   EMAIL_WRITER_MODEL: z.string().default('gpt-5.6-sol'),
@@ -294,6 +314,13 @@ const refinedEnvSchema = envSchema.superRefine((val, ctx) => {
       code: 'custom',
       path: ['OPENAI_API_KEY'],
       message: 'OPENAI_API_KEY is required when LLM_PROVIDER=openai and ALLOW_PAID_LLM_CALLS=true',
+    });
+  }
+  if (val.DEMO_V2_ENABLED && val.DEMO_ENGINE_VERSION !== 'v2') {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['DEMO_ENGINE_VERSION'],
+      message: 'DEMO_ENGINE_VERSION must be v2 when DEMO_V2_ENABLED=true',
     });
   }
 });

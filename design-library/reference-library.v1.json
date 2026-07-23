@@ -1,0 +1,11 @@
+{
+  "version": "reference-library-v1",
+  "references": [
+    {
+      "id": "editorial-healthcare-layout",
+      "category": "layout",
+      "notes": "Reference for spacing and hierarchy only; do not copy content or identity.",
+      "allowedUse": "INSPIRATION_ONLY"
+    }
+  ]
+}

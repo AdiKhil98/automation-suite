@@ -2,8 +2,9 @@
 
 **Status:** Phases 0-16 are complete, committed and tagged through
 `phase-16-production-safety-hardening` (`9092606`). Bounded radius prospecting is committed (`2fe45de`).
-A post-Phase-16 controlled validation orchestrator is implemented for review; it remains non-sendable.
-**Last updated:** 2026-07-22
+A post-Phase-16 controlled validation orchestrator remains non-sendable. Demo Engine V2 Milestone 1 is
+implemented as an isolated, disabled-by-default foundation; no V2 operational path exists.
+**Last updated:** 2026-07-23
 
 One phase at a time. Each phase ends with tests, a commit, an annotated tag, and an explicit approval gate.
 No phase begins before the previous one is approved with `APPROVE PHASE X`.
@@ -27,6 +28,18 @@ No phase begins before the previous one is approved with `APPROVE PHASE X`.
 | 14 | Controlled sending (only on explicit request) | `phase-14-sending` | complete; committed + tagged |
 | 15 | Production sending readiness and live Gmail provider integration | `phase-15-production-sending-readiness` | complete; committed + tagged |
 | 16 | Production safety hardening | `phase-16-production-safety-hardening` | complete; committed + tagged; no live send |
+
+## Demo Engine V2 roadmap
+
+| Milestone | Scope | Status |
+|---|---|---|
+| 1 | Additive schemas, immutable contracts, manifests, validators, repositories, fixtures, and safety tests | complete; locally verified |
+| 2+ | Intelligence/content generation, translation, asset acquisition, briefs/plans, rendering, visual review, revisions, human review, deployment integration | not approved; not implemented |
+
+Milestone 1 leaves V1 untouched and selected by default. Migration `0023` creates 21 isolated V2 tables with
+no FK to `demos`. Human translation/reuse/final approvals are actor-bound; approval packages bind the complete
+content/translation/asset/brief/plan/registry/render/screenshot/rubric/visual-review fingerprint. Automatic
+review is advisory only and cannot authorize deployment. See D-0037.
 
 > **Controlled prospect validation extension:** the normal prospect continuation remains conservative.
 > An explicit `--controlled-test` mode may process exactly one qualified lead through the existing capture,

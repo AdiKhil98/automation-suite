@@ -9,12 +9,12 @@ const journal = JSON.parse(readFileSync(new URL('../../migrations/meta/_journal.
 const schema = readFileSync(new URL('../../src/persistence/schema.ts', import.meta.url), 'utf8');
 
 describe('migration 0022 lead-fact schema parity', () => {
-  it('is registered exactly once as the monotonic final entry', () => {
+  it('is registered exactly once at its monotonic journal position', () => {
     const matching = journal.entries.filter((entry) => entry.tag === '0022_restore_demo_fact_types');
     expect(matching).toHaveLength(1);
     expect(matching[0]?.idx).toBe(22);
-    expect(journal.entries.at(-1)?.tag).toBe('0022_restore_demo_fact_types');
-    expect((matching[0]?.when ?? 0) > (journal.entries.at(-2)?.when ?? Number.MAX_SAFE_INTEGER)).toBe(true);
+    expect(journal.entries[22]?.tag).toBe('0022_restore_demo_fact_types');
+    expect((matching[0]?.when ?? 0) > (journal.entries[21]?.when ?? Number.MAX_SAFE_INTEGER)).toBe(true);
   });
 
   it('restores every established demo fact type in code and the database constraint', () => {

@@ -2,10 +2,17 @@
 
 All notable changes per phase. Format loosely follows Keep a Changelog.
 
-## [Unreleased] - 2026-07-22
+## [Unreleased] - 2026-07-23
 
 ### Added
 
+- Demo Engine V2 Milestone 1 additive foundation: 21 isolated `demo_v2_*` tables, guarded reverse migration,
+  versioned immutable package contracts, relational provenance, multilingual/RTL metadata, asset-catalog and
+  reuse-review separation, Creative Brief and ExperiencePlan snapshots, and hash-bound approval packages.
+- Deterministic canonical hashing, complete-primary-language fallback, component/reference manifest validation,
+  screenshot-set aggregation, automatic-review rubric binding, and insert-only V2 persistence boundaries.
+- V2 configuration defaults to `DEMO_ENGINE_VERSION=v1`, `DEMO_V2_ENABLED=false`, and mock providers. Milestone 1
+  exposes no V2 generation, rendering, deployment, email, Gmail, or provider path.
 - Bounded `prospect-run` CLI for validated niche + location/coordinates + radius discovery, ordered candidate
   fallback, deterministic qualification, and optional exact-lead downstream continuation.
 - Deterministic mappings for dentists, lawyers, gyms, and real-estate agencies to approved Google Table A
@@ -24,6 +31,11 @@ All notable changes per phase. Format loosely follows Keep a Changelog.
 
 ### Safety
 
+- Translation approval requires a human actor. Asset selection is `SELECTED`, distinct from exact hash-matched
+  human reuse approval. Automatic review requires score ≥85, zero blockers, all required category scores ≥70,
+  and exact rubric/visual-review bindings; it never grants deployment approval.
+- Approval packages bind content, translations, assets, brief, plan, registries, render, complete screenshot set,
+  quality rubric, and visual-review set. Any mismatch or invalidation fails closed.
 - Prospecting and continuation are disabled by default. Places reads require the separate paid-read gate;
   standard tests use injected transports and make no network calls. Continuation never invokes Gmail send.
 - Gmail draft creation now requires the dedicated default-false `GMAIL_DRAFT_ACTIONS_ENABLED` gate instead

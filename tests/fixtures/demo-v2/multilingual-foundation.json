@@ -1,0 +1,19 @@
+{
+  "artifactId": "fixture-demo-v2-artifact",
+  "primaryLanguage": "de",
+  "supportedLanguages": ["de", "en", "fr", "he", "ar"],
+  "directions": {
+    "de": "LTR",
+    "en": "LTR",
+    "fr": "LTR",
+    "he": "RTL",
+    "ar": "RTL"
+  },
+  "content": {
+    "de": "Eine sorgfältige, evidenzgebundene Beschreibung ohne erfundene Behauptungen.",
+    "en": "A careful evidence-bound description without invented claims.",
+    "fr": "Une description soigneuse et fondée sur des preuves, sans affirmations inventées.",
+    "he": "תיאור זהיר המבוסס על ראיות ללא טענות מומצאות.",
+    "ar": "وصف دقيق قائم على الأدلة من دون ادعاءات مختلقة."
+  }
+}

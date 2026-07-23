@@ -4,6 +4,27 @@ Every significant decision is recorded here in the required format. Newest first
 
 ---
 
+## D-0037 - Demo Engine V2 Milestone 1 is isolated, immutable, and human-approval bound
+
+- **Date:** 2026-07-23
+- **Problem:** A higher-quality demo engine needs multilingual content, asset reuse controls, creative planning,
+  visual review, and approvals without allowing existing V1 approval/deployment state to authorize incomplete
+  or changed V2 artifacts.
+- **Chosen option:** Add 21 isolated `demo_v2_*` foundation tables in migration `0023`, deterministic canonical
+  hashes, versioned immutable snapshots, complete primary-language fallback, local component/reference
+  manifests, insert-only finalized/review repositories, and a guarded reverse. V1 remains selected and unchanged.
+- **Approval rule:** Translation approval, `APPROVED_CONCEPT_USE`/rejection, and final artifact approval require
+  identified human actors. `SELECTED` means layout selection only. Automatic review requires overall score ≥85,
+  zero blockers, every required category ≥70, and exact approval/rubric/visual hashes; it never equals deployment
+  approval. Approval binds all upstream fingerprints plus render, complete screenshot set, rubric, and visual set.
+- **Reason:** Structural separation and recomputed bindings fail closed even if an explicit invalidation write is
+  interrupted, while preserving every historical snapshot and decision for audit.
+- **Tradeoffs:** Twenty-one additive tables increase migration and test-cleanup work. Generation, translation,
+  asset download, rendering, visual-review runs, and deployment integration remain deferred.
+- **Rollback path:** Keep `DEMO_ENGINE_VERSION=v1` and `DEMO_V2_ENABLED=false`. Prefer leaving inert tables in
+  place; the reverse script is destructive, separately controlled, and refuses any populated V2 table.
+- **Status:** Accepted and implemented for Milestone 1; no operational V2 path or external call.
+
 ## D-0036 - Controlled prospect validation is isolated, test-addressed, and non-sendable
 
 - **Date:** 2026-07-22

@@ -27,8 +27,10 @@ outbound-outreach pipeline for a web-design / AI-automation services business:
 
 ## Current approved phase
 
-**Phases 0-15 are complete, committed, and tagged. Phase 16 - production safety hardening - is
-approved for implementation and mock/local testing only.** No live Gmail operation, OAuth
+**Phases 0-16 are complete, committed, and tagged. Demo Engine V2 Milestone 1 is approved for an additive,
+disabled-by-default foundation only. V1 remains authoritative (`DEMO_ENGINE_VERSION=v1`,
+`DEMO_V2_ENABLED=false`).** No V2 generation, translation, asset download, rendering, visual review,
+deployment, email, Gmail, or provider behavior is authorized. No live Gmail operation, OAuth
 reauthorization, real-data restoration, real credential ACL change, readiness approval, schedule,
 or email send is authorized. All sending flags remain disabled and the mock provider remains the
 default. `docs/CURRENT_STATUS.md` and `docs/ROADMAP.md` are the authoritative current handoff.

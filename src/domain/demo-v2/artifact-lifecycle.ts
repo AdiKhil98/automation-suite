@@ -1,0 +1,42 @@
+import { z } from 'zod';
+
+export const demoV2ArtifactStatuses = [
+  'INTELLIGENCE_PENDING', 'INTELLIGENCE_READY', 'CONTENT_PENDING', 'CONTENT_READY',
+  'ASSET_REVIEW_PENDING', 'FOUNDATION_READY', 'BRIEF_READY', 'PLAN_READY', 'RENDERING',
+  'RENDERED', 'AUTO_REVIEW_PENDING', 'AUTO_REVIEW_PASSED', 'REVISION_REQUIRED',
+  'HUMAN_REVIEW_REQUIRED', 'HUMAN_APPROVED', 'REJECTED', 'BLOCKED', 'SUPERSEDED',
+] as const;
+
+export const demoV2ArtifactStatusSchema = z.enum(demoV2ArtifactStatuses);
+export type DemoV2ArtifactStatus = z.infer<typeof demoV2ArtifactStatusSchema>;
+
+const transitions: Readonly<Record<DemoV2ArtifactStatus, readonly DemoV2ArtifactStatus[]>> = {
+  INTELLIGENCE_PENDING: ['INTELLIGENCE_READY', 'BLOCKED'],
+  INTELLIGENCE_READY: ['CONTENT_PENDING', 'BLOCKED', 'SUPERSEDED'],
+  CONTENT_PENDING: ['CONTENT_READY', 'BLOCKED'],
+  CONTENT_READY: ['ASSET_REVIEW_PENDING', 'BLOCKED', 'SUPERSEDED'],
+  ASSET_REVIEW_PENDING: ['FOUNDATION_READY', 'BLOCKED'],
+  FOUNDATION_READY: ['BRIEF_READY', 'BLOCKED', 'SUPERSEDED'],
+  BRIEF_READY: ['PLAN_READY', 'BLOCKED', 'SUPERSEDED'],
+  PLAN_READY: ['RENDERING', 'BLOCKED', 'SUPERSEDED'],
+  RENDERING: ['RENDERED', 'REVISION_REQUIRED', 'BLOCKED'],
+  RENDERED: ['AUTO_REVIEW_PENDING', 'REVISION_REQUIRED', 'SUPERSEDED'],
+  AUTO_REVIEW_PENDING: ['AUTO_REVIEW_PASSED', 'REVISION_REQUIRED', 'BLOCKED'],
+  AUTO_REVIEW_PASSED: ['HUMAN_REVIEW_REQUIRED', 'REVISION_REQUIRED', 'SUPERSEDED'],
+  REVISION_REQUIRED: ['RENDERING', 'REJECTED', 'BLOCKED'],
+  HUMAN_REVIEW_REQUIRED: ['HUMAN_APPROVED', 'REJECTED', 'REVISION_REQUIRED'],
+  HUMAN_APPROVED: ['REVISION_REQUIRED', 'SUPERSEDED'],
+  REJECTED: [],
+  BLOCKED: ['INTELLIGENCE_PENDING', 'CONTENT_PENDING', 'ASSET_REVIEW_PENDING', 'RENDERING'],
+  SUPERSEDED: [],
+};
+
+export function assertDemoV2Transition(from: DemoV2ArtifactStatus, to: DemoV2ArtifactStatus): void {
+  if (!transitions[from].includes(to)) throw new Error(`invalid_demo_v2_transition:${from}:${to}`);
+}
+
+export function assertDemoV2Enabled(config: { DEMO_ENGINE_VERSION: 'v1' | 'v2'; DEMO_V2_ENABLED: boolean }): void {
+  if (config.DEMO_ENGINE_VERSION !== 'v2' || !config.DEMO_V2_ENABLED) {
+    throw new Error('demo_v2_disabled');
+  }
+}

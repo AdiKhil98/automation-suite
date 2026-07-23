@@ -2,10 +2,25 @@
 
 ## Current phase
 
-Phase 16 is committed and tagged. Bounded niche + location + radius prospecting is committed, and a
-non-sendable controlled end-to-end validation mode is implemented for final review. No Google, website,
-OpenAI, Playwright, Netlify, or Gmail request was made during implementation; all outbound/sending defaults
-remain disabled.
+Phases 0-16 are committed and tagged. Demo Engine V2 Milestone 1 is implemented and locally verified as an
+additive, inert foundation. V1 remains authoritative:
+`DEMO_ENGINE_VERSION=v1`, `DEMO_V2_ENABLED=false`, and every V2 provider defaults to mock. No generation,
+translation, asset download, rendering, screenshot review, deployment, email, Gmail, or other external-service
+path was added.
+
+## Demo Engine V2 Milestone 1
+
+- Migration `0023_demo_engine_v2_foundation.sql` adds 21 isolated `demo_v2_*` tables and changes no V1 table.
+- Versioned Clinic Intelligence, primary content, translation, asset, Creative Brief, ExperiencePlan, and
+  approval snapshots use deterministic SHA-256 bindings and insert-only finalized/review persistence methods.
+- German, English, French, Hebrew, and Arabic are supported with explicit LTR/RTL metadata. Any missing, stale,
+  rejected, unreviewed, or fingerprint-mismatched translation triggers complete primary-language fallback.
+- Final translation approval and final asset-reuse approval require identified human actors. Asset availability,
+  layout selection (`SELECTED`), and legal/concept reuse approval remain separate.
+- Approval packages bind render and complete screenshot-set hashes, quality-rubric version/hash, and the exact
+  visual-review set. Automatic pass requires overall score ≥85, zero blockers, every required category ≥70,
+  and exact binding matches. It is never human or deployment approval.
+- The guarded reverse refuses populated V2 tables. V1 review/deployment code does not read V2 records.
 
 ## Completed work
 
@@ -94,7 +109,9 @@ remain disabled.
 ## Verification
 
 - Lint and typecheck pass.
-- 400 unit, 45 PostgreSQL integration, and 9 browser tests pass.
+- 520 unit and 49 PostgreSQL integration tests pass; build passes.
+- Migration `0023` apply, empty reverse, clean reapply, 21-table inventory, V1-table preservation, and populated
+  reverse refusal pass on a dedicated loopback test database, which was removed afterward.
 - Migration `0017` apply/reverse/reapply passes.
 - Final diff whitespace check and full sensitive-value/security scan pass with zero findings.
 - Tests used mocked/local providers only. No live Gmail call, OAuth reauthorization, real draft read or
@@ -106,4 +123,5 @@ remain disabled.
 
 Inbox access or modification, contact discovery, draft create/update/delete/recreation, direct
 `messages.send`, replacement MIME, bulk sending, automatic retry, reply detection, follow-up automation,
-and live production smoke testing.
+live production smoke testing, and all Demo Engine V2 generation/render/deploy/provider behavior beyond the
+Milestone 1 foundation.
