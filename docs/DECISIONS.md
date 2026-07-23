@@ -4,6 +4,31 @@ Every significant decision is recorded here in the required format. Newest first
 
 ---
 
+## D-0038 - Cold email copy is evidence-ID bound and independently persuasive
+
+- **Date:** 2026-07-23
+- **Problem:** The Phase 9 contract accepted one generic subject, coarse fact/finding declarations, and a
+  reviewer revision verdict that could allow unchanged copy through. It did not structurally represent
+  business relevance, legitimate urgency, competitor support, human style, or exact approved-demo alignment.
+- **Chosen option:** Require exactly three specific subjects and explicit strategy, relevance, urgency,
+  evidence-ID, competitor, CTA, style-scan, genericity, and demo-alignment fields. Keep greeting, CTA text,
+  signoff, and URL insertion deterministic. Add a fail-closed validator for objective copy violations and an
+  independent reviewer whose approval requires every evidence, persuasion, style, CTA, competitor, and demo
+  dimension to pass. `APPROVE_WITH_REVISIONS` is not approval of the current draft.
+- **Evidence and competitor boundary:** Writer evidence IDs must resolve to current facts or accepted
+  outreach-safe findings. Concept claims must intersect finding IDs recorded on the approved demo. Because
+  Phase 7 competitor research is deferred and no verified package is available, competitor evidence is
+  structurally `NONE` and all competitor language is rejected.
+- **Safety boundary:** This changes email generation quality only. Human approval remains mandatory. No Gmail
+  draft, send, schedule, deployment, provider, Demo V1 generation, or Demo V2 behavior changes.
+- **Tradeoffs:** Fail-closed validation may reject otherwise salvageable copy and requires a fresh generation
+  rather than silently applying reviewer suggestions. Competitor observations remain unavailable until a
+  separately approved verified-package integration exists.
+- **Rollback path:** Revert the single copy-standard commit. No migration or data rollback is required.
+- **Status:** Implemented and locally verified with mock-only fictional `.example` fixtures.
+
+---
+
 ## D-0037 - Demo Engine V2 Milestone 1 is isolated, immutable, and human-approval bound
 
 - **Date:** 2026-07-23

@@ -6,6 +6,14 @@ All notable changes per phase. Format loosely follows Keep a Changelog.
 
 ### Added
 
+- Strict Cold Email Copy Standard for the Phase 9 writer and independent reviewer: exactly three
+  evidence-specific subject options, explicit strategy/business-relevance/urgency/demo-alignment fields,
+  one deterministic CTA, and fail-closed reviewer dimensions for specificity, persuasion, evidence, style,
+  competitor support, and approved-demo alignment.
+- Deterministic copy validation for generic subjects/openings, forbidden German and English phrases,
+  fabricated urgency, unsupported competitor language, excessive hedging, multiple CTA language, length,
+  markdown, emoji, prohibited dash/comma/colon/semicolon patterns, evidence-ID drift, and demo-finding drift.
+- Fictional `.example` fixtures covering strong German and English copy plus every required rejection case.
 - Demo Engine V2 Milestone 1 additive foundation: 21 isolated `demo_v2_*` tables, guarded reverse migration,
   versioned immutable package contracts, relational provenance, multilingual/RTL metadata, asset-catalog and
   reuse-review separation, Creative Brief and ExperiencePlan snapshots, and hash-bound approval packages.
@@ -31,6 +39,9 @@ All notable changes per phase. Format loosely follows Keep a Changelog.
 
 ### Safety
 
+- Email generation still ends at human review. Reviewer revisions are never treated as approval, competitor
+  language is disabled while no verified competitor package exists, and concept copy must bind to finding IDs
+  visibly addressed by the approved V1 demo. No Gmail, sending, schedule, deployment, or Demo V2 path changed.
 - Translation approval requires a human actor. Asset selection is `SELECTED`, distinct from exact hash-matched
   human reuse approval. Automatic review requires score ≥85, zero blockers, all required category scores ≥70,
   and exact rubric/visual-review bindings; it never grants deployment approval.

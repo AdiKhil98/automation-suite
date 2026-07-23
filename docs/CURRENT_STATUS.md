@@ -24,6 +24,10 @@ path was added.
 
 ## Completed work
 
+- The Phase 9 email writer and reviewer now enforce Cold Email Copy Standard v2. Writer output carries exactly
+  three subjects, explicit evidence IDs, business relevance, urgency basis, one CTA, style scans, and demo
+  alignment. Deterministic validation and an independent reviewer both fail closed; unchanged revision requests
+  are never approved. Human approval remains mandatory.
 - Phases 0-16 are committed and tagged through `phase-16-production-safety-hardening` (`9092606`).
 - Database test isolation is committed (`68a6ab3`), and website-verification observability plus independent
   Place Details persistence is committed (`6e3b591`).
@@ -109,7 +113,7 @@ path was added.
 ## Verification
 
 - Lint and typecheck pass.
-- 520 unit and 49 PostgreSQL integration tests pass; build passes.
+- 523 unit and 49 PostgreSQL integration tests pass; build passes.
 - Migration `0023` apply, empty reverse, clean reapply, 21-table inventory, V1-table preservation, and populated
   reverse refusal pass on a dedicated loopback test database, which was removed afterward.
 - Migration `0017` apply/reverse/reapply passes.

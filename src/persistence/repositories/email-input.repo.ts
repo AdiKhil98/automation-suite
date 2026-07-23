@@ -12,6 +12,15 @@ export class EmailInputRepository {
     const rows = await this.db.select().from(demos).where(eq(demos.leadId, leadId)).orderBy(desc(demos.createdAt)).limit(1);
     const d = rows[0];
     if (!d) return null;
-    return { id: d.id, status: d.status, ctaKind: d.ctaKind, contentHash: d.contentHash };
+    const approvedFindingRefs = Array.isArray(d.findingRefs)
+      ? d.findingRefs.filter((value): value is string => typeof value === 'string')
+      : [];
+    return {
+      id: d.id,
+      status: d.status,
+      ctaKind: d.ctaKind,
+      approvedFindingRefs,
+      contentHash: d.contentHash,
+    };
   }
 }

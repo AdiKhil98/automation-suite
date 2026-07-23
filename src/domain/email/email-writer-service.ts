@@ -267,12 +267,22 @@ export class EmailWriterService {
     }
     const review = rParsed.data;
 
-    // Gate: APPROVE, or a deterministically-applicable REVISE; and the reviewer's honesty
-    // judgments must hold (these are genuine judgments over free prose, not code-guaranteed).
-    const reviseApplicable = review.decision === 'REVISE'
-      && !review.revisionRequiresNewFacts && !review.revisionRequiresNewClaims && !review.revisionRequiresCtaChange;
-    const approvable = (review.decision === 'APPROVE' || reviseApplicable)
-      && review.personalizationSupported && review.claimHonest && !review.fabricationRisk;
+    // Revisions are never silently approved without being applied. Every persuasion, evidence,
+    // punctuation, CTA, competitor, and demo-alignment dimension must pass.
+    const approvable = review.decision === 'APPROVE'
+      && !review.fabricationRisk
+      && review.subjectSpecific
+      && review.openingSpecific
+      && review.businessRelevanceClear
+      && review.urgencySupported
+      && review.competitorClaimsSupported
+      && review.humanStylePass
+      && review.punctuationPass
+      && review.singlePrimaryCta
+      && review.sufficientlyPersonalized
+      && review.evidenceSupported
+      && review.demoAligned
+      && review.persuasive;
     if (!approvable) {
       const p = this.buildPersist(input, draft, review, 'REVIEW_FAILED', 'EMAIL_REVIEW_FAILED', emailInputs, wRes, rRes, cost, modelCalls);
       await recordDebug('REVIEW_REJECTED', draft, review, []);
@@ -312,8 +322,15 @@ export class EmailWriterService {
         schemaVersion: EMAIL_SCHEMA_VERSION, rulesVersion: EMAIL_WRITER_RULES_VERSION, provider: this.deps.provider.name,
         requestedWriterModel: c.writerModel, requestedReviewerModel: c.reviewerModel, writerResponseId: wRes.responseId,
         reviewerResponseId: rRes?.responseId ?? null, reviewerDecision: review?.decision ?? null,
-        fabricationRisk: review?.fabricationRisk ?? null, personalizationSupported: review?.personalizationSupported ?? null,
-        claimHonest: review?.claimHonest ?? null, reviewerProblems: review?.problems ?? null, totalCostUsd: cost,
+        fabricationRisk: review?.fabricationRisk ?? null,
+        personalizationSupported: review ? review.evidenceSupported && review.sufficientlyPersonalized : null,
+        claimHonest: review
+          ? review.urgencySupported && review.competitorClaimsSupported && !review.fabricationRisk
+          : null,
+        reviewerProblems: review
+          ? [...review.problems, ...review.requiredRevisions]
+          : null,
+        totalCostUsd: cost,
       },
       factInputs: rendered.factInputs.map((fi) => ({ id: randomUUID(), emailId, leadFactId: fi.factId, field: fi.field })),
       findingInputs: rendered.findingInputs.map((f) => ({ id: randomUUID(), emailId, auditFindingId: f.findingId, directive: f.directive })),
@@ -323,18 +340,28 @@ export class EmailWriterService {
   }
 
   private brief(input: EmailWriteInput, safeFindings: EmailFinding[], demoLinkAllowed: boolean): EmailBrief {
-    const val = (t: string): string | null => {
-      const f = input.facts.find((x) => x.factType === t && x.isCurrent && x.value.trim() !== '');
-      return f ? f.value.trim() : null;
-    };
-    const servicesFact = val('services');
-    const services = servicesFact ? servicesFact.split('|').map((s) => s.trim()).filter(Boolean).slice(0, 8) : [];
-    const ctx = buildEmailContext({ facts: input.facts, findings: safeFindings, demo: input.demo });
+    const currentFacts = input.facts.filter((fact) => fact.isCurrent && fact.value.trim() !== '');
+    const val = (type: string): string | null =>
+      currentFacts.find((fact) => fact.factType === type)?.value.trim() ?? null;
     return {
-      businessName: val('business_name'), city: val('city'), services, contactName: val('contact_name'),
-      availableFactKeys: [...ctx.availableFactKeys], opportunityScore: input.opportunityScore, demoLinkAllowed,
-      language: ctx.language,
-      findings: safeFindings.map((f) => ({ findingRef: f.findingRef, category: f.category, observation: f.observation, recommendation: f.recommendation })),
+      businessName: val('business_name'),
+      contactName: val('contact_name'),
+      language: buildEmailContext({ facts: input.facts, findings: safeFindings, demo: input.demo }).language,
+      facts: currentFacts.map((fact) => ({
+        evidenceId: fact.id,
+        type: fact.factType,
+        value: fact.value.trim(),
+      })),
+      findings: safeFindings.map((finding) => ({
+        evidenceId: finding.id,
+        findingRef: finding.findingRef,
+        category: finding.category,
+        observation: finding.observation,
+        recommendation: finding.recommendation,
+      })),
+      demoLinkAllowed,
+      approvedDemoFindingRefs: input.demo?.approvedFindingRefs ?? [],
+      competitorPackage: null,
     };
   }
 }

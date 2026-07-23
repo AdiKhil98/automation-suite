@@ -3,7 +3,8 @@
 **Status:** Phases 0-16 are complete, committed and tagged through
 `phase-16-production-safety-hardening` (`9092606`). Bounded radius prospecting is committed (`2fe45de`).
 A post-Phase-16 controlled validation orchestrator remains non-sendable. Demo Engine V2 Milestone 1 is
-implemented as an isolated, disabled-by-default foundation; no V2 operational path exists.
+implemented as an isolated, disabled-by-default foundation; no V2 operational path exists. Phase 9 email
+generation uses Cold Email Copy Standard v2 with deterministic and independent-reviewer quality gates.
 **Last updated:** 2026-07-23
 
 One phase at a time. Each phase ends with tests, a commit, an annotated tag, and an explicit approval gate.
