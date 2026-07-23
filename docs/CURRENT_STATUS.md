@@ -2,11 +2,11 @@
 
 ## Current phase
 
-Phases 0-16 are committed and tagged. Demo Engine V2 Milestone 1 is implemented and locally verified as an
-additive, inert foundation. V1 remains authoritative:
-`DEMO_ENGINE_VERSION=v1`, `DEMO_V2_ENABLED=false`, and every V2 provider defaults to mock. No generation,
-translation, asset download, rendering, screenshot review, deployment, email, Gmail, or other external-service
-path was added.
+Phases 0-16 are committed and tagged. Demo Engine V2 Milestones 1 and 2 are implemented and locally verified.
+Milestone 2 populates the isolated Milestone 1 foundation through a mock-only Clinic Intelligence and design
+orchestration path. V1 remains authoritative: `DEMO_ENGINE_VERSION=v1`, `DEMO_V2_ENABLED=false`, and every V2
+provider defaults to mock. No rendering, screenshot review, deployment, email, Gmail, scheduling, sending, live
+provider, or paid-call path was added.
 
 ## Demo Engine V2 Milestone 1
 
@@ -21,6 +21,34 @@ path was added.
   visual-review set. Automatic pass requires overall score ≥85, zero blockers, every required category ≥70,
   and exact binding matches. It is never human or deployment approval.
 - The guarded reverse refuses populated V2 tables. V1 review/deployment code does not read V2 records.
+
+## Demo Engine V2 Milestone 2
+
+- Deterministic Clinic Intelligence accepts only current, explicitly accepted source records, records excluded
+  and contradictory inputs, selects `de`/`en`/`fr`/`he`/`ar` with LTR/RTL metadata, and fails closed when
+  identity, official-site, language, or critical-fact evidence is unsafe.
+- Primary-language content is structured, claim-classified, and relationally bound to exact intelligence
+  sources. English translation is mock-prepared only for non-English packages and remains unavailable for use
+  until a human approves the exact source and translation hashes.
+- Asset discovery parses first-party HTML metadata, validates every source/redirect/final URL through the
+  existing SSRF guard, classifies MIME/dimensions/quality, deduplicates by content hash, and proposes crop,
+  focal-point, overlay, contrast, and fallback guidance. Every proposal remains `REUSE_REVIEW_REQUIRED`.
+- A bounded mock creative provider produces a validated Creative Brief and no-code ExperiencePlan from exact
+  intelligence/content/asset/manifest fingerprints. One cached translation purpose and one cached creative
+  purpose are allowed per fingerprint; mock cost is zero.
+- The fixture CLI and PostgreSQL repository stop at `HUMAN_REVIEW_REQUIRED`. They cannot render, approve,
+  deploy, draft, schedule, or send. The CLI is strictly read-only: it prints JSON, opens no database
+  connection, and performs no write. Five positive language fixtures and negative safety fixtures use only
+  fictional `.example` businesses and mock bytes.
+- A deterministic FAQ concierge builds up to ten topics (booking, locations, opening hours, urgent contact,
+  first visit, treatment discovery, anxious-patient support, children/family care, supported languages, and
+  escalation). A topic exists only with specific verified evidence; each question and answer binds to source
+  IDs and record hashes, carries an escalation target, and never diagnoses, recommends treatment, or invents
+  hours, services, availability, or contact channels. Unsupported topics are omitted.
+- The design reference family is selected once and shared by the asset selections, Creative Brief,
+  ExperiencePlan, and report. Asset selections are retired unconditionally so no stale current row survives a
+  version that proposes none. The design-library manifests were replaced, changing both manifest hashes;
+  previously bound artifacts would be invalidated by design, with zero current impact.
 
 ## Completed work
 
@@ -113,7 +141,10 @@ path was added.
 ## Verification
 
 - Lint and typecheck pass.
-- 523 unit and 49 PostgreSQL integration tests pass; build passes.
+- 553 unit and 51 PostgreSQL integration tests pass; build passes.
+- Integration tests run only against a dedicated loopback `outreach_test` database, accepted by the
+  destructive-test guard. The operational `DATABASE_URL` (remote Supabase pooler) is never used by tests and
+  was not touched.
 - Migration `0023` apply, empty reverse, clean reapply, 21-table inventory, V1-table preservation, and populated
   reverse refusal pass on a dedicated loopback test database, which was removed afterward.
 - Migration `0017` apply/reverse/reapply passes.
@@ -127,5 +158,5 @@ path was added.
 
 Inbox access or modification, contact discovery, draft create/update/delete/recreation, direct
 `messages.send`, replacement MIME, bulk sending, automatic retry, reply detection, follow-up automation,
-live production smoke testing, and all Demo Engine V2 generation/render/deploy/provider behavior beyond the
-Milestone 1 foundation.
+live production smoke testing, and all Demo Engine V2 rendering, screenshot review, revisions, approval,
+deployment, or live-provider behavior beyond the Milestone 2 orchestration foundation.

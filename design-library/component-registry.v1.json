@@ -1,17 +1,21 @@
 {
   "version": "component-registry-v1",
   "components": [
-    {
-      "id": "hero-editorial",
-      "version": "1",
-      "supportedDirections": ["LTR", "RTL"],
-      "contentSlots": ["eyebrow", "heading", "body", "primaryCta"]
-    },
-    {
-      "id": "services-grid",
-      "version": "1",
-      "supportedDirections": ["LTR", "RTL"],
-      "contentSlots": ["heading", "services"]
-    }
+    {"id":"disclosure-v1","version":"1","supportedDirections":["LTR","RTL"],"contentSlots":["text"]},
+    {"id":"navigation-v1","version":"1","supportedDirections":["LTR","RTL"],"contentSlots":["treatments","clinic","team","contact","primaryCta"]},
+    {"id":"language-switcher-v1","version":"1","supportedDirections":["LTR","RTL"],"contentSlots":["languages","activeLanguage"]},
+    {"id":"image-led-hero-v1","version":"1","supportedDirections":["LTR","RTL"],"contentSlots":["eyebrow","heading","body","primaryCta","image"]},
+    {"id":"appointment-actions-v1","version":"1","supportedDirections":["LTR","RTL"],"contentSlots":["heading","verifiedMethod"]},
+    {"id":"trust-strip-v1","version":"1","supportedDirections":["LTR","RTL"],"contentSlots":["items"]},
+    {"id":"editorial-treatment-discovery-v1","version":"1","supportedDirections":["LTR","RTL"],"contentSlots":["heading","treatments"]},
+    {"id":"clinic-story-v1","version":"1","supportedDirections":["LTR","RTL"],"contentSlots":["heading","body","image"]},
+    {"id":"team-and-specialist-presentation-v1","version":"1","supportedDirections":["LTR","RTL"],"contentSlots":["heading","people","images"]},
+    {"id":"architecture-or-interior-gallery-v1","version":"1","supportedDirections":["LTR","RTL"],"contentSlots":["heading","images"]},
+    {"id":"patient-journey-v1","version":"1","supportedDirections":["LTR","RTL"],"contentSlots":["heading","steps"]},
+    {"id":"anxious-patient-section-v1","version":"1","supportedDirections":["LTR","RTL"],"contentSlots":["heading","body","contactAction"]},
+    {"id":"location-and-opening-hours-v1","version":"1","supportedDirections":["LTR","RTL"],"contentSlots":["location","hours","contact"]},
+    {"id":"deterministic-faq-concierge-v1","version":"1","supportedDirections":["LTR","RTL"],"contentSlots":["heading","questions","answers","escalation"]},
+    {"id":"final-cta-v1","version":"1","supportedDirections":["LTR","RTL"],"contentSlots":["heading","verifiedMethod"]},
+    {"id":"footer-v1","version":"1","supportedDirections":["LTR","RTL"],"contentSlots":["legal","contact","disclosure"]}
   ]
 }

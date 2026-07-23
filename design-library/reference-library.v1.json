@@ -1,11 +1,10 @@
 {
   "version": "reference-library-v1",
   "references": [
-    {
-      "id": "editorial-healthcare-layout",
-      "category": "layout",
-      "notes": "Reference for spacing and hierarchy only; do not copy content or identity.",
-      "allowedUse": "INSPIRATION_ONLY"
-    }
+    {"id":"premium-dental-editorial","category":"premium dental editorial","notes":"Editorial hierarchy, generous spacing, and verified architectural imagery. Composition principles only.","allowedUse":"INSPIRATION_ONLY"},
+    {"id":"warm-family-dental","category":"warm family dental","notes":"Welcoming hierarchy, practical reassurance, and verified team or environment imagery. Composition principles only.","allowedUse":"INSPIRATION_ONLY"},
+    {"id":"advanced-specialist-clinic","category":"advanced specialist clinic","notes":"Evidence-led specialist presentation with verified doctor, team, or equipment context. Composition principles only.","allowedUse":"INSPIRATION_ONLY"},
+    {"id":"modern-medical-minimal","category":"modern medical minimal","notes":"Restrained typography-led composition for sparse imagery and dense practical information. Composition principles only.","allowedUse":"INSPIRATION_ONLY"},
+    {"id":"luxury-cosmetic-dental","category":"luxury cosmetic dental","notes":"Elegant clinic and treatment context without before-and-after or outcome claims. Composition principles only.","allowedUse":"INSPIRATION_ONLY"}
   ]
 }

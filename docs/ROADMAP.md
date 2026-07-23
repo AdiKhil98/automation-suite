@@ -2,9 +2,10 @@
 
 **Status:** Phases 0-16 are complete, committed and tagged through
 `phase-16-production-safety-hardening` (`9092606`). Bounded radius prospecting is committed (`2fe45de`).
-A post-Phase-16 controlled validation orchestrator remains non-sendable. Demo Engine V2 Milestone 1 is
-implemented as an isolated, disabled-by-default foundation; no V2 operational path exists. Phase 9 email
-generation uses Cold Email Copy Standard v2 with deterministic and independent-reviewer quality gates.
+A post-Phase-16 controlled validation orchestrator remains non-sendable. Demo Engine V2 Milestones 1 and 2 are
+implemented as an isolated, disabled-by-default, mock-only intelligence/content/asset/design foundation. No V2
+render, approval, deployment, or live-provider path exists. Phase 9 email generation uses Cold Email Copy
+Standard v2 with deterministic and independent-reviewer quality gates.
 **Last updated:** 2026-07-23
 
 One phase at a time. Each phase ends with tests, a commit, an annotated tag, and an explicit approval gate.
@@ -35,12 +36,17 @@ No phase begins before the previous one is approved with `APPROVE PHASE X`.
 | Milestone | Scope | Status |
 |---|---|---|
 | 1 | Additive schemas, immutable contracts, manifests, validators, repositories, fixtures, and safety tests | complete; locally verified |
-| 2+ | Intelligence/content generation, translation, asset acquisition, briefs/plans, rendering, visual review, revisions, human review, deployment integration | not approved; not implemented |
+| 2 | Clinic Intelligence, structured multilingual content, review-gated English translation, first-party asset discovery, Creative Brief, and no-code ExperiencePlan orchestration | complete; mock/local only |
+| 3+ | Rendering, screenshot generation, visual review, revisions, human approval workflow, and deployment integration | not approved; not implemented |
 
 Milestone 1 leaves V1 untouched and selected by default. Migration `0023` creates 21 isolated V2 tables with
 no FK to `demos`. Human translation/reuse/final approvals are actor-bound; approval packages bind the complete
 content/translation/asset/brief/plan/registry/render/screenshot/rubric/visual-review fingerprint. Automatic
 review is advisory only and cannot authorize deployment. See D-0037.
+
+Milestone 2 writes versioned Milestone 1 packages from accepted source records and exact fingerprints. Its
+bounded mock providers make zero paid calls; translation and asset reuse remain human-review gated; lifecycle
+advancement stops at `HUMAN_REVIEW_REQUIRED`. V1 remains selected and unchanged. See D-0039.
 
 > **Controlled prospect validation extension:** the normal prospect continuation remains conservative.
 > An explicit `--controlled-test` mode may process exactly one qualified lead through the existing capture,

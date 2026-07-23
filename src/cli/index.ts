@@ -33,6 +33,7 @@ import { resetTestData } from './commands/reset-test-data.js';
 import { resumeAuditCommand } from './commands/resume-audit.js';
 import { withContext } from './context.js';
 import { websiteVerificationStatusCommand } from './commands/website-verification-status.js';
+import { demoV2OrchestrationFixtureCommand } from './commands/demo-v2-orchestrate-fixture.js';
 
 const program = new Command();
 
@@ -40,6 +41,13 @@ program
   .name('automation-suite')
   .description('Controlled AI Outreach Operating System — Phase 1 CLI')
   .version('0.1.0');
+
+program
+  .command('demo-v2-orchestrate-fixture')
+  .description('Build and inspect a fictional mock-only Demo V2 Milestone 2 package; never renders or deploys')
+  .requiredOption('--fixture <name>', 'premium-german-dental | english-specialist-clinic | french-clinic | hebrew-rtl-clinic | arabic-rtl-clinic')
+  .option('--stage <name>', 'intelligence | content | translation | assets | brief | plan | report', 'report')
+  .action((opts: { fixture: string; stage?: string }) => demoV2OrchestrationFixtureCommand(opts));
 
 program
   .command('create-sample-leads')

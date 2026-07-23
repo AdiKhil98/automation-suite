@@ -6,6 +6,37 @@ All notable changes per phase. Format loosely follows Keep a Changelog.
 
 ### Added
 
+- Demo Engine V2 Milestone 2 mock/local orchestration: deterministic Clinic Intelligence, structured primary
+  content, review-gated English translation, SSRF-checked first-party asset discovery, selection proposals,
+  concrete Creative Briefs, and no-code ExperiencePlans persisted through the existing Milestone 1 tables.
+- Five fictional `.example` language/direction fixtures plus negative cases for stale, insufficient,
+  contradictory, unsupported, third-party, unusable-image, translation-drift, generic-design, responsive,
+  and model-budget failures. A fixture-only CLI reports facts, exclusions, fingerprints, assets, and sections.
+- A bounded exact-fingerprint model-call cache permits at most one mock translation purpose and one mock
+  creative-orchestration purpose; both record zero cost. The configured USD ceiling is a forward contract only:
+  every mock call records $0, so it becomes an enforceable spend guard only once a paid provider is wired.
+- A deterministic FAQ concierge package covering booking, locations, opening hours, urgent contact, first visit,
+  treatment discovery, anxious-patient support, children/family care, supported languages, and phone/email/
+  WhatsApp/appointment escalation. A topic appears only when specific verified evidence supports it; every
+  question and answer binds to source IDs and record hashes; answers point at the verified on-page section or
+  channel instead of restating a value, so they never diagnose, recommend treatment, or invent hours, services,
+  availability, or contact channels. Unsupported topics are omitted, and stable topic keys are exposed for a
+  future chatbot-style interface.
+- The design-library manifests were replaced (component registry 2 → 16 components; reference library 1 → 5
+  families), which **changes both manifest hashes**. Artifacts bound to the previous hashes would be invalidated
+  by design; current impact is zero because no V2 operational artifacts exist.
+
+### Fixed
+
+- The design reference family is now selected exactly once and reused by the asset selections, Creative Brief,
+  ExperiencePlan, and report. Previously two different rules computed it, so selections could be bound to one
+  composition while the brief declared another, and `luxury-cosmetic-dental` was unreachable for selections.
+  Whole-payload regex matching was removed: only assertion *values* inform design direction, so unrelated
+  evidence text — or an identifier such as a source ID containing "premium" — can no longer change the family.
+- Asset selections for an artifact are now retired unconditionally, so a newer version producing zero selections
+  leaves no stale `is_current` row behind.
+- A `figcaption` is now scoped to its own `<figure>`. A sibling figure's caption previously bled into unrelated
+  images and mis-classified them (a clinic interior photo was categorised as `TEAM`).
 - Strict Cold Email Copy Standard for the Phase 9 writer and independent reviewer: exactly three
   evidence-specific subject options, explicit strategy/business-relevance/urgency/demo-alignment fields,
   one deterministic CTA, and fail-closed reviewer dimensions for specificity, persuasion, evidence, style,
@@ -39,6 +70,9 @@ All notable changes per phase. Format loosely follows Keep a Changelog.
 
 ### Safety
 
+- Demo V2 remains disabled and mock-only. Orchestration stops at `HUMAN_REVIEW_REQUIRED`; translation is not
+  usable without exact human approval, asset availability never grants reuse approval, and no render,
+  deployment, Gmail, scheduling, sending, live-network, or paid-provider path is reachable.
 - Email generation still ends at human review. Reviewer revisions are never treated as approval, competitor
   language is disabled while no verified competitor package exists, and concept copy must bind to finding IDs
   visibly addressed by the approved V1 demo. No Gmail, sending, schedule, deployment, or Demo V2 path changed.

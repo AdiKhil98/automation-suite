@@ -4,6 +4,49 @@ Every significant decision is recorded here in the required format. Newest first
 
 ---
 
+## D-0039 - Demo Engine V2 Milestone 2 is evidence-bound, mock-only design orchestration
+
+- **Date:** 2026-07-23
+- **Problem:** The inert Milestone 1 contracts needed a safe way to turn accepted lead/audit/capture evidence
+  into multilingual clinic content, first-party asset proposals, and concrete design plans without rendering,
+  external writes, paid calls, or weakening human approval boundaries.
+- **Chosen option:** Build deterministic Clinic Intelligence and primary content from current accepted source
+  records with exact relational provenance and fingerprints. Prepare English through a bounded mock provider,
+  but use complete primary-language fallback until a human approves the exact translation binding. Discover
+  assets only from official/reviewed hosts, rechecking every URL and redirect with the existing SSRF guard;
+  separate technical availability from `REUSE_REVIEW_REQUIRED`. Produce a concrete Creative Brief and no-code
+  ExperiencePlan through one exact-fingerprint-cached mock creative purpose.
+- **Safety boundary:** V1 remains selected and untouched. V2 remains disabled and all providers remain mock.
+  The Milestone 2 repository writes only the existing isolated V2 foundation and advances only through
+  `HUMAN_REVIEW_REQUIRED`; it has no render, final-approval, deployment, email, Gmail, schedule, or send method.
+  Fixtures are fictional `.example` records and mock image bytes; model cost is zero.
+- **Reason:** Deterministic evidence selection and immutable bindings keep facts auditable, while a narrow
+  creative boundary can make design judgments without controlling calculations, approvals, or external effects.
+- **Single reference family:** the design reference family is chosen exactly ONCE per orchestration from the
+  scoped positioning/services/concerns/atmosphere assertions, then reused verbatim by the asset-selection
+  proposals, the Creative Brief, the ExperiencePlan, and the report. An earlier draft recomputed it twice with
+  different rules, which could bind selections to one composition while the brief declared another and made
+  `luxury-cosmetic-dental` unreachable for selections. Loose whole-payload regex matching was removed so
+  unrelated evidence text (for example the word "family" inside a street address) cannot change the family.
+- **Design-library manifests replaced:** the component registry grew from 2 to 16 vetted components and the
+  reference library from 1 to 5 families. Both manifest hashes therefore changed. Any artifact bound to the
+  previous hashes would be invalidated by design; **current impact is zero because no V2 operational artifacts
+  exist** — V2 is disabled, and the Milestone 1 tables hold no records outside tests.
+- **Cost ceiling is a forward contract:** `DemoV2ModelBudget` enforces one call per purpose and exact-fingerprint
+  caching. Every mock call records exactly $0, so the configured USD ceiling cannot currently be breached and is
+  not yet a real spend guard. Before any non-zero-cost provider is wired it must gain a pre-call worst-case
+  projection in line with D-0023.
+- **CLI is read-only:** `demo-v2-orchestrate-fixture` builds a fixture package and prints JSON. It opens no
+  database connection and performs no write; persistence exists only through the repository, exercised by tests.
+- **Tradeoffs:** Language detection and asset suitability are conservative heuristics. English requires a later
+  human review, asset rights require a separate human decision, and plans remain metadata until a separately
+  approved rendering milestone.
+- **Rollback path:** Keep `DEMO_ENGINE_VERSION=v1` and `DEMO_V2_ENABLED=false`; revert the Milestone 2 commit.
+  No migration rollback is required because Milestone 2 reuses the additive Milestone 1 schema.
+- **Status:** Implemented and locally verified with mock-only fictional fixtures.
+
+---
+
 ## D-0038 - Cold email copy is evidence-ID bound and independently persuasive
 
 - **Date:** 2026-07-23
