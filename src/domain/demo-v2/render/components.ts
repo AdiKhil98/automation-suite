@@ -145,7 +145,7 @@ export const COMPONENT_SPECS: readonly ComponentSpec[] = [
   spec({
     id: 'EditorialSplitHero', group: 'HERO',
     requiredContentKeys: ['hero.heading'], optionalContentKeys: ['hero.eyebrow', 'appointment.heading'],
-    contentKeyPrefixes: [], allowedAssetCategories: ['HERO', 'CLINIC_INTERIOR', 'DOCTOR', 'EQUIPMENT'], maxAssets: 1,
+    contentKeyPrefixes: [], allowedAssetCategories: ['HERO', 'CLINIC_INTERIOR', 'EXTERIOR', 'EQUIPMENT'], maxAssets: 1,
     fallbackBehavior: 'Collapses to a single column when no approved asset exists.',
     supportedLanguages: ALL, rtl: 'MIRRORED',
     responsive: 'Two columns ≥1024px, stacked below; image never letterboxed.',
@@ -158,7 +158,7 @@ export const COMPONENT_SPECS: readonly ComponentSpec[] = [
   spec({
     id: 'CalmCareHero', group: 'HERO',
     requiredContentKeys: ['hero.heading'], optionalContentKeys: ['hero.eyebrow', 'appointment.heading'],
-    contentKeyPrefixes: [], allowedAssetCategories: ['CLINIC_INTERIOR', 'TEAM', 'HERO'], maxAssets: 1,
+    contentKeyPrefixes: [], allowedAssetCategories: ['CLINIC_INTERIOR', 'EXTERIOR', 'HERO'], maxAssets: 1,
     fallbackBehavior: 'Soft typographic panel when no approved asset exists.',
     supportedLanguages: ALL, rtl: 'MIRRORED',
     responsive: 'Framed image with generous padding; stacks on mobile.',
@@ -404,7 +404,7 @@ export const COMPONENT_SPECS: readonly ComponentSpec[] = [
   spec({
     id: 'CalmCareStory', group: 'EXPERIENCE',
     requiredContentKeys: [], optionalContentKeys: ['appointment.verified_method'], contentKeyPrefixes: ['atmosphere.', 'trust.'],
-    allowedAssetCategories: ['CLINIC_INTERIOR', 'TEAM'], maxAssets: 1,
+    allowedAssetCategories: ['CLINIC_INTERIOR', 'EXTERIOR', 'TREATMENT'], maxAssets: 1,
     fallbackBehavior: 'Omitted without verified atmosphere or strength evidence.',
     supportedLanguages: ALL, rtl: 'MIRRORED',
     responsive: 'Narrow measure text column; optional supporting image on desktop.',

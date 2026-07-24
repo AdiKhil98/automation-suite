@@ -81,6 +81,14 @@ describe('3B1 imagery', () => {
     expect((html.match(/<img /g) ?? []).length).toBeGreaterThanOrEqual(3);
     expect(result.usedAssetHashes.length).toBeGreaterThanOrEqual(3);
   }, 30_000);
+
+  it('reserves a portrait for the team section (never starved by hero or clinic story)', async () => {
+    const { renderInput } = await buildAcceptanceFixture(manifests);
+    const html = renderDemoV2(renderInput).documents[0]!.html;
+    const teamSection = /data-dv2-component="(?:SpecialistPortraitRail|TeamEditorialGrid|DoctorFeature)"[\s\S]*?<\/section>/.exec(html)?.[0] ?? '';
+    expect(teamSection).toMatch(/<img /);
+    expect(teamSection).toMatch(/dv2-person__name/);
+  }, 30_000);
 });
 
 describe('3B1 FAQ preview reduction', () => {
