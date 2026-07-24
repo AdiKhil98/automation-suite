@@ -6,6 +6,24 @@ All notable changes per phase. Format loosely follows Keep a Changelog.
 
 ### Added
 
+- Demo Engine V2 Milestone 3B1 visual-quality upgrade: a versioned, per-reference-family typography
+  system (distinct display/body/nav/button/label roles, weights, fluid scales, RTL faces for Hebrew/
+  Arabic, German `hyphens:auto` and French manual wrapping — all system/`ui-serif`/`ui-sans-serif`
+  fonts, no downloads or runtime font requests). Structured deterministic fixture imagery (interior/
+  architecture/portrait/team/treatment/location styles with real tonal range) replaces flat
+  gradients; image-led hero, offset clinic-story and location sections, and a condensed FAQ preview
+  (top 3-4 verified questions inline, the remainder in the chatbot-style concierge). Broader asset
+  selection so story/team/gallery/location sections carry approved imagery.
+- Extended deterministic structural checks (typography: RTL-face presence, destructive word breaks;
+  imagery: low-resolution hero, missing focal point; composition/mobile: duplicate mobile CTA bars,
+  FAQ-wall density, empty team sections) — eligibility only, never a visual-quality verdict.
+- Complete French, Hebrew, and Arabic end-to-end acceptance fixtures (RTL for HE/AR, complete
+  reviewed English secondary, correct `lang`/`dir`, zero mixed-language output, complete primary
+  fallback when English is withheld). Upgraded fictional German dental acceptance fixture.
+- Immutable, versioned render persistence (migration `0024`): `demo_v2_render_versions`,
+  `demo_v2_screenshots`, and `demo_v2_review_packages` with a repository + unit of work. New renders
+  supersede prior versions (history retained); review packages bind the exact render + screenshot-set
+  hash, require all six screenshots, and can never be `HUMAN_APPROVED` or deployment-eligible.
 - Demo Engine V2 Milestone 3A premium renderer: a code-native component registry (34 components), a token-based
   design system with five visibly distinct reference-family compositions, and a deterministic renderer that
   turns an approved fictional ExperiencePlan into a self-contained, responsive, bilingual (DE/EN) local website

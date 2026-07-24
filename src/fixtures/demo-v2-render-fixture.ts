@@ -16,20 +16,32 @@ const CAPTURED = '2026-07-20T10:00:00.000Z';
 const NOW = '2026-07-24T10:00:00.000Z';
 
 const IMAGES = {
-  interior: { path: '/media/praxis-interior.png', width: 1800, height: 1100, hue: 168 },
-  doctor: { path: '/media/team-portrait.png', width: 1200, height: 1500, hue: 28 },
-  location: { path: '/media/praxis-eingang.png', width: 1600, height: 900, hue: 205 },
+  interior: { path: '/media/praxis-interior.png', width: 1600, height: 1000, hue: 172, style: 'interior' as const },
+  architecture: { path: '/media/praxis-architektur.png', width: 1400, height: 1050, hue: 158, style: 'architecture' as const },
+  doctor: { path: '/media/team-portrait.png', width: 1200, height: 1500, hue: 26, style: 'portrait' as const },
+  team: { path: '/media/praxis-team.png', width: 1600, height: 1100, hue: 30, style: 'interior' as const },
+  treatment: { path: '/media/behandlung.png', width: 1500, height: 1000, hue: 190, style: 'treatment' as const },
+  location: { path: '/media/praxis-eingang.png', width: 1600, height: 900, hue: 205, style: 'location' as const },
 } as const;
 
 export interface GeneratedImage { url: string; bytes: Buffer; width: number; height: number; hash: string }
 
+let imageCache: Record<keyof typeof IMAGES, GeneratedImage> | null = null;
+
 export function fictionalClinicImages(): Record<keyof typeof IMAGES, GeneratedImage> {
+  // Deterministic and large (per-pixel PNG synthesis) — cache so repeated fixture builds in a
+  // single process (tests, multi-language renders) do not regenerate the same bytes.
+  if (imageCache) return imageCache;
   const build = (key: keyof typeof IMAGES): GeneratedImage => {
     const spec = IMAGES[key];
-    const bytes = fictionalPng({ seed: `lindenhof-${key}`, width: spec.width, height: spec.height, hue: spec.hue });
+    const bytes = fictionalPng({ seed: `lindenhof-${key}`, width: spec.width, height: spec.height, hue: spec.hue, style: spec.style });
     return { url: `${BASE}${spec.path}`, bytes, width: spec.width, height: spec.height, hash: imageSha256(bytes) };
   };
-  return { interior: build('interior'), doctor: build('doctor'), location: build('location') };
+  imageCache = {
+    interior: build('interior'), architecture: build('architecture'), doctor: build('doctor'),
+    team: build('team'), treatment: build('treatment'), location: build('location'),
+  };
+  return imageCache;
 }
 
 /** The exact 14-section experience plan for the acceptance fixture. */
@@ -95,31 +107,21 @@ export function germanClinicFixtureInput(manifests: {
       captureEvidenceId: null,
       html: `<html lang="de"><head></head><body><main>`
         + `<section><h1>Zahnarztpraxis Lindenhof</h1>`
-        + `<img src="${images.interior.url}" alt="Helle Praxisräume mit ruhigem Interieur"></section>`
+        + `<img src="${images.interior.url}" alt="Innenansicht der ruhigen Praxisräume"></section>`
+        + `<section><img src="${images.architecture.url}" alt="Fassade und Architektur der Praxis"></section>`
         + `<section><figure><img src="${images.doctor.url}" alt="Dr. Beispiel, Zahnärztin">`
         + `<figcaption>Verifiziertes Praxisteam</figcaption></figure></section>`
-        + `<section><img src="${images.location.url}" alt="Eingang und Aussenansicht der Praxis"></section>`
+        + `<section><img src="${images.team.url}" alt="Praxisteam im Empfangsbereich"></section>`
+        + `<section><img src="${images.treatment.url}" alt="Behandlungssituation im Behandlungszimmer"></section>`
+        + `<section><img src="${images.location.url}" alt="Standort und Eingang der Praxis"></section>`
         + `</main></body></html>`,
     }],
     officialWebsiteUrl: BASE,
     approvedCdnHosts: [],
-    assetFetchResults: {
-      [images.interior.url]: {
-        finalUrl: images.interior.url, redirectUrls: [], mimeType: 'image/png',
-        bytes: images.interior.bytes.length, width: images.interior.width, height: images.interior.height,
-        contentHash: images.interior.hash,
-      },
-      [images.doctor.url]: {
-        finalUrl: images.doctor.url, redirectUrls: [], mimeType: 'image/png',
-        bytes: images.doctor.bytes.length, width: images.doctor.width, height: images.doctor.height,
-        contentHash: images.doctor.hash,
-      },
-      [images.location.url]: {
-        finalUrl: images.location.url, redirectUrls: [], mimeType: 'image/png',
-        bytes: images.location.bytes.length, width: images.location.width, height: images.location.height,
-        contentHash: images.location.hash,
-      },
-    },
+    assetFetchResults: Object.fromEntries(Object.values(images).map((image) => [image.url, {
+      finalUrl: image.url, redirectUrls: [] as string[], mimeType: 'image/png',
+      bytes: image.bytes.length, width: image.width, height: image.height, contentHash: image.hash,
+    }])),
     componentRegistry: { version: manifests.componentVersion, hash: manifests.componentHash },
     referenceLibrary: { version: manifests.referenceVersion, hash: manifests.referenceHash },
     now: NOW,
@@ -160,11 +162,9 @@ export async function buildAcceptanceFixture(manifests: {
   const input = germanClinicFixtureInput(manifests);
   const orchestration = await orchestrateDemoV2Fixture(input);
   const images = fictionalClinicImages();
-  const bytesByHash = new Map<string, Buffer>([
-    [images.interior.hash, images.interior.bytes],
-    [images.doctor.hash, images.doctor.bytes],
-    [images.location.hash, images.location.bytes],
-  ]);
+  const bytesByHash = new Map<string, Buffer>(
+    Object.values(images).map((image) => [image.hash, image.bytes]),
+  );
 
   const assets: RenderAssetBinding[] = orchestration.selections.map((selection) => {
     const asset = orchestration.assets.find((candidate) => candidate.id === selection.assetId)!;

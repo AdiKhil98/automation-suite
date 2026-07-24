@@ -60,6 +60,8 @@ export interface RenderModel {
   scriptHash: string;
   css: string;
   script: string;
+  /** Per-language typography block (family fonts + RTL faces + language-aware wrapping). */
+  typographyCss: string;
 }
 
 const A = escapeHtml;
@@ -98,6 +100,21 @@ function img(asset: RenderAsset, sizes: string, lazy: boolean, focal: Map<string
   return `<img src="${A(asset.href)}" alt="${A(asset.alt)}" width="${asset.width}" height="${asset.height}"`
     + ` sizes="${A(sizes)}" class="${cls}"`
     + ` ${lazy ? 'loading="lazy" decoding="async"' : 'loading="eager" fetchpriority="high" decoding="sync"'}>`;
+}
+
+/** Priority order for the condensed FAQ preview (booking/first-visit/hours/urgent first). */
+const FAQ_PREVIEW_PRIORITY = ['booking', 'first_visit', 'opening_hours', 'urgent_contact', 'locations', 'treatment_discovery'];
+export const FAQ_PREVIEW_MAX = 4;
+
+export function pickFaqPreview(entries: readonly RenderFaqEntry[]): RenderFaqEntry[] {
+  const byTopic = new Map(entries.map((entry) => [entry.topic, entry]));
+  const ordered: RenderFaqEntry[] = [];
+  for (const topic of FAQ_PREVIEW_PRIORITY) {
+    const entry = byTopic.get(topic);
+    if (entry) ordered.push(entry);
+  }
+  for (const entry of entries) if (!ordered.includes(entry)) ordered.push(entry);
+  return ordered.slice(0, FAQ_PREVIEW_MAX);
 }
 
 function anchorLinks(model: RenderModel, renderedAnchors: ReadonlySet<string>): { href: string; label: string }[] {
@@ -276,10 +293,16 @@ function place(model: RenderModel, section: RenderSection): string {
   if (section.componentId === 'LocationNarrative') {
     const location = text(model, 'location.value');
     if (!location) return '';
+    const asset = section.assets[0];
+    const copy = `<div><h2>${A(heading)}</h2><p class="dv2-lede">${A(location)}</p>`
+      + `${text(model, 'hours.value') ? `<p class="dv2-lede">${A(text(model, 'hours.value')!)}</p>` : ''}`
+      + `${atmosphere.map((item) => `<p class="dv2-lede">${A(item.value)}</p>`).join('')}</div>`;
+    // Image-led when an approved location/exterior asset exists; otherwise a text narrative.
     return `<section id="${A(section.anchor)}" class="dv2-section" data-rhythm="${A(section.rhythm)}"`
-      + ` data-motion="TEXT_REVEAL" data-dv2-component="LocationNarrative">`
-      + `<div class="dv2-wrap"><h2>${A(heading)}</h2><p class="dv2-lede">${A(location)}</p>`
-      + `${atmosphere.map((item) => `<p class="dv2-lede">${A(item.value)}</p>`).join('')}</div></section>`;
+      + ` data-motion="IMAGE_REVEAL" data-dv2-component="LocationNarrative">`
+      + `<div class="dv2-wrap dv2-wrap--wide${asset ? ' dv2-story dv2-story--reverse' : ''}">`
+      + `${asset ? `<figure>${img(asset, '(min-width:768px) 45vw, 100vw', true, focal)}</figure>` : ''}${copy}`
+      + `</div></section>`;
   }
   if (section.assets.length === 0 && atmosphere.length === 0) return '';
   const asset = section.assets[0];
@@ -321,11 +344,16 @@ function experience(model: RenderModel, section: RenderSection): string {
   const atmosphere = collect(model, 'atmosphere.');
   const strengths = collect(model, 'trust.');
   const body = [...atmosphere, ...strengths];
-  if (body.length === 0) return '';
+  const asset = section.assets[0];
+  if (body.length === 0 && !asset) return '';
+  const copy = `<div><h2>${A(heading)}</h2>`
+    + `${body.slice(0, 3).map((item) => `<p class="dv2-lede">${A(item.value)}</p>`).join('')}</div>`;
+  // Image-led clinic story when approved interior/team imagery exists (offset editorial layout).
   return `<section id="${A(section.anchor)}" class="dv2-section" data-rhythm="${A(section.rhythm)}"`
-    + ` data-motion="TEXT_REVEAL" data-dv2-component="CalmCareStory">`
-    + `<div class="dv2-wrap dv2-wrap--narrow"><h2>${A(heading)}</h2>`
-    + `${body.map((item) => `<p class="dv2-lede">${A(item.value)}</p>`).join('')}</div></section>`;
+    + ` data-motion="IMAGE_REVEAL" data-dv2-component="CalmCareStory">`
+    + `<div class="dv2-wrap${asset ? ' dv2-wrap--wide dv2-story' : ' dv2-wrap--narrow'}">`
+    + `${asset ? `<figure>${img(asset, '(min-width:768px) 50vw, 100vw', true, focal)}</figure>` : ''}${copy}`
+    + `</div></section>`;
 }
 
 function informationPanel(model: RenderModel, section: RenderSection): string {
@@ -446,16 +474,23 @@ const RENDERERS: Record<string, (model: RenderModel, section: RenderSection, com
   AnxiousPatientSection: (model, section) => experience(model, section),
   LocationHoursPanel: (model, section) => informationPanel(model, section),
   ContactPanel: (model, section) => informationPanel(model, section),
-  // In-page, no-JS-safe rendering of the same deterministic package; the floating chatbot-style
-  // concierge is added globally and reads the identical entries.
+  // Condensed FAQ PREVIEW: only the 3-4 highest-value verified topics render inline; every other
+  // verified question stays available inside the floating concierge (added globally). This avoids
+  // the dense FAQ wall while preserving access to all verified content.
   DeterministicFaqConcierge: (model, section) => {
     if (model.faq.length === 0) return '';
     const heading = text(model, 'faq.heading') ?? model.labels.faq ?? '';
-    return `<section id="${A(section.anchor)}" class="dv2-section" data-rhythm="${A(section.rhythm)}"`
-      + ` data-dv2-component="DeterministicFaqConcierge"><div class="dv2-wrap"><h2>${A(heading)}</h2>`
-      + `<dl class="dv2-panel">${model.faq.map((entry) =>
-        `<div><dt>${A(entry.question)}</dt><dd>${A(entry.answer)}</dd></div>`).join('')}</dl>`
-      + `</div></section>`;
+    const preview = pickFaqPreview(model.faq);
+    const remaining = model.faq.length - preview.length;
+    const more = remaining > 0
+      ? `<p class="dv2-faq__more">${A((model.labels.faqMore ?? '{n} more in the assistant').replace('{n}', String(remaining)))}</p>`
+      : '';
+    return `<section id="${A(section.anchor)}" class="dv2-section" data-rhythm="tight"`
+      + ` data-motion="TEXT_REVEAL" data-dv2-component="DeterministicFaqConcierge">`
+      + `<div class="dv2-wrap"><h2>${A(heading)}</h2>`
+      + `<dl class="dv2-faq">${preview.map((entry) =>
+        `<div class="dv2-faq__item"><dt>${A(entry.question)}</dt><dd>${A(entry.answer)}</dd></div>`).join('')}</dl>`
+      + `${more}</div></section>`;
   },
   FinalAppointmentCta: (model, section) => finalCta(model, section),
   ContactFallback: (model, section) => finalCta(model, section),
@@ -509,13 +544,14 @@ export function renderDocument(model: RenderModel): string {
   // the strict CSP needs no 'unsafe-hashes' or inline style attributes.
   const focalCss = [...focal.keys()].sort().map((key) => focal.get(key)!).join('');
   const focalHash = createHash('sha256').update(focalCss, 'utf8').digest('base64');
+  const typographyHash = createHash('sha256').update(model.typographyCss, 'utf8').digest('base64');
 
   // `frame-ancestors` is intentionally omitted: it is ignored when delivered via <meta> and only
   // emits a console warning. Framing protection belongs in an HTTP header at serve time.
   const csp = [
     "default-src 'none'",
     "img-src 'self'",
-    `style-src 'sha256-${model.styleHash}' 'sha256-${focalHash}'`,
+    `style-src 'sha256-${model.styleHash}' 'sha256-${typographyHash}' 'sha256-${focalHash}'`,
     `script-src 'sha256-${model.scriptHash}'`,
     "base-uri 'none'",
     "form-action 'none'",
@@ -536,6 +572,7 @@ export function renderDocument(model: RenderModel): string {
 <title>${A(model.businessName)}</title>
 ${alternate}
 <style>${model.css}</style>
+<style>${model.typographyCss}</style>
 <style>${focalCss}</style>
 </head>
 <body id="top"${model.appointmentHref ? ' data-mobilebar="true"' : ''}>

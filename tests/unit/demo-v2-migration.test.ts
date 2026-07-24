@@ -15,8 +15,10 @@ describe('migration 0023 Demo Engine V2 foundation', () => {
     const matching = journal.entries.filter((entry) => entry.tag === '0023_demo_engine_v2_foundation');
     expect(matching).toHaveLength(1);
     expect(matching[0]?.idx).toBe(23);
-    expect(journal.entries.at(-1)?.tag).toBe('0023_demo_engine_v2_foundation');
-    expect((matching[0]?.when ?? 0) > (journal.entries.at(-2)?.when ?? Number.MAX_SAFE_INTEGER)).toBe(true);
+    // Milestone 3B1 adds 0024 after it; 0023 must remain monotonic against its own predecessor (22).
+    const predecessor = journal.entries.find((entry) => entry.idx === 22);
+    expect((matching[0]?.when ?? 0) > (predecessor?.when ?? Number.MAX_SAFE_INTEGER)).toBe(true);
+    expect(journal.entries.at(-1)?.tag).toBe('0024_demo_v2_render_persistence');
   });
 
   it('creates exactly the 21 isolated approved V2 tables and changes no V1 table', () => {

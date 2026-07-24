@@ -221,12 +221,17 @@ export async function discoverFirstPartyAssets(input: {
 }
 
 const referencePriority: Record<string, DemoV2AssetCandidate['category'][]> = {
-  'premium-dental-editorial': ['CLINIC_INTERIOR', 'HERO', 'DOCTOR', 'TEAM'],
-  'warm-family-dental': ['TEAM', 'CLINIC_INTERIOR', 'HERO'],
-  'advanced-specialist-clinic': ['DOCTOR', 'EQUIPMENT', 'TEAM', 'CLINIC_INTERIOR'],
-  'modern-medical-minimal': ['CLINIC_INTERIOR', 'DOCTOR', 'EQUIPMENT'],
-  'luxury-cosmetic-dental': ['CLINIC_INTERIOR', 'HERO', 'TREATMENT'],
+  // Hero category first, then supporting imagery for story / team / gallery sections.
+  'premium-dental-editorial': ['CLINIC_INTERIOR', 'HERO', 'EXTERIOR', 'DOCTOR', 'TEAM', 'TREATMENT'],
+  'warm-family-dental': ['TEAM', 'CLINIC_INTERIOR', 'HERO', 'DOCTOR', 'EXTERIOR', 'TREATMENT'],
+  'advanced-specialist-clinic': ['DOCTOR', 'EQUIPMENT', 'CLINIC_INTERIOR', 'TEAM', 'TREATMENT', 'EXTERIOR'],
+  'modern-medical-minimal': ['CLINIC_INTERIOR', 'EXTERIOR', 'DOCTOR', 'TEAM', 'EQUIPMENT', 'TREATMENT'],
+  'luxury-cosmetic-dental': ['CLINIC_INTERIOR', 'HERO', 'EXTERIOR', 'TREATMENT', 'DOCTOR', 'TEAM'],
 };
+
+/** Upper bound on approved selections; enough to give the hero, story, team, and gallery imagery
+ * without reusing one asset everywhere. */
+const MAX_ASSET_SELECTIONS = 5;
 
 export function proposeAssetSelections(
   assets: DemoV2AssetCandidate[],
@@ -240,7 +245,7 @@ export function proposeAssetSelections(
     const asset = usable.find((candidate) => candidate.category === categoryName && !selected.includes(candidate));
     if (asset) selected.push(asset);
   }
-  return selected.slice(0, 3).map((asset, index) => {
+  return selected.slice(0, MAX_ASSET_SELECTIONS).map((asset, index) => {
     const intendedSection = index === 0 ? 'image-led hero' : asset.category === 'TEAM' || asset.category === 'DOCTOR'
       ? 'team and specialist presentation' : 'architecture or interior gallery';
     const base = {

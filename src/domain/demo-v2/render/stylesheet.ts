@@ -96,6 +96,7 @@ ul,ol{margin:0;padding:0;list-style:none}
 .dv2-spotlight__lead{font-size:var(--fs-lg);font-family:var(--font-display);padding-block:var(--s4);border-block-end:2px solid var(--c-accent)}
 .dv2-people{display:grid;gap:var(--s6);margin-block-start:var(--s6)}
 .dv2-person figure{margin:0}
+.dv2-person figure{margin:0;background:var(--c-surface-alt);border-radius:var(--r-md);overflow:hidden}
 .dv2-person img{aspect-ratio:4/5;object-fit:cover;border-radius:var(--r-md);width:100%}
 .dv2-person__name{margin-block-start:var(--s2);font-size:var(--fs-base)}
 .dv2-gallery{display:grid;gap:var(--s3);margin-block-start:var(--s6)}
@@ -104,13 +105,19 @@ ul,ol{margin:0;padding:0;list-style:none}
 .dv2-gallery figure:first-child img{aspect-ratio:16/10}
 .dv2-gallery figure+figure img{aspect-ratio:4/3}
 .dv2-story{display:grid;gap:var(--s6);align-items:center}
-.dv2-story img{width:100%;aspect-ratio:16/10;object-fit:cover;border-radius:var(--r-md)}
+.dv2-story img{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:var(--r-md)}
+.dv2-story figure{margin:0}
 .dv2-journey{display:grid;gap:var(--s4);margin-block-start:var(--s6);counter-reset:step}
 .dv2-journey li{display:flex;gap:var(--s3);align-items:flex-start;padding-inline-start:0}
 .dv2-journey__num{font-family:var(--font-display);color:var(--c-accent);font-size:var(--fs-md);min-width:2ch}
 .dv2-panel{display:grid;gap:var(--s4);background:var(--c-surface);padding:var(--s6);border:1px solid var(--c-line);border-radius:var(--r-md)}
 .dv2-panel dt{font-size:var(--fs-xs);text-transform:uppercase;letter-spacing:.1em;color:var(--c-ink-muted)}
 .dv2-panel dd{margin:.25rem 0 0}
+.dv2-faq{display:grid;gap:var(--s4);margin-block-start:var(--s6);max-width:var(--w-content)}
+.dv2-faq__item{border-block-start:1px solid var(--c-line);padding-block-start:var(--s3)}
+.dv2-faq__item dt{font-family:var(--font-display);font-size:var(--fs-md);margin:0}
+.dv2-faq__item dd{margin:.4rem 0 0;color:var(--c-ink-muted);max-width:var(--measure,64ch)}
+.dv2-faq__more{margin-block-start:var(--s4);font-size:var(--fs-sm);color:var(--c-accent);font-weight:600}
 .dv2-cta{background:var(--c-accent);color:var(--c-ink-on-accent);text-align:center}
 .dv2-cta h2{color:var(--c-ink-on-accent)}
 .dv2-cta .dv2-btn{background:var(--c-ink-on-accent);color:var(--c-accent);margin-block-start:var(--s4)}
@@ -147,6 +154,7 @@ const RESPONSIVE_CSS = `
 .dv2-gallery{grid-template-columns:2fr 1fr}
 .dv2-gallery figure:first-child{grid-row:span 2}
 .dv2-story{grid-template-columns:1.1fr .9fr}
+.dv2-story--reverse figure{order:2}
 .dv2-footer__grid{grid-template-columns:repeat(3,1fr)}
 .dv2-panel{grid-template-columns:repeat(2,1fr)}
 .dv2-journey{grid-template-columns:repeat(3,1fr)}

@@ -29,6 +29,8 @@ function chunk(type: string, data: Buffer): Buffer {
   return Buffer.concat([length, typed, crc]);
 }
 
+export type FictionalImageStyle = 'interior' | 'exterior' | 'architecture' | 'portrait' | 'treatment' | 'location';
+
 export interface FictionalImageSpec {
   /** Stable seed: identical seed + size always yields identical bytes. */
   seed: string;
@@ -36,6 +38,8 @@ export interface FictionalImageSpec {
   height: number;
   /** Base hue in degrees; each fictional asset gets a distinct hue so images are distinguishable. */
   hue: number;
+  /** Composition style — gives each fictional asset believable structure, not a flat blur. */
+  style?: FictionalImageStyle;
 }
 
 function hslToRgb(h: number, s: number, l: number): [number, number, number] {
@@ -48,30 +52,54 @@ function hslToRgb(h: number, s: number, l: number): [number, number, number] {
 }
 
 /**
- * Render a calm, architectural-looking gradient with soft horizontal banding and a lighter focal
- * region slightly above centre — enough structure that crops and focal points are visibly
- * meaningful, with no real place, person, or brand depicted.
+ * Render believable, structured fictional imagery — architectural planes, window/light rhythm,
+ * perspective floor, and a soft focal subject — so crops and focal points read as intentional
+ * photography rather than a flat blur. Fully deterministic; no real place, person, or brand.
  */
 export function fictionalPng(spec: FictionalImageSpec): Buffer {
   const { width, height, hue } = spec;
+  const style = spec.style ?? 'interior';
   const seedNum = [...createHash('sha256').update(spec.seed).digest().subarray(0, 4)]
     .reduce((sum, byte) => sum * 256 + byte, 0);
+  const rand = (n: number) => ((seedNum >> (n % 24)) & 0xff) / 255;
+  // Structural parameters vary by style so an "interior" differs from a "portrait" or "exterior".
+  const columns = style === 'exterior' || style === 'architecture' ? 7 + Math.round(rand(1) * 4)
+    : style === 'portrait' ? 0 : 4 + Math.round(rand(2) * 3);
+  const horizonY = style === 'portrait' ? 0.62 : style === 'location' ? 0.66 : 0.58;
   const raw = Buffer.alloc((width * 3 + 1) * height);
   let offset = 0;
   for (let y = 0; y < height; y += 1) {
     raw[offset] = 0; // filter type: none
     offset += 1;
-    const vertical = y / Math.max(1, height - 1);
+    const v = y / Math.max(1, height - 1);
     for (let x = 0; x < width; x += 1) {
-      const horizontal = x / Math.max(1, width - 1);
-      // Soft focal glow above centre keeps faces/subjects out of the default crop edges.
-      const focalX = horizontal - 0.5;
-      const focalY = vertical - 0.42;
-      const focal = Math.max(0, 1 - Math.sqrt(focalX * focalX + focalY * focalY) * 1.9);
-      const band = Math.sin((vertical * 9 + (seedNum % 7)) * Math.PI) * 0.035;
-      const lightness = 0.36 + vertical * 0.24 + focal * 0.2 + band;
-      const saturation = 0.1 + (1 - vertical) * 0.14;
-      const [r, g, b] = hslToRgb((hue + horizontal * 14) % 360, saturation, Math.min(0.93, Math.max(0.1, lightness)));
+      const h = x / Math.max(1, width - 1);
+      // Focal subject sits slightly above centre (keeps faces/subjects off the crop edges).
+      const fx = h - 0.5;
+      const fy = v - 0.42;
+      const focal = Math.max(0, 1 - Math.sqrt(fx * fx + fy * fy) * (style === 'portrait' ? 1.4 : 1.9));
+      // Diagonal daylight falloff.
+      const light = 0.12 * (1 - Math.abs(h - (0.3 + rand(3) * 0.2)) - Math.abs(v - 0.25));
+      // Vertical rhythm: window mullions / columns for architectural styles.
+      const colPhase = columns > 0 ? Math.pow(Math.abs(Math.sin((h * columns + rand(4)) * Math.PI)), 6) : 0;
+      const mullion = v < horizonY ? -colPhase * 0.14 : 0;
+      // Floor/ceiling separation.
+      const floor = v > horizonY ? -0.06 - (v - horizonY) * 0.18 : 0;
+      const ceiling = v < 0.14 ? 0.06 : 0;
+      const grain = (rand((x * 3 + y * 7) % 24) - 0.5) * 0.02;
+      let lightness = 0.42 + (horizonY - v) * 0.2 + focal * 0.22 + light + mullion + floor + ceiling + grain;
+      if (style === 'portrait') {
+        // Soft studio backdrop with a centred vignette suggesting a person.
+        const subject = Math.max(0, 1 - Math.sqrt(fx * fx * 2.2 + (v - 0.5) * (v - 0.5) * 1.4) * 2.4);
+        lightness = 0.5 + light + grain - subject * 0.26 + (0.5 - v) * 0.12;
+      }
+      const hueShift = (hue + h * 12 + (v > horizonY ? 6 : 0)) % 360;
+      const saturation = 0.14 + (1 - v) * 0.16 + (style === 'treatment' ? 0.06 : 0);
+      // Expand contrast around a mid-tone anchor so images carry real visual weight on a light
+      // canvas instead of washing out to near-white.
+      const anchor = style === 'portrait' ? 0.46 : 0.5;
+      const contrasted = anchor + (lightness - anchor) * 1.45;
+      const [r, g, b] = hslToRgb(hueShift, saturation, Math.min(0.9, Math.max(0.14, contrasted)));
       raw[offset] = r;
       raw[offset + 1] = g;
       raw[offset + 2] = b;
@@ -87,7 +115,7 @@ export function fictionalPng(spec: FictionalImageSpec): Buffer {
   return Buffer.concat([
     Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
     chunk('IHDR', ihdr),
-    chunk('IDAT', deflateSync(raw, { level: 9 })),
+    chunk('IDAT', deflateSync(raw, { level: 6 })),
     chunk('IEND', Buffer.alloc(0)),
   ]);
 }

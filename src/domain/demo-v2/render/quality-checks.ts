@@ -27,6 +27,8 @@ export interface QualityCheckInput {
   bundledAssetPaths: readonly string[];
   expectedAnchors: readonly string[];
   faqTopicCount: number;
+  /** Maximum FAQ items allowed in the inline preview before it reads as a dense wall. */
+  maxFaqPreview?: number;
 }
 
 export interface QualityCheckResult {
@@ -70,7 +72,10 @@ const LANGUAGE_MARKERS: Record<string, RegExp> = {
   fr: /\b(et|le|la|les|rendez-vous|cabinet|horaires)\b/,
 };
 
-export function runQualityChecks(input: QualityCheckInput): QualityCheckResult {
+export const DEMO_V2_MAX_FAQ_PREVIEW = 4;
+
+export function runQualityChecks(rawInput: QualityCheckInput): QualityCheckResult {
+  const input = { maxFaqPreview: DEMO_V2_MAX_FAQ_PREVIEW, ...rawInput };
   const issues: QualityIssue[] = [];
   const add = (code: string, severity: QualitySeverity, detail: string, language: string) =>
     issues.push({ code, severity, detail, language });
@@ -130,9 +135,15 @@ export function runQualityChecks(input: QualityCheckInput): QualityCheckResult {
     if (!/class="dv2-skip"/.test(html)) add('inaccessible_control', 'BLOCKER', 'skip link missing', language);
 
     // ---- content integrity ----
+    // Language detection runs over PROSE only: emails, URLs, and domains are technical tokens (a
+    // clinic domain may contain "clinic") and must not count as foreign-language markers.
+    const prose = body
+      .replace(/[\w.+-]+@[\w.-]+/g, ' ')
+      .replace(/https?:\/\/\S+/gi, ' ')
+      .replace(/\b[a-z0-9-]+\.(?:example|invalid|com|net|org|de|fr|il|co)\b/gi, ' ');
     const foreign = Object.entries(LANGUAGE_MARKERS)
       .filter(([code]) => code !== language && input.supportedLanguages.includes(code))
-      .filter(([, pattern]) => pattern.test(body));
+      .filter(([, pattern]) => pattern.test(prose));
     if (foreign.length > 0) {
       add('mixed_language', 'BLOCKER', `foreign language markers: ${foreign.map(([code]) => code).join(',')}`, language);
     }
@@ -180,6 +191,43 @@ export function runQualityChecks(input: QualityCheckInput): QualityCheckResult {
     }
     for (const anchor of input.expectedAnchors) {
       if (!ids.includes(anchor)) add('empty_sections', 'FINDING', `planned section ${anchor} not rendered`, language);
+    }
+
+    // ---- typography (structural) ----
+    // RTL documents must carry RTL typography metadata (dir=rtl + an RTL-appropriate face).
+    if (RTL_LANGUAGES.has(language)) {
+      // RTL faces are declared through --font-* custom properties, so match the face names anywhere.
+      const rtlFace = /Narkisim|Frank Ruehl|Arial Hebrew|Geeza Pro|Damascus|Arabic Typesetting|Noto Naskh/i;
+      if (!rtlFace.test(html)) add('missing_rtl_typography', 'BLOCKER', 'RTL document lacks an RTL font stack', language);
+    }
+    // A destructive universal break rule shreds words (esp. German/French) — never allowed.
+    if (/(?:overflow-wrap|word-break)\s*:\s*(?:anywhere|break-all)/i.test(html)) {
+      add('destructive_word_break', 'BLOCKER', 'destructive word breaking present', language);
+    }
+
+    // ---- imagery (structural) ----
+    for (const tag of html.matchAll(/<img[^>]*>/gi)) {
+      const w = Number(attr(tag[0], /\bwidth="(\d+)"/) ?? '0');
+      const h = Number(attr(tag[0], /\bheight="(\d+)"/) ?? '0');
+      const inHero = /class="dv2-hero__media"/.test(html) && html.indexOf(tag[0]) < html.indexOf('</section>');
+      if (inHero && (w < 1200 || h < 700)) {
+        add('low_resolution_hero', 'FINDING', `hero image ${w}x${h} below premium threshold`, language);
+      }
+      if (!/class="dv2-fp-/.test(tag[0])) add('missing_focal_point', 'FINDING', 'image without a focal-point class', language);
+    }
+
+    // ---- composition / mobile (structural) ----
+    if (countOccurrences(html, /class="dv2-mobilebar"/g) > 1) {
+      add('duplicate_mobile_cta', 'BLOCKER', 'more than one mobile appointment bar', language);
+    }
+    const faqItems = countOccurrences(html, /class="dv2-faq__item"/g);
+    if (faqItems > input.maxFaqPreview) {
+      add('faq_wall', 'FINDING', `FAQ preview shows ${faqItems} items (max ${input.maxFaqPreview})`, language);
+    }
+    // A team section that rendered but carries only a single bare line of text (no image, no roles).
+    const teamMatch = /data-dv2-component="(?:SpecialistPortraitRail|TeamEditorialGrid|DoctorFeature)"[\s\S]*?<\/section>/.exec(html);
+    if (teamMatch && !/<img/.test(teamMatch[0]) && countOccurrences(teamMatch[0], /dv2-person__name/g) < 1) {
+      add('team_without_content', 'FINDING', 'team section lacks imagery and roles', language);
     }
   }
 

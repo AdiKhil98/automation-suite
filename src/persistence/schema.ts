@@ -1926,3 +1926,106 @@ export const demoV2ApprovalInvalidations = pgTable(
     hashCk: check('demo_v2_approval_invalidations_hash_ck', sql.raw(`previous_package_hash ~ '${DEMO_V2_HASH_SQL}' AND observed_fingerprint ~ '${DEMO_V2_HASH_SQL}'`)),
   }),
 );
+
+// --- Milestone 3B1: render / screenshot / review-package persistence (immutable, versioned) ---
+
+export const demoV2RenderVersions = pgTable(
+  'demo_v2_render_versions',
+  {
+    id: text('id').primaryKey(),
+    artifactId: text('artifact_id').notNull().references(() => demoV2Artifacts.id, { onDelete: 'cascade' }),
+    experiencePlanId: text('experience_plan_id').notNull().references(() => demoV2ExperiencePlans.id, { onDelete: 'restrict' }),
+    version: integer('version').notNull(),
+    rendererVersion: text('renderer_version').notNull(),
+    referenceFamily: text('reference_family').notNull(),
+    bundleLocation: text('bundle_location').notNull(),
+    status: text('status').notNull().default('RENDERED'),
+    primaryLanguage: text('primary_language').notNull(),
+    supportedLanguages: jsonb('supported_languages').notNull(),
+    intelligenceHash: text('intelligence_hash').notNull(),
+    contentHash: text('content_hash').notNull(),
+    translationHash: text('translation_hash'),
+    assetSelectionSetHash: text('asset_selection_set_hash').notNull(),
+    componentRegistryHash: text('component_registry_hash').notNull(),
+    referenceLibraryHash: text('reference_library_hash').notNull(),
+    creativeBriefHash: text('creative_brief_hash').notNull(),
+    experiencePlanHash: text('experience_plan_hash').notNull(),
+    renderHash: text('render_hash').notNull(),
+    structurallyEligible: boolean('structurally_eligible').notNull(),
+    deterministicValidation: jsonb('deterministic_validation').notNull(),
+    isCurrent: boolean('is_current').notNull().default(true),
+    supersededById: text('superseded_by_id'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    finalizedAt: timestamp('finalized_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    versionUk: uniqueIndex('demo_v2_render_versions_artifact_version_uk').on(t.artifactId, t.version),
+    currentUk: uniqueIndex('demo_v2_render_versions_current_uk').on(t.artifactId).where(sql`${t.isCurrent}`),
+    renderHashIdx: index('demo_v2_render_versions_hash_idx').on(t.renderHash),
+    versionCk: check('demo_v2_render_versions_version_ck', sql`${t.version} > 0`),
+    statusCk: check('demo_v2_render_versions_status_ck', sql`${t.status} IN ('RENDERED','SUPERSEDED')`),
+    languageCk: check('demo_v2_render_versions_language_ck', sql.raw(`primary_language IN (${DEMO_V2_LANGUAGE_SQL})`)),
+    hashCk: check('demo_v2_render_versions_hash_ck', sql.raw(
+      `render_hash ~ '${DEMO_V2_HASH_SQL}' AND content_hash ~ '${DEMO_V2_HASH_SQL}'`
+      + ` AND intelligence_hash ~ '${DEMO_V2_HASH_SQL}' AND (translation_hash IS NULL OR translation_hash ~ '${DEMO_V2_HASH_SQL}')`)),
+  }),
+);
+
+export const demoV2Screenshots = pgTable(
+  'demo_v2_screenshots',
+  {
+    id: text('id').primaryKey(),
+    renderVersionId: text('render_version_id').notNull().references(() => demoV2RenderVersions.id, { onDelete: 'cascade' }),
+    kind: text('kind').notNull(),
+    language: text('language').notNull(),
+    viewport: text('viewport').notNull(),
+    width: integer('width').notNull(),
+    height: integer('height').notNull(),
+    fileHash: text('file_hash').notNull(),
+    location: text('location').notNull(),
+    screenshotSetHash: text('screenshot_set_hash').notNull(),
+    rendererVersion: text('renderer_version').notNull(),
+    renderHash: text('render_hash').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    memberUk: uniqueIndex('demo_v2_screenshots_member_uk').on(t.renderVersionId, t.kind, t.language, t.viewport),
+    setIdx: index('demo_v2_screenshots_set_idx').on(t.screenshotSetHash),
+    kindCk: check('demo_v2_screenshots_kind_ck', sql`${t.kind} IN ('ORIGINAL','FINAL')`),
+    viewportCk: check('demo_v2_screenshots_viewport_ck', sql`${t.viewport} IN ('DESKTOP','TABLET','MOBILE')`),
+    languageCk: check('demo_v2_screenshots_language_ck', sql.raw(`language IN (${DEMO_V2_LANGUAGE_SQL})`)),
+    dimensionsCk: check('demo_v2_screenshots_dimensions_ck', sql`${t.width} > 0 AND ${t.height} > 0`),
+    hashCk: check('demo_v2_screenshots_hash_ck', sql.raw(`file_hash ~ '${DEMO_V2_HASH_SQL}' AND screenshot_set_hash ~ '${DEMO_V2_HASH_SQL}' AND render_hash ~ '${DEMO_V2_HASH_SQL}'`)),
+  }),
+);
+
+export const demoV2ReviewPackages = pgTable(
+  'demo_v2_review_packages',
+  {
+    id: text('id').primaryKey(),
+    artifactId: text('artifact_id').notNull().references(() => demoV2Artifacts.id, { onDelete: 'cascade' }),
+    renderVersionId: text('render_version_id').notNull().references(() => demoV2RenderVersions.id, { onDelete: 'cascade' }),
+    schemaVersion: text('schema_version').notNull(),
+    referenceFamily: text('reference_family').notNull(),
+    rendererVersion: text('renderer_version').notNull(),
+    primaryLanguage: text('primary_language').notNull(),
+    supportedLanguages: jsonb('supported_languages').notNull(),
+    payload: jsonb('payload').notNull(),
+    renderHash: text('render_hash').notNull(),
+    screenshotSetHash: text('screenshot_set_hash').notNull(),
+    reviewPackageHash: text('review_package_hash').notNull(),
+    structurallyEligible: boolean('structurally_eligible').notNull(),
+    /** Milestone 3B1 never makes a render deployment eligible. */
+    deploymentEligible: boolean('deployment_eligible').notNull().default(false),
+    isCurrent: boolean('is_current').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    finalizedAt: timestamp('finalized_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    renderUk: uniqueIndex('demo_v2_review_packages_render_uk').on(t.renderVersionId),
+    currentUk: uniqueIndex('demo_v2_review_packages_current_uk').on(t.artifactId).where(sql`${t.isCurrent}`),
+    hashIdx: index('demo_v2_review_packages_hash_idx').on(t.reviewPackageHash),
+    deploymentCk: check('demo_v2_review_packages_deployment_ck', sql`${t.deploymentEligible} = false`),
+    hashCk: check('demo_v2_review_packages_hash_ck', sql.raw(`render_hash ~ '${DEMO_V2_HASH_SQL}' AND screenshot_set_hash ~ '${DEMO_V2_HASH_SQL}' AND review_package_hash ~ '${DEMO_V2_HASH_SQL}'`)),
+  }),
+);

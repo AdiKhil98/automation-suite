@@ -4,6 +4,40 @@ Every significant decision is recorded here in the required format. Newest first
 
 ---
 
+## D-0041 - Demo Engine V2 Milestone 3B1 raises the visual ceiling and persists renders
+
+- **Date:** 2026-07-24
+- **Problem:** The 3A renderer was technically valid but not prospect-worthy — generic typography,
+  flat composition, placeholder-like imagery, empty team/clinic sections, and a dense FAQ wall — and
+  render artifacts were not persisted for audit or later review.
+- **Chosen option:** (1) A versioned per-family typography system with materially different pairings
+  (editorial serif / humanist sans / technical grotesk / neo-grotesk / high-contrast serif), RTL
+  faces for HE/AR, German hyphenation and French manual wrapping, all from local system fonts — no
+  downloads or runtime font requests. (2) Structured deterministic fixture imagery with real tonal
+  range (per-style composition) instead of flat gradients, framed and higher-contrast so images carry
+  weight; image-led hero / offset clinic-story / location sections; a condensed FAQ preview (3-4 top
+  verified topics inline, the rest in the deterministic concierge). (3) Extended fail-closed
+  structural checks (typography / imagery / composition / mobile) that still only establish
+  eligibility for later visual review. (4) Complete FR/HE/AR acceptance fixtures. (5) Immutable,
+  versioned render / screenshot / review-package persistence via migration 0024.
+- **Safety boundary:** All providers remain mock; V2 stays disabled and V1 unchanged. No external
+  fonts, images, providers, deployment, Gmail, email, or scheduling. Persisted review packages are
+  immutable, bind the exact render + screenshot-set hash (a changed render invalidates prior review
+  eligibility), and are hard-constrained to `deployment_eligible = false`; nothing reaches
+  AUTO_REVIEW_PASSED from a real model or HUMAN_APPROVED.
+- **Reason:** Distinct typography + intentional composition + believable imagery move the output from
+  "technically correct template" toward a differentiated premium clinic, while immutable persistence
+  makes every render and review package auditable and reproducible.
+- **Tradeoffs:** Fixture imagery is synthetic (structured, not photographic); deterministic checks
+  gate structure, not aesthetics. The team-portrait section can still be starved of its asset when an
+  upstream story section consumes the team image — deferred to 3B2 asset-allocation work.
+- **Rollback path:** Keep `DEMO_ENGINE_VERSION=v1` / `DEMO_V2_ENABLED=false`; revert the 3B1 commit.
+  Migration 0024 is additive (three new isolated tables); reverting drops them.
+- **Status:** Implemented and locally verified with mock-only fictional fixtures. Stop for human
+  visual review of the produced screenshots.
+
+---
+
 ## D-0040 - Demo Engine V2 Milestone 3A renders code-native, deterministic, mock-only previews
 
 - **Date:** 2026-07-24

@@ -9,6 +9,7 @@ import { type DemoV2AssetCandidate, type DemoV2AssetSelectionProposal } from '..
 import { componentSpecsHash, requireComponent, type ComponentSpec } from './components.js';
 import { compositionFor } from './design-system.js';
 import { buildStylesheet } from './stylesheet.js';
+import { buildTypographyCss, typographyHash } from './typography.js';
 import { buildRuntimeScript } from './runtime.js';
 import {
   renderDocument, renderFictionalBaseline,
@@ -62,11 +63,11 @@ const ANCHORS: Record<string, string> = {
 };
 
 const LABELS: Record<Language, Record<string, string>> = {
-  de: { skip: 'Zum Inhalt springen', menu: 'Menü', close: 'Schließen', appointment: 'Termin anfragen', contact: 'Kontakt', whatsapp: 'WhatsApp', location: 'Anfahrt', faq: 'Häufige Fragen', treatments: 'Behandlungen', team: 'Team', clinic: 'Praxis', journey: 'Ihr Weg zum Termin', story: 'Die Praxis', verified: 'Verifiziert', primaryNav: 'Hauptnavigation', mobileNav: 'Mobile Navigation', languageGroup: 'Sprache', conciergeNote: 'Konzeptdemo. Antworten stammen ausschließlich aus verifizierten Angaben. Keine medizinische Beratung.' },
-  en: { skip: 'Skip to content', menu: 'Menu', close: 'Close', appointment: 'Request an appointment', contact: 'Contact', whatsapp: 'WhatsApp', location: 'Directions', faq: 'Common questions', treatments: 'Treatments', team: 'Team', clinic: 'Clinic', journey: 'Your route to an appointment', story: 'The practice', verified: 'Verified', primaryNav: 'Primary navigation', mobileNav: 'Mobile navigation', languageGroup: 'Language', conciergeNote: 'Concept demo. Answers come only from verified information. This is not medical advice.' },
-  fr: { skip: 'Aller au contenu', menu: 'Menu', close: 'Fermer', appointment: 'Demander un rendez-vous', contact: 'Contact', whatsapp: 'WhatsApp', location: 'Accès', faq: 'Questions fréquentes', treatments: 'Soins', team: 'Équipe', clinic: 'Cabinet', journey: 'Votre parcours vers un rendez-vous', story: 'Le cabinet', verified: 'Vérifié', primaryNav: 'Navigation principale', mobileNav: 'Navigation mobile', languageGroup: 'Langue', conciergeNote: "Démo conceptuelle. Les réponses proviennent uniquement d'informations vérifiées. Ceci n'est pas un conseil médical." },
-  he: { skip: 'דלג לתוכן', menu: 'תפריט', close: 'סגירה', appointment: 'בקשת תור', contact: 'יצירת קשר', whatsapp: 'וואטסאפ', location: 'הגעה', faq: 'שאלות נפוצות', treatments: 'טיפולים', team: 'צוות', clinic: 'המרפאה', journey: 'הדרך לקביעת תור', story: 'המרפאה שלנו', verified: 'מאומת', primaryNav: 'ניווט ראשי', mobileNav: 'ניווט נייד', languageGroup: 'שפה', conciergeNote: 'הדגמת קונספט. התשובות מבוססות על מידע מאומת בלבד. אין זה ייעוץ רפואי.' },
-  ar: { skip: 'تخطَّ إلى المحتوى', menu: 'القائمة', close: 'إغلاق', appointment: 'طلب موعد', contact: 'اتصل بنا', whatsapp: 'واتساب', location: 'الوصول', faq: 'أسئلة شائعة', treatments: 'العلاجات', team: 'الفريق', clinic: 'العيادة', journey: 'طريقك إلى الموعد', story: 'عن العيادة', verified: 'موثق', primaryNav: 'التنقل الرئيسي', mobileNav: 'تنقل الجوال', languageGroup: 'اللغة', conciergeNote: 'عرض تصوري. الإجابات مستمدة من معلومات موثقة فقط. هذه ليست استشارة طبية.' },
+  de: { skip: 'Zum Inhalt springen', menu: 'Menü', close: 'Schließen', appointment: 'Termin anfragen', contact: 'Kontakt', whatsapp: 'WhatsApp', location: 'Anfahrt', faq: 'Häufige Fragen', treatments: 'Behandlungen', team: 'Team', clinic: 'Praxis', journey: 'Ihr Weg zum Termin', story: 'Die Praxis', faqMore: 'Weitere {n} Fragen im Assistenten', verified: 'Verifiziert', primaryNav: 'Hauptnavigation', mobileNav: 'Mobile Navigation', languageGroup: 'Sprache', conciergeNote: 'Konzeptdemo. Antworten stammen ausschließlich aus verifizierten Angaben. Keine medizinische Beratung.' },
+  en: { skip: 'Skip to content', menu: 'Menu', close: 'Close', appointment: 'Request an appointment', contact: 'Contact', whatsapp: 'WhatsApp', location: 'Directions', faq: 'Common questions', treatments: 'Treatments', team: 'Team', clinic: 'Clinic', journey: 'Your route to an appointment', story: 'The practice', faqMore: '{n} more questions in the assistant', verified: 'Verified', primaryNav: 'Primary navigation', mobileNav: 'Mobile navigation', languageGroup: 'Language', conciergeNote: 'Concept demo. Answers come only from verified information. This is not medical advice.' },
+  fr: { skip: 'Aller au contenu', menu: 'Menu', close: 'Fermer', appointment: 'Demander un rendez-vous', contact: 'Contact', whatsapp: 'WhatsApp', location: 'Accès', faq: 'Questions fréquentes', treatments: 'Soins', team: 'Équipe', clinic: 'Cabinet', journey: 'Votre parcours vers un rendez-vous', story: 'Le cabinet', faqMore: '{n} autres questions dans l’assistant', verified: 'Vérifié', primaryNav: 'Navigation principale', mobileNav: 'Navigation mobile', languageGroup: 'Langue', conciergeNote: "Démo conceptuelle. Les réponses proviennent uniquement d'informations vérifiées. Ceci n'est pas un conseil médical." },
+  he: { skip: 'דלג לתוכן', menu: 'תפריט', close: 'סגירה', appointment: 'בקשת תור', contact: 'יצירת קשר', whatsapp: 'וואטסאפ', location: 'הגעה', faq: 'שאלות נפוצות', treatments: 'טיפולים', team: 'צוות', clinic: 'המרפאה', journey: 'הדרך לקביעת תור', story: 'המרפאה שלנו', faqMore: 'עוד {n} שאלות בעוזר', verified: 'מאומת', primaryNav: 'ניווט ראשי', mobileNav: 'ניווט נייד', languageGroup: 'שפה', conciergeNote: 'הדגמת קונספט. התשובות מבוססות על מידע מאומת בלבד. אין זה ייעוץ רפואי.' },
+  ar: { skip: 'تخطَّ إلى المحتوى', menu: 'القائمة', close: 'إغلاق', appointment: 'طلب موعد', contact: 'اتصل بنا', whatsapp: 'واتساب', location: 'الوصول', faq: 'أسئلة شائعة', treatments: 'العلاجات', team: 'الفريق', clinic: 'العيادة', journey: 'طريقك إلى الموعد', story: 'عن العيادة', faqMore: '{n} أسئلة أخرى في المساعد', verified: 'موثق', primaryNav: 'التنقل الرئيسي', mobileNav: 'تنقل الجوال', languageGroup: 'اللغة', conciergeNote: 'عرض تصوري. الإجابات مستمدة من معلومات موثقة فقط. هذه ليست استشارة طبية.' },
 };
 
 const LANGUAGE_LABEL: Record<Language, string> = { de: 'DE', en: 'EN', fr: 'FR', he: 'עב', ar: 'ع' };
@@ -317,6 +318,7 @@ export function renderDemoV2(input: RenderInput): RenderResult {
       locationHref: sanitizeUrl(input.channels.locationUrl),
       whatsappHref: sanitizeUrl(input.channels.whatsappUrl),
       styleHash, scriptHash, css, script,
+      typographyCss: buildTypographyCss(input.referenceFamily, language),
     };
     documents.push({
       language,
@@ -335,6 +337,7 @@ export function renderDemoV2(input: RenderInput): RenderResult {
   const renderHash = demoV2Hash({
     rendererVersion: DEMO_V2_RENDERER_VERSION,
     componentSpecsHash: componentSpecsHash(),
+    typographyHash: typographyHash(),
     componentRegistryHash: input.componentRegistryHash,
     referenceLibraryHash: input.referenceLibraryHash,
     referenceFamily: input.referenceFamily,
