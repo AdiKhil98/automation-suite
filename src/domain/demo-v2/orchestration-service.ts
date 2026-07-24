@@ -42,6 +42,8 @@ export interface DemoV2FixtureInput {
   referenceLibrary: { version: string; hash: string };
   now: string;
   version?: number;
+  /** Fictional English equivalents for evidence-derived prose (mock translation only). */
+  translationGlossary?: Readonly<Record<string, string>>;
 }
 
 export interface DemoV2OrchestrationOutput {
@@ -100,7 +102,7 @@ export async function orchestrateDemoV2Fixture(input: DemoV2FixtureInput): Promi
       artifactId,
       primary: content.package,
       version,
-      provider: new MockDemoV2TranslationProvider(),
+      provider: new MockDemoV2TranslationProvider(input.translationGlossary ?? {}),
     }),
   });
 

@@ -4,6 +4,37 @@ Every significant decision is recorded here in the required format. Newest first
 
 ---
 
+## D-0040 - Demo Engine V2 Milestone 3A renders code-native, deterministic, mock-only previews
+
+- **Date:** 2026-07-24
+- **Problem:** An approved ExperiencePlan needed to become a polished, responsive, bilingual website preview
+  without letting a model emit markup/CSS/JS, without external calls or deployment, and without weakening the
+  evidence, lifecycle, or approval boundaries.
+- **Chosen option:** A deterministic, code-native renderer. A closed component registry (34 typed components,
+  no raw HTML) plus a token-based design system produce five visibly distinct reference-family compositions.
+  The renderer consumes the existing content/translation/asset/brief/plan packages and their hashes, renders
+  only planned sections in order, uses only approved fictional assets (content-hash verified, no hotlinking,
+  focal-point positioning via a hashed style block), refuses stale/mismatched hashes, incomplete translations,
+  unapproved assets, and unsupported components, and emits a self-contained bundle with a strict per-document
+  CSP (hashed inline style/script; `frame-ancestors` served as an HTTP header), noindex, and a concept
+  disclosure. A missing or unreviewed secondary package renders the complete primary language only — never a
+  partial/mixed page. Deterministic fail-closed structural checks decide eligibility for later visual review
+  ONLY; the FAQ concierge is a chatbot-style UI over the deterministic package with no free-form input,
+  runtime model, or data collection, omitted entirely when no verified topic exists.
+- **Safety boundary:** All providers remain mock. The visual reviewer is a mock-only contract (8 fixtures);
+  no live model runs and no `AUTO_REVIEW_PASSED` from a real reviewer, `HUMAN_APPROVED`, or deployment-eligible
+  state is produced. Operator commands render/preview/screenshot/export locally over loopback only — no deploy,
+  Gmail, email, scheduling, or external service. V1 and V2 defaults are unchanged; V2 stays disabled.
+- **Reason:** Deterministic assembly keeps output auditable and reproducible (a stable render hash) while a
+  bounded visual-review contract defers aesthetic judgement to a later, separately approved step.
+- **Tradeoffs:** Rich per-image styling flows through a hashed style block rather than inline attributes;
+  screenshots require Playwright (loaded lazily). Structural eligibility is explicitly not a quality verdict.
+- **Rollback path:** Keep `DEMO_ENGINE_VERSION=v1` and `DEMO_V2_ENABLED=false`; revert the Milestone 3A commit.
+  No migration change (the renderer reads existing packages and writes only local files).
+- **Status:** Implemented and locally verified with mock-only fictional fixtures.
+
+---
+
 ## D-0039 - Demo Engine V2 Milestone 2 is evidence-bound, mock-only design orchestration
 
 - **Date:** 2026-07-23

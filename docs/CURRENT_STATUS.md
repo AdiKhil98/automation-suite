@@ -2,11 +2,14 @@
 
 ## Current phase
 
-Phases 0-16 are committed and tagged. Demo Engine V2 Milestones 1 and 2 are implemented and locally verified.
-Milestone 2 populates the isolated Milestone 1 foundation through a mock-only Clinic Intelligence and design
-orchestration path. V1 remains authoritative: `DEMO_ENGINE_VERSION=v1`, `DEMO_V2_ENABLED=false`, and every V2
-provider defaults to mock. No rendering, screenshot review, deployment, email, Gmail, scheduling, sending, live
-provider, or paid-call path was added.
+Phases 0-16 are committed and tagged. Demo Engine V2 Milestones 1, 2, and 3A are implemented and locally
+verified. Milestone 3A adds a deterministic, code-native renderer that turns an approved fictional
+ExperiencePlan into a self-contained, responsive, bilingual (DE/EN) local website bundle with a chatbot-style
+FAQ concierge, plus deterministic structural quality checks, mock-only visual-review and revision contracts,
+and local render/preview/screenshot/review-package tooling. V1 remains authoritative:
+`DEMO_ENGINE_VERSION=v1`, `DEMO_V2_ENABLED=false`, and every V2 provider defaults to mock. No live provider,
+paid call, deployment, screenshot-review model, email, Gmail, or scheduling path was added; the lifecycle
+still cannot reach a real AUTO_REVIEW_PASSED, HUMAN_APPROVED, or deployment-eligible state.
 
 ## Demo Engine V2 Milestone 1
 

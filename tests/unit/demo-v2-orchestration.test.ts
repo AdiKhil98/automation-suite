@@ -229,9 +229,16 @@ describe('Demo V2 Milestone 2 orchestration', () => {
       const services = fixture.sources.find((source) => source.key === 'fact.services')!;
       services.value = `${services.value}|Sehr lange verifizierte Behandlungsbezeichnung mit mehreren Wörtern`;
       const output = await orchestrateDemoV2Fixture(fixture);
-      const item = output.content.package.items.find((candidate) => candidate.contentKind === 'SERVICE_NAME')!;
-      expect(item.textValue).toContain(' ');
-      expect(item.textValue).not.toMatch(/mehrerenWörtern/);
+      // Each verified service is now its own content item; the appended long, multi-word name is
+      // preserved verbatim as words rather than concatenated.
+      const longItem = output.content.package.items.find((candidate) =>
+        candidate.contentKind === 'SERVICE_NAME' && (candidate.textValue ?? '').includes('Wörtern'))!;
+      expect(longItem.textValue).toContain(' ');
+      expect(longItem.textValue).not.toMatch(/mehrerenWörtern/);
+      // No single service item smuggles the pipe delimiter through.
+      for (const candidate of output.content.package.items.filter((entry) => entry.contentKind === 'SERVICE_NAME')) {
+        expect(candidate.textValue).not.toContain('|');
+      }
     }
   });
 

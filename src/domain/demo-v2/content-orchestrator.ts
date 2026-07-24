@@ -139,11 +139,22 @@ export function buildPrimaryContent(input: {
   const business = first('businessIdentity');
   if (business) add('hero.heading', 'HEADING', 'VERBATIM_FACT', business.value, business.sourceIds);
 
-  for (const [index, service] of input.intelligence.services.entries()) {
-    add(`treatments.${String(index)}.label`, 'SERVICE_NAME', 'VERBATIM_FACT', service.value, service.sourceIds);
+  // A services fact is a pipe-delimited set; each verified name becomes its own content item so
+  // the renderer never prints "A|B|C" as a single label.
+  let serviceIndex = 0;
+  for (const service of input.intelligence.services) {
+    for (const name of service.value.split('|').map((part) => part.trim()).filter((part) => part !== '')) {
+      add(`treatments.${String(serviceIndex)}.label`, 'SERVICE_NAME', 'VERBATIM_FACT', name, service.sourceIds);
+      serviceIndex += 1;
+    }
   }
   for (const [index, strength] of input.intelligence.websiteStrengths.entries()) {
     add(`trust.${String(index)}.text`, 'BODY', 'EVIDENCE_BOUND_DERIVATION', strength.value, strength.sourceIds);
+  }
+  // Verified atmosphere evidence backs the place/story sections; without it those sections have
+  // no text fallback and are omitted entirely.
+  for (const [index, cue] of input.intelligence.atmosphereCues.entries()) {
+    add(`atmosphere.${String(index)}.text`, 'BODY', 'EVIDENCE_BOUND_DERIVATION', cue.value, cue.sourceIds);
   }
   for (const [index, team] of input.intelligence.teamMembers.entries()) {
     add(`team.${String(index)}.text`, 'BODY', team.classification === 'DIRECT_FACT' ? 'VERBATIM_FACT' : 'EVIDENCE_BOUND_DERIVATION', team.value, team.sourceIds);
@@ -222,6 +233,13 @@ export interface DemoV2TranslationProvider {
 /** Zero-network translation preparation. It never grants human review approval. */
 export class MockDemoV2TranslationProvider implements DemoV2TranslationProvider {
   readonly name = 'mock' as const;
+  /**
+   * `glossary` supplies English for evidence-derived prose that has no vetted UI/FAQ equivalent.
+   * A real deployment resolves these through the configured translation provider; the mock needs
+   * them so a prepared English package is COMPLETE rather than silently mixed-language.
+   */
+  constructor(private readonly glossary: Readonly<Record<string, string>> = {}) {}
+
   async translate(primary: PrimaryContentPackage): Promise<Array<{
     sourceContentItemId: string;
     translatedText: string | null;
@@ -241,9 +259,11 @@ export class MockDemoV2TranslationProvider implements DemoV2TranslationProvider 
       // Vetted UI and FAQ concierge strings resolve to their prepared English wording; verified
       // facts pass through unchanged (only known service names have a vetted English name).
       const faqEnglish = item.textValue ? englishFaqEquivalent(primary.language, item.textValue) : null;
+      const glossed = item.textValue ? this.glossary[item.textValue] ?? null : null;
       const translatedText = known
         ? UI.en[known]!
         : faqEnglish
+          ?? glossed
           ?? (item.contentKind === 'SERVICE_NAME' && item.textValue
             ? item.textValue.split('|').map((value) => factualTranslations[value] ?? value).join('|')
             : item.textValue);

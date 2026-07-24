@@ -1,21 +1,427 @@
 {
-  "version": "component-registry-v1",
+  "version": "component-registry-v2",
   "components": [
-    {"id":"disclosure-v1","version":"1","supportedDirections":["LTR","RTL"],"contentSlots":["text"]},
-    {"id":"navigation-v1","version":"1","supportedDirections":["LTR","RTL"],"contentSlots":["treatments","clinic","team","contact","primaryCta"]},
-    {"id":"language-switcher-v1","version":"1","supportedDirections":["LTR","RTL"],"contentSlots":["languages","activeLanguage"]},
-    {"id":"image-led-hero-v1","version":"1","supportedDirections":["LTR","RTL"],"contentSlots":["eyebrow","heading","body","primaryCta","image"]},
-    {"id":"appointment-actions-v1","version":"1","supportedDirections":["LTR","RTL"],"contentSlots":["heading","verifiedMethod"]},
-    {"id":"trust-strip-v1","version":"1","supportedDirections":["LTR","RTL"],"contentSlots":["items"]},
-    {"id":"editorial-treatment-discovery-v1","version":"1","supportedDirections":["LTR","RTL"],"contentSlots":["heading","treatments"]},
-    {"id":"clinic-story-v1","version":"1","supportedDirections":["LTR","RTL"],"contentSlots":["heading","body","image"]},
-    {"id":"team-and-specialist-presentation-v1","version":"1","supportedDirections":["LTR","RTL"],"contentSlots":["heading","people","images"]},
-    {"id":"architecture-or-interior-gallery-v1","version":"1","supportedDirections":["LTR","RTL"],"contentSlots":["heading","images"]},
-    {"id":"patient-journey-v1","version":"1","supportedDirections":["LTR","RTL"],"contentSlots":["heading","steps"]},
-    {"id":"anxious-patient-section-v1","version":"1","supportedDirections":["LTR","RTL"],"contentSlots":["heading","body","contactAction"]},
-    {"id":"location-and-opening-hours-v1","version":"1","supportedDirections":["LTR","RTL"],"contentSlots":["location","hours","contact"]},
-    {"id":"deterministic-faq-concierge-v1","version":"1","supportedDirections":["LTR","RTL"],"contentSlots":["heading","questions","answers","escalation"]},
-    {"id":"final-cta-v1","version":"1","supportedDirections":["LTR","RTL"],"contentSlots":["heading","verifiedMethod"]},
-    {"id":"footer-v1","version":"1","supportedDirections":["LTR","RTL"],"contentSlots":["legal","contact","disclosure"]}
+    {
+      "id": "ConceptDisclosureBar",
+      "version": "1",
+      "supportedDirections": [
+        "LTR",
+        "RTL"
+      ],
+      "contentSlots": [
+        "disclosure.text"
+      ]
+    },
+    {
+      "id": "PremiumEditorialNavigation",
+      "version": "1",
+      "supportedDirections": [
+        "LTR",
+        "RTL"
+      ],
+      "contentSlots": [
+        "navigation.contact",
+        "navigation.treatments",
+        "navigation.clinic",
+        "navigation.team",
+        "hero.heading"
+      ]
+    },
+    {
+      "id": "MobileNavigation",
+      "version": "1",
+      "supportedDirections": [
+        "LTR",
+        "RTL"
+      ],
+      "contentSlots": [
+        "navigation.contact",
+        "navigation.treatments",
+        "navigation.clinic",
+        "navigation.team"
+      ]
+    },
+    {
+      "id": "LanguageSwitcher",
+      "version": "1",
+      "supportedDirections": [
+        "LTR",
+        "RTL"
+      ],
+      "contentSlots": []
+    },
+    {
+      "id": "SkipLink",
+      "version": "1",
+      "supportedDirections": [
+        "LTR",
+        "RTL"
+      ],
+      "contentSlots": []
+    },
+    {
+      "id": "ArchitectureImageHero",
+      "version": "1",
+      "supportedDirections": [
+        "LTR",
+        "RTL"
+      ],
+      "contentSlots": [
+        "hero.heading",
+        "hero.eyebrow",
+        "appointment.heading"
+      ]
+    },
+    {
+      "id": "EditorialSplitHero",
+      "version": "1",
+      "supportedDirections": [
+        "LTR",
+        "RTL"
+      ],
+      "contentSlots": [
+        "hero.heading",
+        "hero.eyebrow",
+        "appointment.heading"
+      ]
+    },
+    {
+      "id": "CalmCareHero",
+      "version": "1",
+      "supportedDirections": [
+        "LTR",
+        "RTL"
+      ],
+      "contentSlots": [
+        "hero.heading",
+        "hero.eyebrow",
+        "appointment.heading"
+      ]
+    },
+    {
+      "id": "LocationLedHero",
+      "version": "1",
+      "supportedDirections": [
+        "LTR",
+        "RTL"
+      ],
+      "contentSlots": [
+        "hero.heading",
+        "hero.eyebrow",
+        "location.value",
+        "hours.value",
+        "appointment.heading"
+      ]
+    },
+    {
+      "id": "AppointmentActionDock",
+      "version": "1",
+      "supportedDirections": [
+        "LTR",
+        "RTL"
+      ],
+      "contentSlots": [
+        "appointment.heading",
+        "appointment.verified_method",
+        "contact.value"
+      ]
+    },
+    {
+      "id": "MobileAppointmentBar",
+      "version": "1",
+      "supportedDirections": [
+        "LTR",
+        "RTL"
+      ],
+      "contentSlots": [
+        "appointment.verified_method",
+        "appointment.heading"
+      ]
+    },
+    {
+      "id": "CallEmergencyActions",
+      "version": "1",
+      "supportedDirections": [
+        "LTR",
+        "RTL"
+      ],
+      "contentSlots": [
+        "urgent.value",
+        "contact.value"
+      ]
+    },
+    {
+      "id": "ContactChoicePanel",
+      "version": "1",
+      "supportedDirections": [
+        "LTR",
+        "RTL"
+      ],
+      "contentSlots": [
+        "contact.value",
+        "contact.heading",
+        "location.value"
+      ]
+    },
+    {
+      "id": "SpecialistTrustStrip",
+      "version": "1",
+      "supportedDirections": [
+        "LTR",
+        "RTL"
+      ],
+      "contentSlots": [
+        "hours.value",
+        "location.value",
+        "trust.*"
+      ]
+    },
+    {
+      "id": "VerifiedHoursStrip",
+      "version": "1",
+      "supportedDirections": [
+        "LTR",
+        "RTL"
+      ],
+      "contentSlots": [
+        "hours.value",
+        "location.value"
+      ]
+    },
+    {
+      "id": "LocationProofStrip",
+      "version": "1",
+      "supportedDirections": [
+        "LTR",
+        "RTL"
+      ],
+      "contentSlots": [
+        "location.value",
+        "hours.value"
+      ]
+    },
+    {
+      "id": "EditorialTreatmentIndex",
+      "version": "1",
+      "supportedDirections": [
+        "LTR",
+        "RTL"
+      ],
+      "contentSlots": [
+        "navigation.treatments",
+        "treatments.*"
+      ]
+    },
+    {
+      "id": "GroupedTreatmentDiscovery",
+      "version": "1",
+      "supportedDirections": [
+        "LTR",
+        "RTL"
+      ],
+      "contentSlots": [
+        "navigation.treatments",
+        "treatments.*"
+      ]
+    },
+    {
+      "id": "TreatmentSpotlight",
+      "version": "1",
+      "supportedDirections": [
+        "LTR",
+        "RTL"
+      ],
+      "contentSlots": [
+        "navigation.treatments",
+        "treatments.*"
+      ]
+    },
+    {
+      "id": "SpecialistPortraitRail",
+      "version": "1",
+      "supportedDirections": [
+        "LTR",
+        "RTL"
+      ],
+      "contentSlots": [
+        "team.*"
+      ]
+    },
+    {
+      "id": "TeamEditorialGrid",
+      "version": "1",
+      "supportedDirections": [
+        "LTR",
+        "RTL"
+      ],
+      "contentSlots": [
+        "team.*"
+      ]
+    },
+    {
+      "id": "DoctorFeature",
+      "version": "1",
+      "supportedDirections": [
+        "LTR",
+        "RTL"
+      ],
+      "contentSlots": [
+        "team.*"
+      ]
+    },
+    {
+      "id": "ArchitectureStory",
+      "version": "1",
+      "supportedDirections": [
+        "LTR",
+        "RTL"
+      ],
+      "contentSlots": [
+        "hero.heading",
+        "atmosphere.*",
+        "trust.*"
+      ]
+    },
+    {
+      "id": "InteriorGallery",
+      "version": "1",
+      "supportedDirections": [
+        "LTR",
+        "RTL"
+      ],
+      "contentSlots": [
+        "atmosphere.*"
+      ]
+    },
+    {
+      "id": "LocationNarrative",
+      "version": "1",
+      "supportedDirections": [
+        "LTR",
+        "RTL"
+      ],
+      "contentSlots": [
+        "location.value",
+        "hours.value",
+        "location.heading"
+      ]
+    },
+    {
+      "id": "PatientJourneySteps",
+      "version": "1",
+      "supportedDirections": [
+        "LTR",
+        "RTL"
+      ],
+      "contentSlots": [
+        "appointment.verified_method",
+        "contact.value",
+        "hours.value"
+      ]
+    },
+    {
+      "id": "CalmCareStory",
+      "version": "1",
+      "supportedDirections": [
+        "LTR",
+        "RTL"
+      ],
+      "contentSlots": [
+        "appointment.verified_method",
+        "atmosphere.*",
+        "trust.*"
+      ]
+    },
+    {
+      "id": "AnxiousPatientSection",
+      "version": "1",
+      "supportedDirections": [
+        "LTR",
+        "RTL"
+      ],
+      "contentSlots": [
+        "faq.anxious_patient.answer",
+        "appointment.verified_method"
+      ]
+    },
+    {
+      "id": "LocationHoursPanel",
+      "version": "1",
+      "supportedDirections": [
+        "LTR",
+        "RTL"
+      ],
+      "contentSlots": [
+        "location.value",
+        "hours.value",
+        "location.heading",
+        "hours.heading"
+      ]
+    },
+    {
+      "id": "ContactPanel",
+      "version": "1",
+      "supportedDirections": [
+        "LTR",
+        "RTL"
+      ],
+      "contentSlots": [
+        "contact.value",
+        "contact.heading"
+      ]
+    },
+    {
+      "id": "DeterministicFaqConcierge",
+      "version": "1",
+      "supportedDirections": [
+        "LTR",
+        "RTL"
+      ],
+      "contentSlots": [
+        "faq.heading",
+        "appointment.verified_method",
+        "contact.value",
+        "faq.*"
+      ]
+    },
+    {
+      "id": "FinalAppointmentCta",
+      "version": "1",
+      "supportedDirections": [
+        "LTR",
+        "RTL"
+      ],
+      "contentSlots": [
+        "appointment.heading",
+        "appointment.verified_method"
+      ]
+    },
+    {
+      "id": "ContactFallback",
+      "version": "1",
+      "supportedDirections": [
+        "LTR",
+        "RTL"
+      ],
+      "contentSlots": [
+        "contact.value",
+        "contact.heading"
+      ]
+    },
+    {
+      "id": "PremiumClinicFooter",
+      "version": "1",
+      "supportedDirections": [
+        "LTR",
+        "RTL"
+      ],
+      "contentSlots": [
+        "footer.label",
+        "disclosure.text",
+        "location.value",
+        "hours.value",
+        "contact.value"
+      ]
+    }
   ]
 }

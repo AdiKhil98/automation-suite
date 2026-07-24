@@ -37,6 +37,7 @@ No phase begins before the previous one is approved with `APPROVE PHASE X`.
 |---|---|---|
 | 1 | Additive schemas, immutable contracts, manifests, validators, repositories, fixtures, and safety tests | complete; locally verified |
 | 2 | Clinic Intelligence, structured multilingual content, review-gated English translation, first-party asset discovery, Creative Brief, and no-code ExperiencePlan orchestration | complete; mock/local only |
+| 3A | Code-native component registry + design system, deterministic premium renderer, bilingual bundle, quality checks, mock visual-review + revision contracts, local preview/screenshot/review-package tooling | complete; mock/local only |
 | 3+ | Rendering, screenshot generation, visual review, revisions, human approval workflow, and deployment integration | not approved; not implemented |
 
 Milestone 1 leaves V1 untouched and selected by default. Migration `0023` creates 21 isolated V2 tables with

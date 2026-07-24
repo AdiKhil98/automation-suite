@@ -34,6 +34,9 @@ import { resumeAuditCommand } from './commands/resume-audit.js';
 import { withContext } from './context.js';
 import { websiteVerificationStatusCommand } from './commands/website-verification-status.js';
 import { demoV2OrchestrationFixtureCommand } from './commands/demo-v2-orchestrate-fixture.js';
+import {
+  demoV2PreviewCommand, demoV2RenderCommand, demoV2RenderHashCommand, demoV2ScreenshotsCommand,
+} from './commands/demo-v2-render.js';
 
 const program = new Command();
 
@@ -48,6 +51,35 @@ program
   .requiredOption('--fixture <name>', 'premium-german-dental | english-specialist-clinic | french-clinic | hebrew-rtl-clinic | arabic-rtl-clinic')
   .option('--stage <name>', 'intelligence | content | translation | assets | brief | plan | report', 'report')
   .action((opts: { fixture: string; stage?: string }) => demoV2OrchestrationFixtureCommand(opts));
+
+program
+  .command('demo-v2-render')
+  .description('Milestone 3A: render the fictional Demo V2 fixture to a local bundle and run deterministic checks; never deploys')
+  .option('--out <dir>', 'output directory', './demos/demo-v2')
+  .option('--family <name>', 'override the reference family')
+  .action((opts: { out?: string; family?: string }) => demoV2RenderCommand(opts));
+
+program
+  .command('demo-v2-preview')
+  .description('Milestone 3A: serve a rendered Demo V2 bundle on loopback only (no deployment)')
+  .option('--out <dir>', 'bundle directory', './demos/demo-v2')
+  .option('--port <n>', 'loopback port', '4601')
+  .action((opts: { out?: string; port?: string }) => demoV2PreviewCommand(opts));
+
+program
+  .command('demo-v2-screenshots')
+  .description('Milestone 3A: capture desktop/tablet/mobile screenshots in every supported language; optionally export the review package')
+  .option('--out <dir>', 'bundle directory', './demos/demo-v2')
+  .option('--family <name>', 'override the reference family')
+  .option('--review-package', 'also write review-package.json')
+  .action((opts: { out?: string; family?: string; reviewPackage?: boolean }) => demoV2ScreenshotsCommand(opts));
+
+program
+  .command('demo-v2-render-hash')
+  .description('Milestone 3A: print the render, content, translation, asset, and manifest hashes')
+  .option('--out <dir>', 'output directory', './demos/demo-v2')
+  .option('--family <name>', 'override the reference family')
+  .action((opts: { out?: string; family?: string }) => demoV2RenderHashCommand(opts));
 
 program
   .command('create-sample-leads')

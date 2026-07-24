@@ -6,6 +6,21 @@ All notable changes per phase. Format loosely follows Keep a Changelog.
 
 ### Added
 
+- Demo Engine V2 Milestone 3A premium renderer: a code-native component registry (34 components), a token-based
+  design system with five visibly distinct reference-family compositions, and a deterministic renderer that
+  turns an approved fictional ExperiencePlan into a self-contained, responsive, bilingual (DE/EN) local website
+  bundle with a strict hashed CSP, noindex, concept disclosure, controlled motion with full reduced-motion
+  support, and an accessible chatbot-style FAQ concierge bound to verified topics only. The component registry
+  manifest is regenerated from the code specs (34 components), changing the component-registry hash.
+- Deterministic fail-closed structural quality checks (technical, visual-structure, content-integrity) that
+  decide eligibility for later visual review only — never visual excellence. Milestone 3 visual-review and
+  revision-operation schemas with a mock-only reviewer (8 fixtures); no live model is called, and no
+  AUTO_REVIEW_PASSED / HUMAN_APPROVED / deployment-eligible state is produced.
+- Local-only operator commands `demo-v2-render`, `demo-v2-preview`, `demo-v2-screenshots` (desktop/tablet/mobile
+  in every supported language plus a fictional baseline, with review-package export), and `demo-v2-render-hash`.
+  A polished fictional German clinic acceptance fixture with locally generated `.example` imagery. Services are
+  now emitted as one content item per verified name (never a pipe-joined string), and verified atmosphere
+  evidence backs the place/story sections.
 - Demo Engine V2 Milestone 2 mock/local orchestration: deterministic Clinic Intelligence, structured primary
   content, review-gated English translation, SSRF-checked first-party asset discovery, selection proposals,
   concrete Creative Briefs, and no-code ExperiencePlans persisted through the existing Milestone 1 tables.
