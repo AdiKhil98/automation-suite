@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { parseComponentRegistry } from '../../src/domain/demo-v2/manifests/component-registry.js';
@@ -9,7 +10,7 @@ import { buildTypographyCss } from '../../src/domain/demo-v2/render/typography.j
 import {
   renderDocument, type RenderAsset, type RenderModel, type RenderSection,
 } from '../../src/domain/demo-v2/render/render-html.js';
-import { buildAcceptanceFixture } from '../../src/fixtures/demo-v2-render-fixture.js';
+import { buildAcceptanceFixture, fictionalClinicImages } from '../../src/fixtures/demo-v2-render-fixture.js';
 
 /**
  * Regressions for the fictional Demo V2 visual-composition polish pass. These are structural
@@ -27,7 +28,8 @@ const manifests = {
 };
 
 async function renderLuxuryOnce() {
-  const { renderInput } = await buildAcceptanceFixture(manifests, { referenceFamily: FAMILY });
+  // The fictional demo bundle: luxury family with the intentional text-only doctor feature.
+  const { renderInput } = await buildAcceptanceFixture(manifests, { referenceFamily: FAMILY, textOnlyDoctorFeature: true });
   const result = renderDemoV2(renderInput);
   const de = result.documents.find((document) => document.language === 'de')!;
   const en = result.documents.find((document) => document.language === 'en')!;
@@ -66,18 +68,49 @@ describe('Demo V2 visual polish — deterministic validation stays clean', () =>
 });
 
 describe('Demo V2 team portrait presentation', () => {
-  it('renders the approved doctor portrait as a framed feature beside the name and role', async () => {
+  it('the fictional demo (textOnlyDoctorFeature) renders the polished text-only doctor feature', async () => {
     const { de } = await renderLuxury();
     const team = section(de, 'DoctorFeature');
-    expect(team).toContain('dv2-feature');
-    expect(team).toContain('dv2-feature__portrait');
-    expect(team).toMatch(/<figure class="dv2-feature__portrait"><img [^>]*src="assets\/[^"]+\.png"/);
+    // Intentional text-only path for this fictional demo: name + role, no portrait figure.
+    expect(team).toContain('dv2-feature--text');
     expect(team).toContain('dv2-person__name');
     expect(team).toContain('Dr. Beispiel');
     expect(team).toContain('dv2-person__role');
     expect(team).toContain('Zahnärztin');
-    // Not the multi-card grid — DoctorFeature is a single feature, never a lone stranded card.
+    // No portrait, no empty/reserved image box, no blank figure, no stranded grid card.
+    expect(team).not.toContain('dv2-feature__portrait');
+    expect(team).not.toContain('<figure');
+    expect(team).not.toContain('<img');
     expect(team).not.toContain('dv2-people');
+  });
+
+  it('excludes the unused doctor portrait from files, usedAssetHashes, and counts', async () => {
+    const { result } = await renderLuxury();
+    const doctorHash = fictionalClinicImages().doctor.hash;
+    const pngHashes = result.files
+      .filter((file) => file.path.startsWith('assets/') && file.path.endsWith('.png'))
+      .map((file) => createHash('sha256').update(file.bytes).digest('hex'));
+    // The approved portrait is never placed: absent from the bundled asset files and the hash list.
+    expect(pngHashes).not.toContain(doctorHash);
+    expect(result.usedAssetHashes).not.toContain(doctorHash);
+    // usedAssetHashes advertises exactly the assets actually bundled — nothing extra, nothing missing.
+    expect([...result.usedAssetHashes].sort()).toEqual([...pngHashes].sort());
+  });
+
+  it('flag false preserves the approved framed doctor portrait beside name and role', async () => {
+    const { renderInput } = await buildAcceptanceFixture(manifests, {
+      referenceFamily: FAMILY, textOnlyDoctorFeature: false,
+    });
+    const result = renderDemoV2(renderInput);
+    const de = result.documents.find((document) => document.language === 'de')!.html;
+    const team = section(de, 'DoctorFeature');
+    expect(team).toContain('dv2-feature__portrait');
+    expect(team).toMatch(/<figure class="dv2-feature__portrait"><img [^>]*src="assets\/[^"]+\.png"/);
+    expect(team).not.toContain('dv2-feature--text');
+    expect(team).toContain('Dr. Beispiel');
+    expect(team).toContain('Zahnärztin');
+    // The approved portrait is now genuinely placed, bundled, and advertised.
+    expect(result.usedAssetHashes).toContain(fictionalClinicImages().doctor.hash);
   });
 
   it('never renders a blank asset box — a figure only exists when it wraps a real image', async () => {

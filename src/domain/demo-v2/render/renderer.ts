@@ -92,6 +92,14 @@ export interface RenderInput {
   faq: DemoV2FaqPackage;
   /** English FAQ rendering uses the translated question/answer records. */
   planSections: readonly { order: number; componentFamily: string }[];
+  /**
+   * Component configuration (ExperiencePlan-level). When true the DoctorFeature people-variant is
+   * allocated no image and renders its polished text-only path (name + role, no portrait figure),
+   * even when an approved, hash-verified DOCTOR asset exists. Default (false/undefined) preserves the
+   * approved-portrait behaviour so future demos still render a doctor image. This is an explicit
+   * configuration flag: the renderer never infers it from clinic name, ids, filenames, or pixels.
+   */
+  textOnlyDoctorFeature?: boolean;
   assets: readonly RenderAssetBinding[];
   intelligenceHash: string;
   creativeBriefHash: string;
@@ -243,7 +251,11 @@ export function renderDemoV2(input: RenderInput): RenderResult {
     if (componentId === 'SpecialistPortraitRail' || componentId === 'TeamEditorialGrid') {
       return Math.min(spec.maxAssets, teamCount);
     }
-    if (componentId === 'DoctorFeature') return Math.min(spec.maxAssets, teamCount, 1);
+    if (componentId === 'DoctorFeature') {
+      // Explicit demo configuration may render the polished text-only doctor feature: no image is
+      // allocated, so the approved portrait is never placed, bundled, hashed, or counted.
+      return input.textOnlyDoctorFeature ? 0 : Math.min(spec.maxAssets, teamCount, 1);
+    }
     return spec.maxAssets;
   };
   const takeAssets = (spec: ComponentSpec, capacity: number, used: Set<string>): RenderAsset[] => {

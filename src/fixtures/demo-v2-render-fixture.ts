@@ -158,7 +158,17 @@ export interface AcceptanceFixture {
  */
 export async function buildAcceptanceFixture(manifests: {
   componentVersion: string; componentHash: string; referenceVersion: string; referenceHash: string;
-}, options: { referenceFamily?: string; planSections?: readonly { order: number; componentFamily: string }[] } = {}): Promise<AcceptanceFixture> {
+}, options: {
+  referenceFamily?: string;
+  planSections?: readonly { order: number; componentFamily: string }[];
+  /**
+   * When true the DoctorFeature people-variant renders its polished text-only path (name + role, no
+   * portrait). Default false preserves the approved-portrait behaviour. The fictional demo bundle
+   * (renderFixtureBundle) opts in explicitly; here it stays false so the fixture's general renderer
+   * behaviour still exercises the approved-portrait path.
+   */
+  textOnlyDoctorFeature?: boolean;
+} = {}): Promise<AcceptanceFixture> {
   const input = germanClinicFixtureInput(manifests);
   const orchestration = await orchestrateDemoV2Fixture(input);
   const images = fictionalClinicImages();
@@ -184,6 +194,7 @@ export async function buildAcceptanceFixture(manifests: {
     translationReviewed: true,
     faq: orchestration.content.faq,
     planSections: options.planSections ?? ACCEPTANCE_PLAN_SECTIONS,
+    textOnlyDoctorFeature: options.textOnlyDoctorFeature ?? false,
     assets,
     intelligenceHash: orchestration.intelligence.package.packageHash,
     creativeBriefHash: orchestration.creativeBrief.briefHash,

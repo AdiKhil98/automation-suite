@@ -62,7 +62,9 @@ export async function renderFixtureBundle(options: {
   const manifest = await manifests();
   const language: RenderLanguage = options.language ?? 'de';
   const { renderInput, orchestration } = language === 'de'
-    ? await buildAcceptanceFixture(manifest, { referenceFamily: options.referenceFamily })
+    // This fictional demo intentionally uses the polished text-only doctor feature: the approved
+    // portrait is technically valid but reads as a censored placeholder and hurts credibility.
+    ? await buildAcceptanceFixture(manifest, { referenceFamily: options.referenceFamily, textOnlyDoctorFeature: true })
     : await buildLanguageAcceptanceFixture(language, manifest, { withEnglish: options.withEnglish });
   const render = renderDemoV2(renderInput);
 

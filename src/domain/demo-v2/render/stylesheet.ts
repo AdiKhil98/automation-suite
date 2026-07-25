@@ -164,7 +164,7 @@ const RESPONSIVE_CSS = `
 @media (min-width:768px){
 .dv2-strip{grid-template-columns:repeat(3,1fr)}
 .dv2-people{grid-template-columns:repeat(2,1fr)}
-.dv2-feature{grid-template-columns:auto 1fr}
+.dv2-feature:not(.dv2-feature--text){grid-template-columns:auto 1fr}
 .dv2-gallery{grid-template-columns:2fr 1fr}
 .dv2-gallery figure:first-child{grid-row:span 2}
 .dv2-gallery--feature{grid-template-columns:1fr}
