@@ -170,6 +170,14 @@ const RESPONSIVE_CSS = `
 .dv2-nav__toggle{display:inline-flex}
 .dv2-mobilebar{display:block}
 body[data-mobilebar=true]{padding-block-end:76px}
+/* The opened full-screen mobile menu carries its own appointment action and language switcher; the
+   sticky bar and concierge launcher (body-level layers above the header's stacking context) are
+   hidden while it is open so neither can cover the in-menu language switcher. */
+body[data-navopen=true] .dv2-mobilebar,body[data-navopen=true] .dv2-concierge__launcher{display:none}
+/* The language switcher sits at the end of the scrollable menu; keep clear bottom space so it is
+   never clipped at the viewport edge. */
+.dv2-mobilenav{padding-block-end:var(--s8)}
+.dv2-mobilenav .dv2-lang{margin-block-start:var(--s2);border-block-start:1px solid var(--c-line);padding-block-start:var(--s4)}
 /* Hide the appointment dock's duplicate primary CTA on mobile — the hero CTA and the sticky bar
    already carry it. The subordinate contact action stays visible. */
 .dv2-dock__primary{display:none}

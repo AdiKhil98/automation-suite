@@ -180,8 +180,14 @@ export async function discoverFirstPartyAssets(input: {
       seenContent.add(fetched.contentHash);
       const final = new URL(fetched.finalUrl);
       const own = ownership(final.hostname.toLowerCase(), official.hostname.toLowerCase(), cdnHosts);
-      const text = [found.altText, found.nearbyHeading, found.nearbyCaption, final.pathname].filter(Boolean).join(' ');
-      let classified = category(text);
+      // Classify primarily from the image's OWN signals (its alt text and file path). A nearby
+      // heading/caption is only a weak fallback when the image's own signals are indecisive, so a
+      // business-name heading such as "Zahnarztpraxis …" (which contains "zahnarzt") can never
+      // mislabel an interior photo as a DOCTOR portrait.
+      const ownText = [found.altText, final.pathname].filter(Boolean).join(' ');
+      const contextText = [found.nearbyHeading, found.nearbyCaption].filter(Boolean).join(' ');
+      const ownCategory = category(ownText);
+      let classified = ownCategory === 'DECORATIVE' ? category(contextText) : ownCategory;
       const isSvg = /image\/svg\+xml/i.test(fetched.mimeType);
       const tooLarge = fetched.bytes > (input.maxBytes ?? 10_000_000);
       const tiny = fetched.width <= 20 || fetched.height <= 20;
@@ -226,7 +232,9 @@ const referencePriority: Record<string, DemoV2AssetCandidate['category'][]> = {
   'warm-family-dental': ['TEAM', 'CLINIC_INTERIOR', 'HERO', 'DOCTOR', 'EXTERIOR', 'TREATMENT'],
   'advanced-specialist-clinic': ['DOCTOR', 'EQUIPMENT', 'CLINIC_INTERIOR', 'TEAM', 'TREATMENT', 'EXTERIOR'],
   'modern-medical-minimal': ['CLINIC_INTERIOR', 'EXTERIOR', 'DOCTOR', 'TEAM', 'EQUIPMENT', 'TREATMENT'],
-  'luxury-cosmetic-dental': ['CLINIC_INTERIOR', 'HERO', 'EXTERIOR', 'TREATMENT', 'DOCTOR', 'TEAM'],
+  // LOCATION (clinic exterior/entrance) is eligible gallery imagery, so the interior gallery is
+  // populated rather than left empty when interior/exterior assets are spent on the hero and story.
+  'luxury-cosmetic-dental': ['CLINIC_INTERIOR', 'HERO', 'EXTERIOR', 'TREATMENT', 'DOCTOR', 'LOCATION', 'TEAM'],
 };
 
 /** Upper bound on approved selections; enough to give the hero, story, team, and gallery imagery

@@ -253,13 +253,19 @@ function treatments(model: RenderModel, section: RenderSection): string {
   const heading = text(model, 'navigation.treatments') ?? model.labels.treatments ?? '';
   if (section.componentId === 'TreatmentSpotlight') {
     const [lead, ...rest] = list;
-    return `<section id="${A(section.anchor)}" class="dv2-section" data-rhythm="${A(section.rhythm)}"`
-      + ` data-motion="TEXT_REVEAL" data-dv2-component="TreatmentSpotlight">`
-      + `<div class="dv2-wrap"><h2>${A(heading)}</h2>`
+    // TreatmentSpotlight may place one approved TREATMENT/EQUIPMENT asset; when present it renders
+    // beside the spotlight copy so a reserved treatment image is actually shown in context (never
+    // reserved-but-dropped).
+    const asset = section.assets[0];
+    const body = `<div><h2>${A(heading)}</h2>`
       + `<p class="dv2-spotlight__lead">${A(lead!.value)}</p>`
       + `<ul class="dv2-index">${rest.map((item, index) =>
         `<li><span class="dv2-index__num">${String(index + 2).padStart(2, '0')}</span>`
-        + `<span class="dv2-index__name">${A(item.value)}</span></li>`).join('')}</ul>`
+        + `<span class="dv2-index__name">${A(item.value)}</span></li>`).join('')}</ul></div>`;
+    return `<section id="${A(section.anchor)}" class="dv2-section" data-rhythm="${A(section.rhythm)}"`
+      + ` data-motion="${asset ? 'IMAGE_REVEAL' : 'TEXT_REVEAL'}" data-dv2-component="TreatmentSpotlight">`
+      + `<div class="dv2-wrap${asset ? ' dv2-wrap--wide dv2-story' : ''}">`
+      + `${asset ? `<figure>${img(asset, '(min-width:768px) 45vw, 100vw', true, focal)}</figure>` : ''}${body}`
       + `</div></section>`;
   }
   const grouped = section.componentId === 'GroupedTreatmentDiscovery';

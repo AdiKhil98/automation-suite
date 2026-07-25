@@ -48,6 +48,9 @@ if(toggle&&panel){
     panel.setAttribute("data-open",open?"true":"false");
     toggle.setAttribute("aria-expanded",open?"true":"false");
     d.body.style.overflow=open?"hidden":"";
+    /* Signal the open menu so the sticky appointment bar and concierge launcher are hidden and can
+       never cover the in-menu language switcher. */
+    d.body.setAttribute("data-navopen",open?"true":"false");
     if(!open)toggle.focus();
   };
   toggle.addEventListener("click",function(){setNav(panel.getAttribute("data-open")!=="true")});

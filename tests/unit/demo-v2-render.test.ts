@@ -205,6 +205,35 @@ describe('Demo V2 deterministic renderer', () => {
     expect([...result.usedAssetHashes].sort()).toEqual(assetFiles.map((file) => imageSha256(file.bytes)).sort());
   });
 
+  it('places every image in a section whose meaning its category supports', async () => {
+    const { result, input } = await render();
+    const categoryById = new Map(input.assets.map((binding) => [binding.asset.id, binding.asset.category]));
+    // Semantic role each component's rendered imagery must belong to.
+    const peopleComponents = new Set(['SpecialistPortraitRail', 'TeamEditorialGrid', 'DoctorFeature']);
+    const peopleCategories = new Set(['DOCTOR', 'TEAM']);
+    const de = result.documents.find((doc) => doc.language === 'de')!.html;
+    let peopleImages = 0;
+    for (const block of de.split('data-dv2-component="').slice(1)) {
+      const componentId = block.slice(0, block.indexOf('"'));
+      const spec = requireComponent(componentId);
+      for (const match of block.matchAll(/assets\/(asset-[0-9a-f]+)\.png/g)) {
+        const category = categoryById.get(match[1]!)!;
+        // Every rendered image's category is one the component is eligible to place.
+        expect(spec.allowedAssetCategories).toContain(category);
+        // A people section only ever shows a person image — never an interior/exterior/treatment.
+        if (peopleComponents.has(componentId)) {
+          expect(peopleCategories.has(category)).toBe(true);
+          peopleImages += 1;
+        } else {
+          // Conversely, a doctor/team portrait is never placed outside a people section.
+          expect(peopleCategories.has(category)).toBe(false);
+        }
+      }
+    }
+    // The people section is present and shows a verified portrait (the doctor), not an interior.
+    expect(peopleImages).toBeGreaterThan(0);
+  });
+
   it('renders every bundled asset and advertises no phantom (reserved-but-dropped) asset', async () => {
     const { result, input } = await render();
     const bundledAssetPaths = result.files

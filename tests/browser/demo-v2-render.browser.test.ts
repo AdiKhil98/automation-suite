@@ -169,4 +169,69 @@ describe.skipIf(skip)('Demo V2 rendered preview (real Chromium, local only)', ()
     expect((await page.locator('.dv2-btn').first().innerText()).toLowerCase()).toContain('appointment');
     await context.close();
   });
+
+  // MOBILE viewport is 390x844 (see VIEWPORTS.MOBILE) — the exact case the live review flagged.
+  it('reveals the language switcher inside the opened mobile menu, unclipped and unobscured (390x844)', async () => {
+    for (const path of ['index.html', 'en.html'] as const) {
+      const { context, page } = await open('MOBILE', { path });
+      const switcher = page.locator('.dv2-mobilenav .dv2-lang');
+      // Hidden until the menu is opened via its toggle button — never revealed on hover.
+      expect(await switcher.isVisible(), `${path} closed`).toBe(false);
+      await page.locator('.dv2-nav__toggle').click();
+      expect(await page.locator('.dv2-mobilenav').getAttribute('data-open')).toBe('true');
+      expect(await switcher.isVisible(), `${path} open`).toBe(true);
+      // The sticky appointment bar and concierge launcher are hidden while the menu is open, so
+      // neither sticky CTA can cover the switcher.
+      expect(await page.locator('.dv2-mobilebar').isVisible()).toBe(false);
+      expect(await page.locator('.dv2-concierge__launcher').isVisible()).toBe(false);
+      // Both language links sit fully within the 844px-tall viewport (not clipped).
+      const en = page.locator('.dv2-mobilenav .dv2-lang a[hreflang="en"]');
+      const de = page.locator('.dv2-mobilenav .dv2-lang a[hreflang="de"]');
+      for (const link of [en, de]) {
+        const box = await link.boundingBox();
+        expect(box).not.toBeNull();
+        expect(box!.y + box!.height).toBeLessThanOrEqual(844);
+        expect(box!.height).toBeGreaterThanOrEqual(40); // touch target
+      }
+      // Nothing paints over the switcher's centre point (not hidden behind another layer).
+      const enBox = (await en.boundingBox())!;
+      const onTop = await page.evaluate(({ x, y }) => {
+        const doc = (globalThis as unknown as {
+          document: { elementFromPoint: (x: number, y: number) => { closest: (s: string) => unknown } | null };
+        }).document;
+        const el = doc.elementFromPoint(x, y);
+        return el != null && el.closest('.dv2-lang') != null;
+      }, { x: enBox.x + enBox.width / 2, y: enBox.y + enBox.height / 2 });
+      expect(onTop, `${path} elementFromPoint`).toBe(true);
+      // Keyboard focusable.
+      await en.focus();
+      const focusedHreflang = await page.evaluate(() => {
+        const doc = (globalThis as unknown as {
+          document: { activeElement: { getAttribute: (n: string) => string | null } | null };
+        }).document;
+        return doc.activeElement?.getAttribute('hreflang') ?? '';
+      });
+      expect(focusedHreflang).toBe('en');
+      await context.close();
+    }
+  });
+
+  it('switches all content together from the mobile menu, German↔English (390x844)', async () => {
+    const { context, page } = await open('MOBILE');
+    expect(await page.getAttribute('html', 'lang')).toBe('de');
+    await page.locator('.dv2-nav__toggle').click();
+    await page.locator('.dv2-mobilenav .dv2-lang a[hreflang="en"]').click();
+    await page.waitForLoadState('networkidle');
+    // The whole document switches together: lang attribute + visible CTA copy.
+    expect(await page.getAttribute('html', 'lang')).toBe('en');
+    expect((await page.locator('.dv2-mobilebar a.dv2-btn').innerText()).toLowerCase()).toContain('appointment');
+    // From the English page the mobile menu offers German and switches back.
+    await page.locator('.dv2-nav__toggle').click();
+    const backToGerman = page.locator('.dv2-mobilenav .dv2-lang a[hreflang="de"]');
+    expect(await backToGerman.isVisible()).toBe(true);
+    await backToGerman.click();
+    await page.waitForLoadState('networkidle');
+    expect(await page.getAttribute('html', 'lang')).toBe('de');
+    await context.close();
+  });
 });
