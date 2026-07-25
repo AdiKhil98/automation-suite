@@ -42,6 +42,7 @@ import { demoV2PersistCommand, demoV2PersistStatusCommand } from './commands/dem
 import {
   demoV2ReviewCommand, demoV2ReviseCommand, demoV2ReviewHistoryCommand, demoV2ReviewLoopCommand,
 } from './commands/demo-v2-review.js';
+import { demoV2ReviewLoopLiveCommand } from './commands/demo-v2-review-loop-live.js';
 import { type MockReviewFixture } from '../domain/demo-v2/render/visual-review.js';
 
 const program = new Command();
@@ -129,6 +130,22 @@ program
   .option('--sequence <fixtures>', 'comma-separated mock verdict fixtures per cycle')
   .action((opts: { reviewPackage: string; sequence?: string }) =>
     withConfigOnly((config) => demoV2ReviewLoopCommand(config, opts)));
+
+program
+  .command('demo-v2-review-loop-live')
+  .description([
+    'Milestone 3B2B1: run ONE guarded LIVE OpenAI visual-review cycle over an existing review-package.json — THIS SPENDS MONEY.',
+    'Fixed reviewer: OpenAI gpt-5.6-sol at high reasoning effort, NO fallback model, NO automatic retries.',
+    'Hard caps: max 3 review calls / 2 revisions; mandatory projected-cost guard + $3 artifact ceiling enforced BEFORE calling; exact-fingerprint cache active.',
+    'Refuses to run without --confirm-live-review AND DEMO_ENGINE_VERSION=v2, DEMO_V2_ENABLED=true, DEMO_V2_VISUAL_REVIEW_PROVIDER=openai, LLM_PROVIDER=openai, ALLOW_PAID_LLM_CALLS=true, OPENAI_API_KEY.',
+    'Filesystem-only by default; --persist validates ONLY the guarded DEMO_V2_PERSIST_DATABASE_URL (loopback test DB) — never DATABASE_URL, never a supabase/pooler/remote/production target.',
+    'Never deploys, emails, schedules, or records an automatic pass / human approval.',
+  ].join(' '))
+  .requiredOption('--review-package <path>', 'path to a review-package.json; its screenshots are uploaded to the live reviewer')
+  .option('--persist', 'validate the guarded persistence database only (no operational DB is ever touched)')
+  .option('--confirm-live-review', 'REQUIRED: explicitly acknowledge this makes a paid OpenAI call; without it the command refuses to run')
+  .action((opts: { reviewPackage: string; persist?: boolean; confirmLiveReview?: boolean }) =>
+    withConfigOnly((config, logger) => demoV2ReviewLoopLiveCommand(config, logger, opts)));
 
 program
   .command('demo-v2-render-hash')
