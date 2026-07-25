@@ -39,6 +39,10 @@ import {
   type RenderLanguage,
 } from './commands/demo-v2-render.js';
 import { demoV2PersistCommand, demoV2PersistStatusCommand } from './commands/demo-v2-persist.js';
+import {
+  demoV2ReviewCommand, demoV2ReviseCommand, demoV2ReviewHistoryCommand, demoV2ReviewLoopCommand,
+} from './commands/demo-v2-review.js';
+import { type MockReviewFixture } from '../domain/demo-v2/render/visual-review.js';
 
 const program = new Command();
 
@@ -94,6 +98,37 @@ program
   .description('Milestone 3B2A: read-only inspection of persisted render versions, screenshots, review packages, and lifecycle status (guarded local database only)')
   .option('--limit <n>', 'max render versions to show', '10')
   .action((opts: { limit?: string }) => withConfigOnly((config) => demoV2PersistStatusCommand(config, opts)));
+
+program
+  .command('demo-v2-review')
+  .description('Milestone 3B2B1: review an existing fictional review-package.json with the MOCK reviewer. Filesystem only; live reviewer is not launchable from here.')
+  .requiredOption('--review-package <path>', 'path to a review-package.json')
+  .option('--fixture <name>', 'mock verdict fixture', 'strong-premium-dental')
+  .option('--persist', 'validate the guarded persistence database (no operational DB is ever touched)')
+  .action((opts: { reviewPackage: string; fixture?: string; persist?: boolean }) =>
+    withConfigOnly((config) => demoV2ReviewCommand(config, { ...opts, fixture: opts.fixture as MockReviewFixture })));
+
+program
+  .command('demo-v2-revise')
+  .description('Milestone 3B2B1: apply a permitted-revision-operations file to a review package plan (presentation only; evidence bindings preserved). Filesystem only.')
+  .requiredOption('--review-package <path>', 'path to a review-package.json')
+  .requiredOption('--operations <path>', 'path to a revision-plan JSON (demo-v2-revision-1)')
+  .action((opts: { reviewPackage: string; operations: string }) =>
+    withConfigOnly((config) => demoV2ReviseCommand(config, opts)));
+
+program
+  .command('demo-v2-review-history')
+  .description('Milestone 3B2B1: read-only inspection of persisted visual reviews — scores, blockers, costs, and hashes (guarded local database only)')
+  .option('--limit <n>', 'max reviews to show', '10')
+  .action((opts: { limit?: string }) => withConfigOnly((config) => demoV2ReviewHistoryCommand(config, opts)));
+
+program
+  .command('demo-v2-review-loop')
+  .description('Milestone 3B2B1: run one complete fictional review loop with the MOCK reviewer (max 3 reviews / 2 revisions). Filesystem only; no persistence, no network.')
+  .requiredOption('--review-package <path>', 'path to a review-package.json')
+  .option('--sequence <fixtures>', 'comma-separated mock verdict fixtures per cycle')
+  .action((opts: { reviewPackage: string; sequence?: string }) =>
+    withConfigOnly((config) => demoV2ReviewLoopCommand(config, opts)));
 
 program
   .command('demo-v2-render-hash')

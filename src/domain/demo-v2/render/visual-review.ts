@@ -2,14 +2,18 @@ import { z } from 'zod';
 import { demoV2Hash, SHA256_PATTERN } from '../hash.js';
 
 /**
- * Milestone 3A visual-review CONTRACT plus a mock provider. No live model is called here.
+ * Milestone 3B2B1 visual-review CONTRACT plus a mock provider. This file is PURE: it never imports
+ * a model client, never opens a socket, and never spends money. The live OpenAI reviewer that
+ * satisfies this contract lives in a separate adapter module behind the paid-call + V2 capability
+ * guards enforced by its caller.
  *
- * The future configured reviewer is OpenAI `gpt-5.6-sol` at high reasoning effort; wiring it is a
- * later, separately approved step. `AUTO_REVIEW_PASSED` is never recorded from a real reviewer in
- * this milestone, and human approval remains unavailable.
+ * The configured live reviewer is OpenAI `gpt-5.6-sol` at high reasoning effort with NO fallback
+ * model and NO automatic retries. A reviewer verdict is APPROVE | REVISE | REJECT only — the
+ * vocabulary deliberately cannot express `AUTO_REVIEW_PASSED`, `HUMAN_APPROVED`, or deployment
+ * eligibility, and this milestone never records an automatic pass.
  */
 
-export const DEMO_V2_VISUAL_REVIEW_SCHEMA_VERSION = 'demo-v2-visual-review-1';
+export const DEMO_V2_VISUAL_REVIEW_SCHEMA_VERSION = 'demo-v2-visual-review-2';
 
 export const VISUAL_SCORE_CATEGORIES = [
   'composition', 'hierarchy', 'typography', 'spacing', 'imagery', 'nicheFit', 'credibility',
@@ -34,11 +38,23 @@ export const REVISION_OPERATIONS = [
 ] as const;
 export type RevisionOperation = (typeof REVISION_OPERATIONS)[number];
 
+/** Reviewer token usage. Mock reports zeros; a live reviewer reports what the provider returned
+ * (a null field means the provider did not account for it and must block further paid calls). */
+export const visualReviewUsageSchema = z.object({
+  inputTokens: z.number().int().nonnegative().nullable(),
+  cachedInputTokens: z.number().int().nonnegative().nullable(),
+  outputTokens: z.number().int().nonnegative().nullable(),
+  reasoningTokens: z.number().int().nonnegative().nullable(),
+});
+export type VisualReviewUsage = z.infer<typeof visualReviewUsageSchema>;
+
 export const visualReviewResultSchema = z.object({
   schemaVersion: z.literal(DEMO_V2_VISUAL_REVIEW_SCHEMA_VERSION),
   provider: z.enum(['mock', 'openai']),
   requestedModel: z.string().min(1),
+  resolvedModel: z.string().min(1).nullable(),
   reasoningEffort: z.string().min(1),
+  responseId: z.string().min(1).nullable(),
   overallScore: score,
   scores: z.object(Object.fromEntries(
     VISUAL_SCORE_CATEGORIES.map((category) => [category, score]),
@@ -48,13 +64,22 @@ export const visualReviewResultSchema = z.object({
   screenshotRefs: z.array(z.string().min(1)).min(1),
   permittedRevisionOperations: z.array(z.enum(REVISION_OPERATIONS)),
   decision: z.enum(['APPROVE', 'REVISE', 'REJECT']),
-  costUsd: z.literal(0),
+  usage: visualReviewUsageSchema,
+  costUsd: z.number().nonnegative(),
 }).superRefine((value, ctx) => {
+  if (value.provider === 'mock' && value.costUsd !== 0) {
+    ctx.addIssue({ code: 'custom', path: ['costUsd'], message: 'mock reviewer must report zero cost' });
+  }
   if (value.decision === 'APPROVE' && value.blockers.length > 0) {
     ctx.addIssue({ code: 'custom', path: ['decision'], message: 'approve requires zero blockers' });
   }
   if (value.decision === 'REJECT' && value.blockers.length === 0) {
     ctx.addIssue({ code: 'custom', path: ['decision'], message: 'reject requires at least one blocker' });
+  }
+  // A REVISE decision may only propose revision operations that are permitted; APPROVE/REJECT
+  // decisions never carry a revision instruction.
+  if (value.decision !== 'REVISE' && value.permittedRevisionOperations.length > 0) {
+    ctx.addIssue({ code: 'custom', path: ['permittedRevisionOperations'], message: 'only a REVISE decision may permit revision operations' });
   }
   for (const finding of [...value.blockers, ...value.findings]) {
     if (!value.screenshotRefs.includes(finding.screenshotRef)) {
@@ -64,15 +89,19 @@ export const visualReviewResultSchema = z.object({
 });
 export type VisualReviewResult = z.infer<typeof visualReviewResultSchema>;
 
+/** The bindings a reviewer verdict is pinned to. If any of these change, the verdict is stale. */
 export interface VisualReviewRequest {
   screenshotRefs: readonly string[];
   referenceFamily: string;
   renderHash: string;
   screenshotSetHash: string;
+  reviewPackageHash: string;
+  /** Deterministic fingerprint of the exact reviewer input (see visual-review-input.ts). */
+  inputFingerprint: string;
 }
 
 export interface DemoV2VisualReviewProvider {
-  readonly name: 'mock';
+  readonly name: 'mock' | 'openai';
   review(request: VisualReviewRequest): Promise<VisualReviewResult>;
 }
 
@@ -86,15 +115,19 @@ function uniform(value: number): Record<VisualScoreCategory, number> {
   return Object.fromEntries(VISUAL_SCORE_CATEGORIES.map((category) => [category, value])) as Record<VisualScoreCategory, number>;
 }
 
-const FIXTURES: Record<MockReviewFixture, (ref: string) => Omit<VisualReviewResult, 'schemaVersion' | 'provider' | 'requestedModel' | 'reasoningEffort' | 'screenshotRefs' | 'costUsd'>> = {
+type FixtureBody = Omit<VisualReviewResult,
+  'schemaVersion' | 'provider' | 'requestedModel' | 'resolvedModel' | 'reasoningEffort' |
+  'responseId' | 'screenshotRefs' | 'usage' | 'costUsd'>;
+
+const FIXTURES: Record<MockReviewFixture, (ref: string) => FixtureBody> = {
   'strong-premium-dental': () => ({
     overallScore: 88, scores: { ...uniform(88), materialImprovement: 90, nicheFit: 91 },
-    blockers: [], findings: [], permittedRevisionOperations: ['SPACING_DENSITY', 'CTA_PROMINENCE'], decision: 'APPROVE',
+    blockers: [], findings: [], permittedRevisionOperations: [], decision: 'APPROVE',
   }),
   'generic-saas': (ref) => ({
     overallScore: 41, scores: { ...uniform(45), nicheFit: 22, credibility: 34, composition: 38 },
     blockers: [{ code: 'generic_saas_composition', detail: 'Reads as a generic startup landing page rather than a dental clinic.', screenshotRef: ref }],
-    findings: [], permittedRevisionOperations: ['COMPONENT_VARIANT', 'SECTION_ORDER'], decision: 'REJECT',
+    findings: [], permittedRevisionOperations: [], decision: 'REJECT',
   }),
   'weak-hierarchy': (ref) => ({
     overallScore: 58, scores: { ...uniform(62), hierarchy: 34, typography: 48 },
@@ -104,7 +137,7 @@ const FIXTURES: Record<MockReviewFixture, (ref: string) => Omit<VisualReviewResu
   'mobile-broken': (ref) => ({
     overallScore: 37, scores: { ...uniform(55), mobile: 12, conversion: 30 },
     blockers: [{ code: 'mobile_broken', detail: 'Primary appointment action is unreachable on mobile.', screenshotRef: ref }],
-    findings: [], permittedRevisionOperations: ['MOBILE_STACKING', 'CTA_PROMINENCE'], decision: 'REJECT',
+    findings: [], permittedRevisionOperations: [], decision: 'REJECT',
   }),
   'mixed-language': (ref) => ({
     overallScore: 33, scores: { ...uniform(52), multilingual: 8 },
@@ -140,12 +173,29 @@ export class MockDemoV2VisualReviewProvider implements DemoV2VisualReviewProvide
       schemaVersion: DEMO_V2_VISUAL_REVIEW_SCHEMA_VERSION,
       provider: 'mock',
       requestedModel: 'mock-visual-reviewer',
+      resolvedModel: 'mock-visual-reviewer',
       reasoningEffort: 'high',
+      responseId: `mock-review-${request.inputFingerprint.slice(0, 12)}`,
       screenshotRefs: [...request.screenshotRefs],
+      usage: { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, reasoningTokens: 0 },
       costUsd: 0,
       ...FIXTURES[this.fixture](ref),
     });
   }
+}
+
+/** Deterministic content hash of a review OUTPUT — the immutable evidence of the verdict. */
+export function visualReviewOutputHash(result: VisualReviewResult): string {
+  return demoV2Hash({
+    schemaVersion: result.schemaVersion, provider: result.provider,
+    requestedModel: result.requestedModel, resolvedModel: result.resolvedModel,
+    reasoningEffort: result.reasoningEffort, decision: result.decision,
+    overallScore: result.overallScore, scores: result.scores,
+    blockers: [...result.blockers].map((b) => ({ code: b.code, ref: b.screenshotRef })).sort((a, b) => a.code.localeCompare(b.code)),
+    findings: [...result.findings].map((f) => ({ code: f.code, ref: f.screenshotRef })).sort((a, b) => a.code.localeCompare(b.code)),
+    permittedRevisionOperations: [...result.permittedRevisionOperations].sort(),
+    screenshotRefs: [...result.screenshotRefs].sort(),
+  });
 }
 
 export function visualReviewSetHash(results: readonly VisualReviewResult[]): string {
@@ -156,13 +206,20 @@ export function visualReviewSetHash(results: readonly VisualReviewResult[]): str
 }
 
 /**
- * Milestone 3A never records an automatic pass from a real reviewer. A mock verdict is advisory
- * only and can never authorise approval or deployment.
+ * A reviewer verdict — mock OR live — can never authorise an automatic pass, human approval, or
+ * deployment. This asserts the verdict vocabulary is intact and refuses any attempt to smuggle a
+ * lifecycle-approval decision through the reviewer. It is decision-based, NOT provider-based: the
+ * live reviewer is permitted in this milestone, but its output still cannot approve anything.
  */
-export function assertNoAutomaticApproval(result: VisualReviewResult, providerName: string): void {
-  if (providerName !== 'mock') throw new Error('demo_v2_live_visual_reviewer_not_permitted_in_milestone_3a');
-  if (result.provider !== 'mock' || result.costUsd !== 0) {
-    throw new Error('demo_v2_visual_review_must_be_mock_only');
+export function assertReviewCannotAutoApprove(result: Pick<VisualReviewResult, 'decision'>): void {
+  const permitted = ['APPROVE', 'REVISE', 'REJECT'];
+  if (!permitted.includes(result.decision)) {
+    throw new Error('demo_v2_visual_review_illegal_decision');
+  }
+  // A reviewer "APPROVE" is advisory only; it maps to HUMAN_REVIEW_REQUIRED, never AUTO_REVIEW_PASSED.
+  const forbidden = ['AUTO_REVIEW_PASSED', 'HUMAN_APPROVED'] as const;
+  if ((forbidden as readonly string[]).includes(result.decision)) {
+    throw new Error('demo_v2_visual_review_cannot_record_automatic_pass');
   }
 }
 
@@ -189,7 +246,6 @@ export const revisionPlanSchema = z.object({
   schemaVersion: z.literal('demo-v2-revision-1'),
   boundRenderHash: z.string().regex(SHA256_PATTERN),
   operations: z.array(revisionOperationSchema).max(12),
-  /** Milestone 3A stores intent only; no live revision loop executes it. */
-  applied: z.literal(false),
+  applied: z.boolean(),
 });
 export type DemoV2RevisionPlan = z.infer<typeof revisionPlanSchema>;

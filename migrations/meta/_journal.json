@@ -176,6 +176,13 @@
       "when": 1785270000000,
       "tag": "0024_demo_v2_render_persistence",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1785356400000,
+      "tag": "0025_demo_v2_visual_reviews",
+      "breakpoints": true
     }
   ]
 }

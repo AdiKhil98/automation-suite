@@ -1,0 +1,270 @@
+{
+  "schemaVersion": "demo-v2-review-package-1",
+  "artifactId": "demo-v2-fixture-artifact",
+  "referenceFamily": "premium-dental-editorial",
+  "rendererVersion": "demo-v2-renderer-1",
+  "qualityRubricVersion": "demo-v2-quality-rubric-1",
+  "primaryLanguage": "de",
+  "supportedLanguages": [
+    "de"
+  ],
+  "creativeBrief": {
+    "positioning": "a fictional premium dental clinic",
+    "coreMessage": "calm, precise care"
+  },
+  "experiencePlan": {
+    "sections": [
+      {
+        "order": 1,
+        "sectionPurpose": "purpose-hero",
+        "conversionRole": "SUPPORT",
+        "componentFamily": "hero",
+        "componentVariant": "editorial",
+        "requiredContentKeys": [
+          "content.hero.heading"
+        ],
+        "selectedClaimSourceIds": [
+          "fact.hero"
+        ],
+        "selectedAssetCategories": [
+          "clinic"
+        ],
+        "proposedAssetSelectionIds": [
+          "asset-hero"
+        ],
+        "visualTreatment": "editorial",
+        "motionPreset": "NONE",
+        "desktopBehavior": "static",
+        "mobileBehavior": "stacked",
+        "accessibilityRequirements": [
+          "focus-visible"
+        ],
+        "supportedLanguages": [
+          "de"
+        ],
+        "auditFindingAddressed": null,
+        "fallbackBehavior": "text",
+        "justification": "fictional section hero"
+      },
+      {
+        "order": 2,
+        "sectionPurpose": "purpose-services",
+        "conversionRole": "SUPPORT",
+        "componentFamily": "services",
+        "componentVariant": "list",
+        "requiredContentKeys": [
+          "content.services.heading"
+        ],
+        "selectedClaimSourceIds": [
+          "fact.services"
+        ],
+        "selectedAssetCategories": [
+          "clinic"
+        ],
+        "proposedAssetSelectionIds": [
+          "asset-services"
+        ],
+        "visualTreatment": "editorial",
+        "motionPreset": "NONE",
+        "desktopBehavior": "static",
+        "mobileBehavior": "stacked",
+        "accessibilityRequirements": [
+          "focus-visible"
+        ],
+        "supportedLanguages": [
+          "de"
+        ],
+        "auditFindingAddressed": null,
+        "fallbackBehavior": "text",
+        "justification": "fictional section services"
+      },
+      {
+        "order": 3,
+        "sectionPurpose": "purpose-story",
+        "conversionRole": "SUPPORT",
+        "componentFamily": "story",
+        "componentVariant": "narrative",
+        "requiredContentKeys": [
+          "content.story.heading"
+        ],
+        "selectedClaimSourceIds": [
+          "fact.story"
+        ],
+        "selectedAssetCategories": [
+          "clinic"
+        ],
+        "proposedAssetSelectionIds": [
+          "asset-story"
+        ],
+        "visualTreatment": "editorial",
+        "motionPreset": "NONE",
+        "desktopBehavior": "static",
+        "mobileBehavior": "stacked",
+        "accessibilityRequirements": [
+          "focus-visible"
+        ],
+        "supportedLanguages": [
+          "de"
+        ],
+        "auditFindingAddressed": null,
+        "fallbackBehavior": "text",
+        "justification": "fictional section story"
+      },
+      {
+        "order": 4,
+        "sectionPurpose": "purpose-appointment-actions",
+        "conversionRole": "SUPPORT",
+        "componentFamily": "appointment-actions",
+        "componentVariant": "persistent",
+        "requiredContentKeys": [
+          "content.appointment-actions.heading"
+        ],
+        "selectedClaimSourceIds": [
+          "fact.appointment-actions"
+        ],
+        "selectedAssetCategories": [
+          "clinic"
+        ],
+        "proposedAssetSelectionIds": [
+          "asset-appointment-actions"
+        ],
+        "visualTreatment": "editorial",
+        "motionPreset": "NONE",
+        "desktopBehavior": "static",
+        "mobileBehavior": "stacked",
+        "accessibilityRequirements": [
+          "focus-visible"
+        ],
+        "supportedLanguages": [
+          "de"
+        ],
+        "auditFindingAddressed": null,
+        "fallbackBehavior": "text",
+        "justification": "fictional section appointment-actions"
+      },
+      {
+        "order": 5,
+        "sectionPurpose": "purpose-faq",
+        "conversionRole": "SUPPORT",
+        "componentFamily": "faq",
+        "componentVariant": "accordion",
+        "requiredContentKeys": [
+          "content.faq.heading"
+        ],
+        "selectedClaimSourceIds": [
+          "fact.faq"
+        ],
+        "selectedAssetCategories": [
+          "clinic"
+        ],
+        "proposedAssetSelectionIds": [
+          "asset-faq"
+        ],
+        "visualTreatment": "editorial",
+        "motionPreset": "NONE",
+        "desktopBehavior": "static",
+        "mobileBehavior": "stacked",
+        "accessibilityRequirements": [
+          "focus-visible"
+        ],
+        "supportedLanguages": [
+          "de"
+        ],
+        "auditFindingAddressed": null,
+        "fallbackBehavior": "text",
+        "justification": "fictional section faq"
+      }
+    ],
+    "visibleEnglishSwitcher": true,
+    "mobileAppointmentPersistent": true,
+    "selectedReferenceFamily": "premium-dental-editorial",
+    "componentRegistryHash": "adb56ed2062828a5c658a0d4844a773272e0aab3d8f667827c376791b35c6399",
+    "referenceLibraryHash": "2b288e44494236b227842ffaaec2ed1c0dd1036e091d3cbb5958b1386f2349ec",
+    "inputFingerprint": "add55557868879758a3f74fb044b06e2c8dd42a3dfe4f32d62c7815bf8c91fe2"
+  },
+  "hashes": {
+    "intelligence": "2819866e85fdf3c47ca215babcb3fdf27ec8af16982f675c51883492d884370a",
+    "content": "8fb6fe4fc61c03091afb662deddad57539eafee40c8cd3785848ede0cfebe204",
+    "translation": null,
+    "assets": [
+      "9473966924f69c8fb9a64d4c9d88c5e50bc14467aac10d49c328088c2691ddc6",
+      "fff9211b30c15e9f14ccccbfc72fafaf3382ea914e53899645a7a4dd5badb9aa"
+    ],
+    "creativeBrief": "c4b3fa6b301cc9f396267f5ec6c7c4f70acce9c871c86c6f8fb303d4f0fe2a5c",
+    "experiencePlan": "4dbeb98270aac86aeeb77902c698d90b015ac402751717e8562b908f9df6f68d",
+    "componentRegistry": "adb56ed2062828a5c658a0d4844a773272e0aab3d8f667827c376791b35c6399",
+    "referenceLibrary": "2b288e44494236b227842ffaaec2ed1c0dd1036e091d3cbb5958b1386f2349ec",
+    "render": "0dce139d3fc29ba10d0b52c93ddc3e2cbffc0feda2a738752bac0c6f09519c1b",
+    "screenshotSet": "301cc85285ab40df5c7571e03bea7ce26f290163510bcfc80f708e10b2bad795",
+    "qualityRubric": "2f4bedb47581c19cb70da3db6a2fb9512963a1eefbc9c940e13ecf114c18da81"
+  },
+  "screenshots": [
+    {
+      "kind": "ORIGINAL",
+      "language": "de",
+      "viewport": "DESKTOP",
+      "path": "screenshots/original-de-desktop.png",
+      "width": 1440,
+      "height": 3200,
+      "fileHash": "92178c1f224ed1062deda4eb44f6589a5aeafe6fee1e9ad07f50f6c368b41087"
+    },
+    {
+      "kind": "ORIGINAL",
+      "language": "de",
+      "viewport": "TABLET",
+      "path": "screenshots/original-de-tablet.png",
+      "width": 834,
+      "height": 3600,
+      "fileHash": "d59df91db00f1de30825aa0cfe96ebd3fa2e5eca56f7f3ecee8478327114000f"
+    },
+    {
+      "kind": "ORIGINAL",
+      "language": "de",
+      "viewport": "MOBILE",
+      "path": "screenshots/original-de-mobile.png",
+      "width": 390,
+      "height": 4200,
+      "fileHash": "66e13966d3e1e94ced5130047cbda84461d27aa76661d90597a5bf13ef3c329d"
+    },
+    {
+      "kind": "FINAL",
+      "language": "de",
+      "viewport": "DESKTOP",
+      "path": "screenshots/final-de-desktop.png",
+      "width": 1440,
+      "height": 3200,
+      "fileHash": "a294a7653587e65292439e8253f576084e7ce921bcc7a6ae74765d76d7d26837"
+    },
+    {
+      "kind": "FINAL",
+      "language": "de",
+      "viewport": "TABLET",
+      "path": "screenshots/final-de-tablet.png",
+      "width": 834,
+      "height": 3600,
+      "fileHash": "7ce084fa95ad6318ad70da08d2e570187ff021f6fdbb5c674f3619a4c0706391"
+    },
+    {
+      "kind": "FINAL",
+      "language": "de",
+      "viewport": "MOBILE",
+      "path": "screenshots/final-de-mobile.png",
+      "width": 390,
+      "height": 4200,
+      "fileHash": "25b6764f6c5c353a356bffcc84269d69eb915fb49cd23f89cf4f09d866ef34d0"
+    }
+  ],
+  "deterministicValidation": {
+    "structurallyEligible": true,
+    "blockers": [],
+    "findings": [
+      {
+        "code": "contrast_advisory",
+        "detail": "A fictional non-blocking note.",
+        "language": "de"
+      }
+    ]
+  },
+  "deploymentEligible": false,
+  "reviewPackageHash": "6dcbe592c7c2d0ac4896744d7e91778865cb94fdd3eecbf48a19257572efb283"
+}

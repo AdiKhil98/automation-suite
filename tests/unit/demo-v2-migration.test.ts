@@ -18,7 +18,7 @@ describe('migration 0023 Demo Engine V2 foundation', () => {
     // Milestone 3B1 adds 0024 after it; 0023 must remain monotonic against its own predecessor (22).
     const predecessor = journal.entries.find((entry) => entry.idx === 22);
     expect((matching[0]?.when ?? 0) > (predecessor?.when ?? Number.MAX_SAFE_INTEGER)).toBe(true);
-    expect(journal.entries.at(-1)?.tag).toBe('0024_demo_v2_render_persistence');
+    expect(journal.entries.at(-1)?.tag).toBe('0025_demo_v2_visual_reviews');
   });
 
   it('creates exactly the 21 isolated approved V2 tables and changes no V1 table', () => {

@@ -10,7 +10,7 @@ import { buildStylesheet } from '../../src/domain/demo-v2/render/stylesheet.js';
 import { renderDemoV2, resolveComponentId, DEMO_V2_RENDERER_VERSION } from '../../src/domain/demo-v2/render/renderer.js';
 import { runQualityChecks } from '../../src/domain/demo-v2/render/quality-checks.js';
 import {
-  MOCK_REVIEW_FIXTURES, MockDemoV2VisualReviewProvider, assertNoAutomaticApproval,
+  MOCK_REVIEW_FIXTURES, MockDemoV2VisualReviewProvider, assertReviewCannotAutoApprove,
   revisionPlanSchema, visualReviewSetHash,
 } from '../../src/domain/demo-v2/render/visual-review.js';
 import { reviewScreenshotSetHash } from '../../src/domain/demo-v2/render/review-package.js';
@@ -306,21 +306,23 @@ describe('Demo V2 deterministic quality checks', () => {
 });
 
 describe('Demo V2 visual-review and revision contracts', () => {
-  it('supports every mock fixture and never permits a live reviewer', async () => {
+  it('supports every mock fixture and no verdict can record an automatic pass', async () => {
     for (const fixture of MOCK_REVIEW_FIXTURES) {
       const provider = new MockDemoV2VisualReviewProvider(fixture);
       const result = await provider.review({
         screenshotRefs: ['final-de-desktop.png'], referenceFamily: 'premium-dental-editorial',
         renderHash: 'a'.repeat(64), screenshotSetHash: 'b'.repeat(64),
+        reviewPackageHash: 'c'.repeat(64), inputFingerprint: 'd'.repeat(64),
       });
       expect(result.provider).toBe('mock');
       expect(result.costUsd).toBe(0);
       expect(['APPROVE', 'REVISE', 'REJECT']).toContain(result.decision);
-      assertNoAutomaticApproval(result, provider.name);
+      assertReviewCannotAutoApprove(result);
     }
-    expect(() => assertNoAutomaticApproval(
-      { provider: 'mock', costUsd: 0 } as never, 'openai',
-    )).toThrow('demo_v2_live_visual_reviewer_not_permitted_in_milestone_3a');
+    // The reviewer vocabulary cannot express a lifecycle approval state.
+    expect(() => assertReviewCannotAutoApprove(
+      { decision: 'AUTO_REVIEW_PASSED' } as never,
+    )).toThrow('demo_v2_visual_review_illegal_decision');
   });
 
   it('rejects a revision operation carrying markup, script, or contact details', () => {
@@ -351,6 +353,7 @@ describe('Demo V2 visual-review and revision contracts', () => {
     const request = {
       screenshotRefs: ['final-de-desktop.png'], referenceFamily: 'x',
       renderHash: 'a'.repeat(64), screenshotSetHash: 'b'.repeat(64),
+      reviewPackageHash: 'c'.repeat(64), inputFingerprint: 'd'.repeat(64),
     };
     const one = await provider.review(request);
     const two = await provider.review(request);
@@ -391,6 +394,7 @@ describe('Demo V2 side-effect safety', () => {
     const provider = new MockDemoV2VisualReviewProvider('strong-premium-dental');
     const result = await provider.review({
       screenshotRefs: ['x.png'], referenceFamily: 'x', renderHash: 'a'.repeat(64), screenshotSetHash: 'b'.repeat(64),
+      reviewPackageHash: 'c'.repeat(64), inputFingerprint: 'd'.repeat(64),
     });
     expect(['APPROVE', 'REVISE', 'REJECT']).toContain(result.decision);
     expect(result.decision).not.toBe('AUTO_REVIEW_PASSED');

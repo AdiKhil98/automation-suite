@@ -7,6 +7,7 @@ import {
   index,
   integer,
   jsonb,
+  numeric,
   pgTable,
   primaryKey,
   text,
@@ -2027,5 +2028,69 @@ export const demoV2ReviewPackages = pgTable(
     hashIdx: index('demo_v2_review_packages_hash_idx').on(t.reviewPackageHash),
     deploymentCk: check('demo_v2_review_packages_deployment_ck', sql`${t.deploymentEligible} = false`),
     hashCk: check('demo_v2_review_packages_hash_ck', sql.raw(`render_hash ~ '${DEMO_V2_HASH_SQL}' AND screenshot_set_hash ~ '${DEMO_V2_HASH_SQL}' AND review_package_hash ~ '${DEMO_V2_HASH_SQL}'`)),
+  }),
+);
+
+/**
+ * Milestone 3B2B1: immutable Sol visual-review records. Each row binds a verdict to the exact
+ * render / screenshot-set / review-package hashes and the reviewer input fingerprint. A verdict is
+ * APPROVE | REVISE | REJECT only — the vocabulary cannot express AUTO_REVIEW_PASSED — and a mock
+ * verdict must cost $0. Rows are never mutated except to flip is_current / stale.
+ */
+export const demoV2VisualReviews = pgTable(
+  'demo_v2_visual_reviews',
+  {
+    id: text('id').primaryKey(),
+    artifactId: text('artifact_id').notNull().references(() => demoV2Artifacts.id, { onDelete: 'cascade' }),
+    renderVersionId: text('render_version_id').notNull().references(() => demoV2RenderVersions.id, { onDelete: 'cascade' }),
+    reviewPackageId: text('review_package_id').notNull().references(() => demoV2ReviewPackages.id, { onDelete: 'cascade' }),
+    reviewRunId: text('review_run_id').notNull(),
+    cycle: integer('cycle').notNull(),
+    provider: text('provider').notNull(),
+    requestedModel: text('requested_model').notNull(),
+    resolvedModel: text('resolved_model'),
+    reasoningEffort: text('reasoning_effort').notNull(),
+    schemaVersion: text('schema_version').notNull(),
+    inputFingerprint: text('input_fingerprint').notNull(),
+    boundRenderHash: text('bound_render_hash').notNull(),
+    boundScreenshotSetHash: text('bound_screenshot_set_hash').notNull(),
+    boundReviewPackageHash: text('bound_review_package_hash').notNull(),
+    rubricVersion: text('rubric_version').notNull(),
+    rubricHash: text('rubric_hash').notNull(),
+    overallScore: integer('overall_score').notNull(),
+    categoryScores: jsonb('category_scores').notNull(),
+    blockers: jsonb('blockers').notNull(),
+    findings: jsonb('findings').notNull(),
+    permittedRevisionOperations: jsonb('permitted_revision_operations').notNull(),
+    decision: text('decision').notNull(),
+    inputTokens: integer('input_tokens'),
+    cachedInputTokens: integer('cached_input_tokens'),
+    outputTokens: integer('output_tokens'),
+    reasoningTokens: integer('reasoning_tokens'),
+    costUsd: numeric('cost_usd', { precision: 12, scale: 6 }).notNull(),
+    responseId: text('response_id'),
+    reviewOutputHash: text('review_output_hash').notNull(),
+    stale: boolean('stale').notNull().default(false),
+    isCurrent: boolean('is_current').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    finalizedAt: timestamp('finalized_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    renderUk: uniqueIndex('demo_v2_visual_reviews_render_uk').on(t.renderVersionId),
+    runCycleUk: uniqueIndex('demo_v2_visual_reviews_run_cycle_uk').on(t.reviewRunId, t.cycle),
+    currentUk: uniqueIndex('demo_v2_visual_reviews_current_uk').on(t.artifactId).where(sql`${t.isCurrent}`),
+    artifactIdx: index('demo_v2_visual_reviews_artifact_idx').on(t.artifactId),
+    fingerprintIdx: index('demo_v2_visual_reviews_fingerprint_idx').on(t.inputFingerprint),
+    outputHashIdx: index('demo_v2_visual_reviews_output_hash_idx').on(t.reviewOutputHash),
+    cycleCk: check('demo_v2_visual_reviews_cycle_ck', sql`${t.cycle} BETWEEN 1 AND 3`),
+    providerCk: check('demo_v2_visual_reviews_provider_ck', sql`${t.provider} IN ('mock','openai')`),
+    decisionCk: check('demo_v2_visual_reviews_decision_ck', sql`${t.decision} IN ('APPROVE','REVISE','REJECT')`),
+    scoreCk: check('demo_v2_visual_reviews_score_ck', sql`${t.overallScore} BETWEEN 0 AND 100`),
+    costCk: check('demo_v2_visual_reviews_cost_ck', sql`${t.costUsd} >= 0`),
+    mockCostCk: check('demo_v2_visual_reviews_mock_cost_ck', sql`${t.provider} <> 'mock' OR ${t.costUsd} = 0`),
+    hashCk: check('demo_v2_visual_reviews_hash_ck', sql.raw(
+      `input_fingerprint ~ '${DEMO_V2_HASH_SQL}' AND bound_render_hash ~ '${DEMO_V2_HASH_SQL}'`
+      + ` AND bound_screenshot_set_hash ~ '${DEMO_V2_HASH_SQL}' AND bound_review_package_hash ~ '${DEMO_V2_HASH_SQL}'`
+      + ` AND rubric_hash ~ '${DEMO_V2_HASH_SQL}' AND review_output_hash ~ '${DEMO_V2_HASH_SQL}'`)),
   }),
 );
