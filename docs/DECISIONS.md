@@ -4,6 +4,37 @@ Every significant decision is recorded here in the required format. Newest first
 
 ---
 
+## D-0042 - Demo Engine V2 Milestone 3B2A wires the review pipeline behind guarded persistence
+
+- **Date:** 2026-07-24
+- **Problem:** Milestone 3B1 built the render-persistence tables but nothing wired the CLI into them,
+  the mobile appointment flow still showed duplicate CTAs, and FR/HE/AR screenshots were only reachable
+  from tests.
+- **Chosen option:** (1) Hide the appointment dock's primary CTA on mobile so only the hero CTA and
+  the single sticky bar carry the primary action (no adjacent duplicate); the FAQ launcher sits above
+  the bar and body padding reserves its height. (2) A `demo-v2-persist` command renders + screenshots +
+  persists a render version, screenshots, and review package into the 3B1 tables, advancing the artifact
+  `HUMAN_REVIEW_REQUIRED → RENDERING → RENDERED → AUTO_REVIEW_PENDING`; a read-only `demo-v2-persist-status`
+  inspects versions/screenshots/hashes/lifecycle. (3) `demo-v2-screenshots --language de|fr|he|ar`
+  (with `--no-english` to withhold the secondary and hide the switcher).
+- **Safety boundary:** Persistence is opt-in and NEVER derives from `DATABASE_URL`. It requires
+  `DEMO_V2_ENABLED=true`, an explicit `ALLOW_DEMO_V2_PERSIST=true`, and a dedicated
+  `DEMO_V2_PERSIST_DATABASE_URL` validated by a guard (loopback host, no Supabase/pooler/remote, test-only
+  db name). The persist commands use a config-only CLI context so they never open the operational pool.
+  The render repository's `advanceArtifact` accepts only RENDERING/RENDERED/AUTO_REVIEW_PENDING — a real
+  `AUTO_REVIEW_PASSED`, `HUMAN_APPROVED`, and deployment eligibility all remain unreachable; review
+  packages are immutable, bind the exact render + screenshot-set hash, require all six screenshots, and
+  are hard-constrained to `deployment_eligible = false`. No external calls; zero cost.
+- **Reason:** Wiring the CLI into the immutable tables makes every render/screenshot/review auditable
+  and reproducible while the multi-layer guard keeps the operational and remote databases untouchable.
+- **Tradeoffs:** The CLI persists a fixture foundation (LEAD_FACT-only) as the render-version FK target;
+  hash consistency is on the render/screenshot/review artifacts, not the seeded foundation.
+- **Rollback path:** Keep `DEMO_V2_ENABLED=false` / `ALLOW_DEMO_V2_PERSIST` unset; revert the 3B2A commit.
+  No new migration (reuses the additive 0024 tables).
+- **Status:** Implemented and locally verified with mock-only fictional fixtures. No new migration.
+
+---
+
 ## D-0041 - Demo Engine V2 Milestone 3B1 raises the visual ceiling and persists renders
 
 - **Date:** 2026-07-24

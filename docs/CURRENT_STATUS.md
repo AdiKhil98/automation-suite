@@ -2,7 +2,7 @@
 
 ## Current phase
 
-Phases 0-16 are committed and tagged. Demo Engine V2 Milestones 1, 2, 3A, and 3B1 are implemented and locally
+Phases 0-16 are committed and tagged. Demo Engine V2 Milestones 1, 2, 3A, 3B1, and 3B2A are implemented and locally
 verified. Milestone 3A adds a deterministic, code-native renderer that turns an approved fictional
 ExperiencePlan into a self-contained, responsive, bilingual (DE/EN) local website bundle with a chatbot-style
 FAQ concierge, plus deterministic structural quality checks, mock-only visual-review and revision contracts,
@@ -144,7 +144,7 @@ still cannot reach a real AUTO_REVIEW_PASSED, HUMAN_APPROVED, or deployment-elig
 ## Verification
 
 - Lint and typecheck pass.
-- 598 unit and 53 PostgreSQL integration tests pass; build passes.
+- 603 unit and 56 PostgreSQL integration tests pass; build passes.
 - Integration tests run only against a dedicated loopback `outreach_test` database, accepted by the
   destructive-test guard. The operational `DATABASE_URL` (remote Supabase pooler) is never used by tests and
   was not touched.

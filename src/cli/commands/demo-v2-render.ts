@@ -11,7 +11,9 @@ import {
   reviewPackageHash, reviewPackageSchema, reviewScreenshotSetHash,
   type ReviewScreenshot,
 } from '../../domain/demo-v2/render/review-package.js';
+import { demoV2Hash } from '../../domain/demo-v2/hash.js';
 import { buildAcceptanceFixture } from '../../fixtures/demo-v2-render-fixture.js';
+import { buildLanguageAcceptanceFixture, type AcceptanceLanguage } from '../../fixtures/demo-v2-multilang-fixture.js';
 
 /**
  * Local-only operator commands. They render, preview, screenshot, and export a review package on
@@ -30,15 +32,22 @@ async function manifests() {
   };
 }
 
+export type RenderLanguage = 'de' | AcceptanceLanguage;
+
 export interface RenderedBundle {
   outDir: string;
+  language: RenderLanguage;
   render: RenderResult;
   quality: QualityCheckResult;
   brief: Record<string, unknown>;
   plan: Record<string, unknown>;
+  artifactId: string;
   intelligenceHash: string;
   contentHash: string;
   translationHash: string | null;
+  assetSelectionSetHash: string;
+  creativeBriefHash: string;
+  experiencePlanHash: string;
   componentRegistryHash: string;
   referenceLibraryHash: string;
   referenceFamily: string;
@@ -46,13 +55,14 @@ export interface RenderedBundle {
 
 /** Render the fictional fixture to a local directory and run the deterministic checks. */
 export async function renderFixtureBundle(options: {
-  outDir?: string; referenceFamily?: string;
+  outDir?: string; referenceFamily?: string; language?: RenderLanguage; withEnglish?: boolean;
 } = {}): Promise<RenderedBundle> {
   const outDir = resolve(options.outDir ?? DEFAULT_OUT);
   const manifest = await manifests();
-  const { renderInput, orchestration } = await buildAcceptanceFixture(manifest, {
-    referenceFamily: options.referenceFamily,
-  });
+  const language: RenderLanguage = options.language ?? 'de';
+  const { renderInput, orchestration } = language === 'de'
+    ? await buildAcceptanceFixture(manifest, { referenceFamily: options.referenceFamily })
+    : await buildLanguageAcceptanceFixture(language, manifest, { withEnglish: options.withEnglish });
   const render = renderDemoV2(renderInput);
 
   await rm(outDir, { recursive: true, force: true });
@@ -71,12 +81,16 @@ export async function renderFixtureBundle(options: {
   });
 
   return {
-    outDir, render, quality,
+    outDir, language, render, quality,
     brief: orchestration.creativeBrief.brief as Record<string, unknown>,
     plan: orchestration.experiencePlan.plan as Record<string, unknown>,
+    artifactId: renderInput.artifactId,
     intelligenceHash: renderInput.intelligenceHash,
     contentHash: renderInput.primary.contentHash,
     translationHash: orchestration.translation?.translationHash ?? null,
+    assetSelectionSetHash: demoV2Hash([...orchestration.selections].map((s) => s.selectionHash).sort()),
+    creativeBriefHash: renderInput.creativeBriefHash,
+    experiencePlanHash: renderInput.experiencePlanHash,
     componentRegistryHash: manifest.componentHash,
     referenceLibraryHash: manifest.referenceHash,
     referenceFamily: renderInput.referenceFamily,
@@ -194,16 +208,11 @@ export async function captureScreenshots(bundle: RenderedBundle): Promise<Screen
   return { screenshots, screenshotSetHash: reviewScreenshotSetHash(screenshots), outDir: shotDir };
 }
 
-export async function demoV2ScreenshotsCommand(opts: { out?: string; family?: string; reviewPackage?: boolean }): Promise<void> {
-  const bundle = await renderFixtureBundle({ outDir: opts.out, referenceFamily: opts.family });
-  const shots = await captureScreenshots(bundle);
-  console.log(`Demo V2 screenshots written to ${shots.outDir} (${String(shots.screenshots.length)} images).`);
-  console.log(`  screenshot set hash: ${shots.screenshotSetHash}`);
-  if (!opts.reviewPackage) return;
-
-  const pkg = reviewPackageSchema.parse({
+/** Assemble the fail-closed review package for a rendered bundle + captured screenshots. */
+export function buildReviewPackage(bundle: RenderedBundle, shots: ScreenshotOutcome) {
+  return reviewPackageSchema.parse({
     schemaVersion: 'demo-v2-review-package-1',
-    artifactId: 'artifact-lindenhof-premium-de',
+    artifactId: bundle.artifactId,
     referenceFamily: bundle.referenceFamily,
     rendererVersion: bundle.render.rendererVersion,
     qualityRubricVersion: bundle.quality.rubricVersion,
@@ -216,8 +225,8 @@ export async function demoV2ScreenshotsCommand(opts: { out?: string; family?: st
       content: bundle.contentHash,
       translation: bundle.translationHash,
       assets: [...bundle.render.usedAssetHashes],
-      creativeBrief: bundle.plan.inputFingerprint as string,
-      experiencePlan: bundle.plan.inputFingerprint as string,
+      creativeBrief: bundle.creativeBriefHash,
+      experiencePlan: bundle.experiencePlanHash,
       componentRegistry: bundle.componentRegistryHash,
       referenceLibrary: bundle.referenceLibraryHash,
       render: bundle.render.renderHash,
@@ -233,11 +242,21 @@ export async function demoV2ScreenshotsCommand(opts: { out?: string; family?: st
     },
     deploymentEligible: false,
   });
+}
+
+export async function demoV2ScreenshotsCommand(opts: { out?: string; family?: string; language?: RenderLanguage; noEnglish?: boolean; reviewPackage?: boolean }): Promise<void> {
+  const bundle = await renderFixtureBundle({ outDir: opts.out, referenceFamily: opts.family, language: opts.language, withEnglish: !opts.noEnglish });
+  const shots = await captureScreenshots(bundle);
+  console.log(`Demo V2 screenshots (${bundle.language}) written to ${shots.outDir} (${String(shots.screenshots.length)} images, languages: ${bundle.render.supportedLanguages.join(', ')}).`);
+  console.log(`  screenshot set hash: ${shots.screenshotSetHash}`);
+  if (!opts.reviewPackage) return;
+
+  const pkg = buildReviewPackage(bundle, shots);
   const path = join(bundle.outDir, 'review-package.json');
   await writeFile(path, `${JSON.stringify({ ...pkg, reviewPackageHash: reviewPackageHash(pkg) }, null, 2)}\n`, 'utf8');
   console.log(`  review package: ${path}`);
   console.log(`  review package hash: ${reviewPackageHash(pkg)}`);
-  console.log('  deploymentEligible: false (Milestone 3A never authorises deployment or human approval).');
+  console.log('  deploymentEligible: false (no deployment or human approval is authorised).');
 }
 
 export async function demoV2RenderHashCommand(opts: { out?: string; family?: string }): Promise<void> {

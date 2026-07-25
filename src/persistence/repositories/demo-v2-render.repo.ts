@@ -1,11 +1,17 @@
 import { randomUUID } from 'node:crypto';
 import { and, desc, eq } from 'drizzle-orm';
+import { assertDemoV2Transition, type DemoV2ArtifactStatus } from '../../domain/demo-v2/artifact-lifecycle.js';
 import { type DbExecutor } from '../db.js';
 import {
+  demoV2Artifacts,
   demoV2RenderVersions,
   demoV2Screenshots,
   demoV2ReviewPackages,
 } from '../schema.js';
+
+/** The only artifact statuses Milestone 3B2A may set: the render → auto-review-pending path.
+ * AUTO_REVIEW_PASSED and HUMAN_APPROVED are deliberately excluded (no real reviewer / approval). */
+const RENDER_STATUSES = new Set<DemoV2ArtifactStatus>(['RENDERING', 'RENDERED', 'AUTO_REVIEW_PENDING']);
 
 /**
  * Immutable, versioned persistence for Milestone 3A/3B1 render artifacts.
@@ -174,10 +180,46 @@ export class DemoV2RenderRepository {
     return { id };
   }
 
+  /** Advance the artifact through a 3B2A render status (RENDERING → RENDERED → AUTO_REVIEW_PENDING).
+   * Any other target — including AUTO_REVIEW_PASSED / HUMAN_APPROVED — is refused. */
+  async advanceArtifact(artifactId: string, to: DemoV2ArtifactStatus): Promise<void> {
+    if (!RENDER_STATUSES.has(to)) throw new Error(`demo_v2_render_status_prohibited:${to}`);
+    const current = (await this.db.select({ status: demoV2Artifacts.status }).from(demoV2Artifacts)
+      .where(and(eq(demoV2Artifacts.id, artifactId), eq(demoV2Artifacts.isCurrent, true))).limit(1))[0];
+    if (!current) throw new Error('demo_v2_artifact_missing');
+    assertDemoV2Transition(current.status as DemoV2ArtifactStatus, to);
+    await this.db.update(demoV2Artifacts).set({ status: to, updatedAt: new Date() }).where(eq(demoV2Artifacts.id, artifactId));
+  }
+
   async currentRenderVersion(artifactId: string) {
     return (await this.db.select().from(demoV2RenderVersions)
       .where(and(eq(demoV2RenderVersions.artifactId, artifactId), eq(demoV2RenderVersions.isCurrent, true)))
       .limit(1))[0] ?? null;
+  }
+
+  async renderVersions(artifactId: string) {
+    return this.db.select().from(demoV2RenderVersions)
+      .where(eq(demoV2RenderVersions.artifactId, artifactId)).orderBy(desc(demoV2RenderVersions.version));
+  }
+
+  /** Recent render versions across artifacts (read-only inspection). */
+  async recentRenderVersions(limit = 10) {
+    return this.db.select().from(demoV2RenderVersions).orderBy(desc(demoV2RenderVersions.createdAt)).limit(limit);
+  }
+
+  async screenshotsForVersion(renderVersionId: string) {
+    return this.db.select().from(demoV2Screenshots).where(eq(demoV2Screenshots.renderVersionId, renderVersionId));
+  }
+
+  async currentReviewPackage(artifactId: string) {
+    return (await this.db.select().from(demoV2ReviewPackages)
+      .where(and(eq(demoV2ReviewPackages.artifactId, artifactId), eq(demoV2ReviewPackages.isCurrent, true)))
+      .limit(1))[0] ?? null;
+  }
+
+  async artifactStatus(artifactId: string): Promise<string | null> {
+    return (await this.db.select({ status: demoV2Artifacts.status }).from(demoV2Artifacts)
+      .where(eq(demoV2Artifacts.id, artifactId)).limit(1))[0]?.status ?? null;
   }
 
   private async nextVersion(artifactId: string): Promise<number> {

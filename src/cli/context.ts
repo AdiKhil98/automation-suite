@@ -43,3 +43,14 @@ export async function withContext(fn: (ctx: CliContext) => Promise<void>): Promi
     await pool.end();
   }
 }
+
+/**
+ * Run a command with config + logger only — it does NOT open the operational `DATABASE_URL` pool.
+ * Used by commands that must never touch the operational database (e.g. Demo V2 persistence, which
+ * opens only its own dedicated, guarded database internally).
+ */
+export async function withConfigOnly(fn: (config: AppConfig, logger: Logger) => Promise<void>): Promise<void> {
+  const config = loadConfig();
+  const logger = createLogger(config.LOG_LEVEL);
+  await fn(config, logger);
+}

@@ -6,6 +6,7 @@ All notable changes per phase. Format loosely follows Keep a Changelog.
 
 ### Added
 
+- Demo Engine V2 Milestone 3B2A review pipeline: the appointment dock hides its primary CTA on mobile so the hero CTA and a single sticky bar are the only appointment actions (no adjacent duplicate; FAQ launcher never overlaps the bar). New `demo-v2-persist` / `demo-v2-persist-status` commands render, screenshot, and persist an immutable render version, screenshots, and review package into the 3B1 tables and advance the artifact HUMAN_REVIEW_REQUIRED → RENDERING → RENDERED → AUTO_REVIEW_PENDING; persistence is opt-in, requires DEMO_V2_ENABLED=true + ALLOW_DEMO_V2_PERSIST=true + a dedicated guarded DEMO_V2_PERSIST_DATABASE_URL (never DATABASE_URL, no Supabase/pooler/remote), and can never reach AUTO_REVIEW_PASSED, HUMAN_APPROVED, or deployment eligibility. `demo-v2-screenshots --language de|fr|he|ar` generates and validates each language (RTL for HE/AR, complete English secondary, or primary-only fallback with --no-english).
 - Demo Engine V2 Milestone 3B1 visual-quality upgrade: a versioned, per-reference-family typography
   system (distinct display/body/nav/button/label roles, weights, fluid scales, RTL faces for Hebrew/
   Arabic, German `hyphens:auto` and French manual wrapping — all system/`ui-serif`/`ui-sans-serif`

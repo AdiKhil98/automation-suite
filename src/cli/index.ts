@@ -31,12 +31,14 @@ import { leadState } from './commands/lead-state.js';
 import { listLeads } from './commands/list-leads.js';
 import { resetTestData } from './commands/reset-test-data.js';
 import { resumeAuditCommand } from './commands/resume-audit.js';
-import { withContext } from './context.js';
+import { withConfigOnly, withContext } from './context.js';
 import { websiteVerificationStatusCommand } from './commands/website-verification-status.js';
 import { demoV2OrchestrationFixtureCommand } from './commands/demo-v2-orchestrate-fixture.js';
 import {
   demoV2PreviewCommand, demoV2RenderCommand, demoV2RenderHashCommand, demoV2ScreenshotsCommand,
+  type RenderLanguage,
 } from './commands/demo-v2-render.js';
+import { demoV2PersistCommand, demoV2PersistStatusCommand } from './commands/demo-v2-persist.js';
 
 const program = new Command();
 
@@ -68,11 +70,30 @@ program
 
 program
   .command('demo-v2-screenshots')
-  .description('Milestone 3A: capture desktop/tablet/mobile screenshots in every supported language; optionally export the review package')
+  .description('Milestone 3A/3B2A: capture desktop/tablet/mobile screenshots for a language (de|fr|he|ar); optionally export the review package. Filesystem only.')
   .option('--out <dir>', 'bundle directory', './demos/demo-v2')
   .option('--family <name>', 'override the reference family')
+  .option('--language <lang>', 'primary language: de | fr | he | ar', 'de')
+  .option('--no-english', 'withhold the English secondary package (renders primary only, hides switcher)')
   .option('--review-package', 'also write review-package.json')
-  .action((opts: { out?: string; family?: string; reviewPackage?: boolean }) => demoV2ScreenshotsCommand(opts));
+  .action((opts: { out?: string; family?: string; language?: RenderLanguage; english?: boolean; reviewPackage?: boolean }) =>
+    demoV2ScreenshotsCommand({ ...opts, noEnglish: opts.english === false }));
+
+program
+  .command('demo-v2-persist')
+  .description('Milestone 3B2A: render + screenshot + persist into the guarded local database. Requires DEMO_V2_ENABLED=true, ALLOW_DEMO_V2_PERSIST=true and DEMO_V2_PERSIST_DATABASE_URL (loopback test DB only). Never deploys or approves.')
+  .option('--out <dir>', 'bundle directory', './demos/demo-v2')
+  .option('--family <name>', 'override the reference family')
+  .option('--language <lang>', 'primary language: de | fr | he | ar', 'de')
+  .option('--no-english', 'withhold the English secondary package')
+  .action((opts: { out?: string; family?: string; language?: RenderLanguage; english?: boolean }) =>
+    withConfigOnly((config) => demoV2PersistCommand(config, { ...opts, noEnglish: opts.english === false })));
+
+program
+  .command('demo-v2-persist-status')
+  .description('Milestone 3B2A: read-only inspection of persisted render versions, screenshots, review packages, and lifecycle status (guarded local database only)')
+  .option('--limit <n>', 'max render versions to show', '10')
+  .action((opts: { limit?: string }) => withConfigOnly((config) => demoV2PersistStatusCommand(config, opts)));
 
 program
   .command('demo-v2-render-hash')

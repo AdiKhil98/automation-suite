@@ -126,6 +126,41 @@ describe.skipIf(skip)('Demo V2 rendered preview (real Chromium, local only)', ()
     await context.close();
   });
 
+  it('has no adjacent duplicate appointment CTAs on mobile (dock primary hidden)', async () => {
+    const { context, page } = await open('MOBILE');
+    // The appointment dock's primary button is hidden on mobile; only the hero CTA + sticky bar remain.
+    const dockPrimary = page.locator('.dv2-dock__primary');
+    expect(await dockPrimary.count()).toBeGreaterThan(0); // present in DOM
+    expect(await dockPrimary.first().isVisible()).toBe(false); // hidden on mobile
+    // Exactly one sticky mobile appointment bar, and it is not adjacent to the hero CTA.
+    expect(await page.locator('.dv2-mobilebar').count()).toBe(1);
+    await context.close();
+  });
+
+  it('keeps the FAQ launcher and the sticky appointment bar from overlapping', async () => {
+    const { context, page } = await open('MOBILE');
+    const bar = await page.locator('.dv2-mobilebar').boundingBox();
+    const launcher = await page.locator('.dv2-concierge__launcher').boundingBox();
+    expect(bar).not.toBeNull();
+    expect(launcher).not.toBeNull();
+    // The launcher's bottom edge sits above the bar's top edge (no overlap).
+    expect(launcher!.y + launcher!.height).toBeLessThanOrEqual(bar!.y + 1);
+    // Both are ≥44px touch targets.
+    expect(launcher!.height).toBeGreaterThanOrEqual(44);
+    await context.close();
+  });
+
+  it('keeps the sticky bar from covering the footer content', async () => {
+    const { context, page } = await open('MOBILE');
+    // Body reserves bottom padding for the fixed bar so content is never hidden beneath it.
+    const paddingBottom = await page.evaluate(() => {
+      const body = (globalThis as unknown as { getComputedStyle: (e: unknown) => { paddingBottom: string }; document: { body: unknown } });
+      return body.getComputedStyle(body.document.body).paddingBottom;
+    });
+    expect(Number.parseInt(paddingBottom, 10)).toBeGreaterThanOrEqual(40);
+    await context.close();
+  });
+
   it('switches language to the complete English page and persists the choice', async () => {
     const { context, page } = await open('DESKTOP');
     await page.locator('.dv2-lang a[hreflang="en"]').first().click();

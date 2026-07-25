@@ -170,8 +170,13 @@ const RESPONSIVE_CSS = `
 .dv2-nav__toggle{display:inline-flex}
 .dv2-mobilebar{display:block}
 body[data-mobilebar=true]{padding-block-end:76px}
-.dv2-concierge__launcher{inset-block-end:84px}
-.dv2-concierge__panel{inset-block-end:148px;inset-inline:var(--s3);width:auto;max-height:min(60vh,460px)}
+/* Hide the appointment dock's duplicate primary CTA on mobile — the hero CTA and the sticky bar
+   already carry it. The subordinate contact action stays visible. */
+.dv2-dock__primary{display:none}
+/* Concierge launcher sits above the sticky appointment bar (never overlapping it) and its panel
+   clears both. */
+.dv2-concierge__launcher{inset-block-end:88px}
+.dv2-concierge__panel{inset-block-end:152px;inset-inline:var(--s3);width:auto;max-height:min(58vh,440px)}
 }
 @media (max-width:520px){
 .dv2-hero--full{min-height:auto}

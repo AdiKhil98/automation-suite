@@ -37,6 +37,7 @@ No phase begins before the previous one is approved with `APPROVE PHASE X`.
 |---|---|---|
 | 1 | Additive schemas, immutable contracts, manifests, validators, repositories, fixtures, and safety tests | complete; locally verified |
 | 2 | Clinic Intelligence, structured multilingual content, review-gated English translation, first-party asset discovery, Creative Brief, and no-code ExperiencePlan orchestration | complete; mock/local only |
+| 3B2A | Mobile CTA hierarchy fix, CLI render/screenshot persistence + inspection behind a dedicated guarded database, FR/HE/AR screenshot generation, review-package completeness | complete; mock/local only |
 | 3B1 | Typography upgrade, editorial composition, imagery, condensed FAQ, FR/HE/AR fixtures, immutable render/screenshot/review persistence (migration 0024) | complete; mock/local only |
 | 3A | Code-native component registry + design system, deterministic premium renderer, bilingual bundle, quality checks, mock visual-review + revision contracts, local preview/screenshot/review-package tooling | complete; mock/local only |
 | 3+ | Rendering, screenshot generation, visual review, revisions, human approval workflow, and deployment integration | not approved; not implemented |

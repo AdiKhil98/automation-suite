@@ -210,11 +210,14 @@ function appointmentDock(model: RenderModel, section: RenderSection): string {
   // The verified destination is the link target, never visible label text — a raw URL as body copy
   // reads as unfinished and adds no meaning the button does not already carry.
   const methodIsUrl = /^https?:\/\//i.test(method);
+  // On mobile the hero CTA + the sticky appointment bar already carry the primary action, so the
+  // dock's primary appointment button is hidden below the mobile breakpoint (see .dv2-dock__primary)
+  // to avoid a second adjacent full-width appointment CTA. The subordinate contact action remains.
   return `<section id="${A(section.anchor)}" class="dv2-section" data-rhythm="tight"`
     + ` data-motion="TEXT_REVEAL" data-dv2-component="AppointmentActionDock">`
     + `<div class="dv2-wrap"><h2>${A(heading)}</h2>`
     + `${methodIsUrl ? '' : `<p class="dv2-lede">${A(method)}</p>`}`
-    + `<p class="dv2-hero__actions"><a class="dv2-btn" href="${A(model.appointmentHref)}">${A(heading)}</a>`
+    + `<p class="dv2-hero__actions"><a class="dv2-btn dv2-dock__primary" href="${A(model.appointmentHref)}">${A(heading)}</a>`
     + `${model.contactHref ? `<a class="dv2-btn dv2-btn--ghost" href="${A(model.contactHref)}">${A(text(model, 'contact.heading') ?? model.labels.contact ?? '')}</a>` : ''}`
     + `</p></div></section>`;
 }

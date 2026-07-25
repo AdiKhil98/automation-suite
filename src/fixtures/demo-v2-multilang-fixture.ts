@@ -1,6 +1,6 @@
 import { orchestrateDemoV2Fixture, type DemoV2FixtureInput } from '../domain/demo-v2/orchestration-service.js';
 import { type RenderAssetBinding, type RenderInput } from '../domain/demo-v2/render/renderer.js';
-import { fictionalClinicImages, ACCEPTANCE_PLAN_SECTIONS, type AcceptanceFixture } from './demo-v2-render-fixture.js';
+import { fictionalClinicImages, germanClinicFixtureInput, ACCEPTANCE_PLAN_SECTIONS, type AcceptanceFixture } from './demo-v2-render-fixture.js';
 
 /**
  * Complete acceptance fixtures for French, Hebrew, and Arabic (plus the German baseline via the
@@ -172,6 +172,17 @@ function fixtureInput(language: AcceptanceLanguage, manifests: {
     now: '2026-07-24T10:00:00.000Z',
     translationGlossary: data.glossary,
   };
+}
+
+/**
+ * The raw fixture input for any acceptance language (German or FR/HE/AR). Used by the persistence
+ * path to seed a LEAD_FACT-only Milestone 2 foundation for the render-version FK target.
+ */
+export function acceptanceFixtureInput(
+  language: 'de' | AcceptanceLanguage,
+  manifests: { componentVersion: string; componentHash: string; referenceVersion: string; referenceHash: string },
+): DemoV2FixtureInput {
+  return language === 'de' ? germanClinicFixtureInput(manifests) : fixtureInput(language, manifests);
 }
 
 /** Build a complete render input for a non-German acceptance language. */
