@@ -93,13 +93,13 @@ const FAMILY_TYPOGRAPHY: Record<ReferenceFamily, FamilyTypography> = {
     displayFont: HIGH_CONTRAST_SERIF, bodyFont: HUMANIST_SANS, navFont: HUMANIST_SANS, buttonFont: HUMANIST_SANS, labelFont: HUMANIST_SANS,
     weights: { display: 500, heading: 500, body: 400, label: 500, button: 600 },
     scale: {
-      eyebrow: 'clamp(0.74rem,0.72rem + 0.1vw,0.82rem)', label: 'clamp(0.82rem,0.8rem + 0.12vw,0.9rem)',
-      body: 'clamp(1.04rem,1rem + 0.22vw,1.15rem)', lede: 'clamp(1.2rem,1.08rem + 0.55vw,1.5rem)',
+      eyebrow: 'clamp(0.76rem,0.74rem + 0.1vw,0.84rem)', label: 'clamp(0.84rem,0.82rem + 0.12vw,0.92rem)',
+      body: 'clamp(1.08rem,1.02rem + 0.3vw,1.22rem)', lede: 'clamp(1.22rem,1.1rem + 0.58vw,1.55rem)',
       h3: 'clamp(1.45rem,1.26rem + 0.8vw,2rem)', h2: 'clamp(2.05rem,1.6rem + 1.9vw,3.2rem)',
       h1: 'clamp(2.5rem,1.9rem + 2.7vw,4rem)', hero: 'clamp(3rem,2.1rem + 4vw,5.2rem)',
     },
-    lineHeightTight: '1.02', lineHeightBody: '1.64', trackingDisplay: '-0.005em', trackingLabel: '0.2em',
-    maxLineCh: 66, headingWrap: 'balance',
+    lineHeightTight: '1.05', lineHeightBody: '1.7', trackingDisplay: '-0.005em', trackingLabel: '0.18em',
+    maxLineCh: 68, headingWrap: 'balance',
   },
 };
 

@@ -47,7 +47,7 @@ ul,ol{margin:0;padding:0;list-style:none}
 .dv2-sr{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
 .dv2-skip{position:absolute;inset-inline-start:var(--s3);inset-block-start:-4rem;z-index:var(--z-skip);background:var(--c-accent);color:var(--c-ink-on-accent);padding:var(--s2) var(--s3);border-radius:var(--r-sm);transition:inset-block-start var(--m-fast) var(--ease)}
 .dv2-skip:focus{inset-block-start:var(--s3)}
-.dv2-btn{display:inline-flex;align-items:center;justify-content:center;gap:.5rem;min-height:44px;padding:.75rem 1.35rem;background:var(--c-accent);color:var(--c-ink-on-accent);text-decoration:none;border-radius:var(--r-md);font-weight:600;font-size:var(--fs-sm);border:1px solid transparent;transition:transform var(--m-fast) var(--ease),background-color var(--m-fast) var(--ease)}
+.dv2-btn{display:inline-flex;align-items:center;justify-content:center;gap:.5rem;min-height:48px;padding:.9rem 1.8rem;background:var(--c-accent);color:var(--c-ink-on-accent);text-decoration:none;border-radius:var(--r-md);font-weight:600;font-size:var(--fs-base);border:1px solid transparent;transition:transform var(--m-fast) var(--ease),background-color var(--m-fast) var(--ease)}
 .dv2-btn:hover{transform:translateY(-1px)}
 .dv2-btn--ghost{background:transparent;color:var(--c-accent);border-color:var(--c-accent)}
 .dv2-disclosure{background:var(--c-accent-soft);color:var(--c-ink);font-size:var(--fs-xs);padding:var(--s2) var(--s3);text-align:center}
@@ -89,24 +89,37 @@ ul,ol{margin:0;padding:0;list-style:none}
 .dv2-strip__item{border-inline-start:2px solid var(--c-accent);padding-inline-start:var(--s3)}
 .dv2-strip__item dt{font-size:var(--fs-xs);letter-spacing:.1em;text-transform:uppercase;color:var(--c-ink-muted)}
 .dv2-strip__item dd{margin:.25rem 0 0;font-size:var(--fs-base)}
-.dv2-index{display:grid;gap:0;margin-block-start:var(--s6)}
-.dv2-index li{display:flex;gap:var(--s4);align-items:baseline;padding-block:var(--s3);border-block-end:1px solid var(--c-line)}
-.dv2-index__num{font-family:var(--font-display);font-size:var(--fs-sm);color:var(--c-ink-muted);min-width:2.5ch}
+.dv2-index{display:grid;gap:0;margin-block-start:var(--s4)}
+.dv2-index li{display:flex;gap:var(--s4);align-items:baseline;padding-block:var(--s4);border-block-end:1px solid var(--c-line)}
+.dv2-index__num{font-family:var(--font-display);font-size:var(--fs-base);color:var(--c-accent);min-width:2.5ch}
 .dv2-index__name{font-size:var(--fs-md)}
-.dv2-spotlight__lead{font-size:var(--fs-lg);font-family:var(--font-display);padding-block:var(--s4);border-block-end:2px solid var(--c-accent)}
+/* Featured treatment reads as the clear lead; the remainder is a readable secondary index. */
+.dv2-spotlight__lead{font-size:var(--fs-xl);font-family:var(--font-display);line-height:var(--lh-tight);margin-block:var(--s3) var(--s4);padding-block-end:var(--s4);border-block-end:2px solid var(--c-accent)}
 .dv2-people{display:grid;gap:var(--s6);margin-block-start:var(--s6)}
-.dv2-person figure{margin:0}
-.dv2-person figure{margin:0;background:var(--c-surface-alt);border-radius:var(--r-md);overflow:hidden}
+/* A defined frame so a soft/low-contrast portrait never reads as an empty beige box. */
+.dv2-person figure{margin:0;background:var(--c-surface);border:1px solid var(--c-line);border-radius:var(--r-md);overflow:hidden;box-shadow:var(--sh-soft)}
 .dv2-person img{aspect-ratio:4/5;object-fit:cover;border-radius:var(--r-md);width:100%}
 .dv2-person__name{margin-block-start:var(--s2);font-size:var(--fs-base)}
+/* DoctorFeature: single editorial feature — portrait beside name/role, content-driven height. */
+.dv2-feature{display:grid;gap:var(--s6);align-items:center;margin-block-start:var(--s6)}
+.dv2-feature__portrait{margin:0;max-width:26rem;background:var(--c-surface);border:1px solid var(--c-line);border-radius:var(--r-md);overflow:hidden;box-shadow:var(--sh-soft)}
+.dv2-feature__portrait img{width:100%;aspect-ratio:4/5;object-fit:cover}
+.dv2-feature__body h2{margin-block-end:var(--s4)}
+.dv2-feature--text{max-width:var(--w-narrow);margin-inline:auto}
+.dv2-person__role{color:var(--c-ink-muted);font-size:var(--fs-md);margin-block-start:var(--s1)}
 .dv2-gallery{display:grid;gap:var(--s3);margin-block-start:var(--s6)}
 .dv2-gallery img{width:100%;object-fit:cover;border-radius:var(--r-md)}
-.dv2-gallery figure{margin:0}
+.dv2-gallery figure{margin:0;border:1px solid var(--c-line);border-radius:var(--r-md);overflow:hidden}
 .dv2-gallery figure:first-child img{aspect-ratio:16/10}
 .dv2-gallery figure+figure img{aspect-ratio:4/3}
+/* Feature gallery for one or two clinic assets: a connected wide image (or balanced pair),
+   never a sparse asymmetric grid with empty cells. */
+.dv2-gallery--feature{grid-template-columns:1fr}
+.dv2-gallery--feature figure:first-child{grid-row:auto}
+.dv2-gallery--feature img,.dv2-gallery--feature figure:first-child img{aspect-ratio:3/2;max-height:32rem}
 .dv2-story{display:grid;gap:var(--s6);align-items:center}
 .dv2-story img{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:var(--r-md)}
-.dv2-story figure{margin:0}
+.dv2-story figure{margin:0;border:1px solid var(--c-line);border-radius:var(--r-md);overflow:hidden}
 .dv2-journey{display:grid;gap:var(--s4);margin-block-start:var(--s6);counter-reset:step}
 .dv2-journey li{display:flex;gap:var(--s3);align-items:flex-start;padding-inline-start:0}
 .dv2-journey__num{font-family:var(--font-display);color:var(--c-accent);font-size:var(--fs-md);min-width:2ch}
@@ -151,8 +164,12 @@ const RESPONSIVE_CSS = `
 @media (min-width:768px){
 .dv2-strip{grid-template-columns:repeat(3,1fr)}
 .dv2-people{grid-template-columns:repeat(2,1fr)}
+.dv2-feature{grid-template-columns:auto 1fr}
 .dv2-gallery{grid-template-columns:2fr 1fr}
 .dv2-gallery figure:first-child{grid-row:span 2}
+.dv2-gallery--feature{grid-template-columns:1fr}
+.dv2-gallery--feature figure:first-child{grid-row:auto}
+.dv2-gallery--pair{grid-template-columns:1fr 1fr}
 .dv2-story{grid-template-columns:1.1fr .9fr}
 .dv2-story--reverse figure{order:2}
 .dv2-footer__grid{grid-template-columns:repeat(3,1fr)}

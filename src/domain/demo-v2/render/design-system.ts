@@ -125,9 +125,11 @@ const FAMILY_TOKENS: Record<ReferenceFamily, Partial<DesignTokens>> = {
   },
   'luxury-cosmetic-dental': {
     fontDisplay: "'Didot','Bodoni MT','Iowan Old Style',Georgia,serif",
-    colors: { ...BASE.colors, canvas: '#f7f4f1', surface: '#ffffff', surfaceAlt: '#ece5de', accent: '#6d5333', accentSoft: '#efe6d9', ink: '#1e1a17', inkMuted: '#6a5f54', line: '#ddd2c5', focus: '#3f5d54', overlay: 'rgba(30,22,16,0.5)' },
+    // inkMuted darkened from #6a5f54 for AA-comfortable muted copy on the warm canvas.
+    colors: { ...BASE.colors, canvas: '#f7f4f1', surface: '#ffffff', surfaceAlt: '#ece5de', accent: '#6d5333', accentSoft: '#efe6d9', ink: '#1e1a17', inkMuted: '#574d42', line: '#ddd2c5', focus: '#3f5d54', overlay: 'rgba(30,22,16,0.5)' },
     radiusSm: '1px', radiusMd: '2px', radiusLg: '3px', contentWidth: '74rem',
-    letterSpacingDisplay: '-0.008em', sectionSpacing: 'clamp(5rem,3.6rem + 5vw,9rem)', overlayStrength: '0.5',
+    // Moderate whitespace: keeps editorial airiness but removes the unfinished ~9rem gaps.
+    letterSpacingDisplay: '-0.008em', sectionSpacing: 'clamp(3.5rem,2.8rem + 3vw,6rem)', overlayStrength: '0.5',
   },
 };
 

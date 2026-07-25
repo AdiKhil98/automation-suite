@@ -282,9 +282,27 @@ function people(model: RenderModel, section: RenderSection): string {
   const list = collect(model, 'team.');
   if (list.length === 0) return '';
   const heading = text(model, 'navigation.team') ?? model.labels.team ?? '';
-  const assets = section.assets.slice(0, section.componentId === 'DoctorFeature' ? 1 : 2);
+  // DoctorFeature is a single editorial feature (portrait beside name/role), never a lone card
+  // stranded in a multi-column grid. It is content-driven and fails closed to a polished text-only
+  // feature when no approved, hash-verified portrait exists — it never renders a blank asset box.
+  if (section.componentId === 'DoctorFeature') {
+    const person = list[0]!;
+    const asset = section.assets[0];
+    const comma = person.value.indexOf(',');
+    const name = comma === -1 ? person.value : person.value.slice(0, comma).trim();
+    const role = comma === -1 ? '' : person.value.slice(comma + 1).trim();
+    const body = `<div class="dv2-feature__body"><h2>${A(heading)}</h2>`
+      + `<p class="dv2-person__name">${A(name)}</p>`
+      + `${role ? `<p class="dv2-person__role">${A(role)}</p>` : ''}</div>`;
+    return `<section id="${A(section.anchor)}" class="dv2-section" data-rhythm="${A(section.rhythm)}"`
+      + ` data-motion="${asset ? 'IMAGE_REVEAL' : 'TEXT_REVEAL'}" data-dv2-component="DoctorFeature">`
+      + `<div class="dv2-wrap dv2-wrap--wide dv2-feature${asset ? '' : ' dv2-feature--text'}">`
+      + `${asset ? `<figure class="dv2-feature__portrait">${img(asset, '(min-width:768px) 40vw, 100vw', true, focal)}</figure>` : ''}`
+      + `${body}</div></section>`;
+  }
+  const assets = section.assets.slice(0, 2);
   const rail = section.componentId === 'SpecialistPortraitRail';
-  const cards = list.slice(0, section.componentId === 'DoctorFeature' ? 1 : 4).map((item, index) => {
+  const cards = list.slice(0, 4).map((item, index) => {
     const asset = assets[index];
     return `<article class="dv2-person">`
       + `${asset ? `<figure>${img(asset, '(min-width:768px) 33vw, 100vw', true, focal)}</figure>` : ''}`
@@ -301,11 +319,19 @@ function place(model: RenderModel, section: RenderSection): string {
   const heading = text(model, 'navigation.clinic') ?? model.labels.clinic ?? '';
   if (section.componentId === 'InteriorGallery') {
     if (section.assets.length === 0) return '';
+    // With only one or two approved clinic assets the asymmetric 2fr/1fr gallery grid leaves empty
+    // cells that detach the heading from its image. Collapse to a content-driven feature layout
+    // (single wide image, or a balanced pair) so the heading and imagery stay visually connected.
+    const shots = section.assets.slice(0, 3);
+    const feature = shots.length <= 2;
+    const galleryClass = feature
+      ? `dv2-gallery dv2-gallery--feature${shots.length === 2 ? ' dv2-gallery--pair' : ''}`
+      : 'dv2-gallery';
     return `<section id="${A(section.anchor)}" class="dv2-section" data-rhythm="${A(section.rhythm)}"`
       + ` data-motion="GALLERY_TRANSITION" data-dv2-component="InteriorGallery">`
       + `<div class="dv2-wrap dv2-wrap--wide"><h2>${A(heading)}</h2>`
-      + `<div class="dv2-gallery">${section.assets.slice(0, 3).map((asset) =>
-        `<figure>${img(asset, '(min-width:768px) 50vw, 100vw', true, focal)}</figure>`).join('')}</div>`
+      + `<div class="${galleryClass}">${shots.map((asset) =>
+        `<figure>${img(asset, feature ? '(min-width:768px) 84rem, 100vw' : '(min-width:768px) 50vw, 100vw', true, focal)}</figure>`).join('')}</div>`
       + `</div></section>`;
   }
   if (section.componentId === 'LocationNarrative') {

@@ -12,6 +12,7 @@ import {
   type ReviewScreenshot,
 } from '../../domain/demo-v2/render/review-package.js';
 import { demoV2Hash } from '../../domain/demo-v2/hash.js';
+import type { Page } from 'playwright';
 import { buildAcceptanceFixture } from '../../fixtures/demo-v2-render-fixture.js';
 import { buildLanguageAcceptanceFixture, type AcceptanceLanguage } from '../../fixtures/demo-v2-multilang-fixture.js';
 
@@ -168,6 +169,26 @@ export interface ScreenshotOutcome {
  * baseline, using the local preview server. Playwright is loaded lazily so the standard suite and
  * CLI do not require a browser.
  */
+/**
+ * Force every image — including lazy, below-the-fold approved assets — to load before a full-page
+ * capture, so no screenshot ever records an approved asset as a blank placeholder box.
+ */
+async function ensureImagesLoaded(page: Page): Promise<void> {
+  // String-form evaluate keeps this browser-side code out of the tsx/esbuild transform (which would
+  // otherwise inject a `__name` helper that does not exist in the page context).
+  const scrollHeight = Number(await page.evaluate('document.body.scrollHeight'));
+  for (let y = 0; y <= scrollHeight; y += 600) {
+    await page.evaluate(`window.scrollTo(0, ${String(y)})`);
+    await page.waitForTimeout(30);
+  }
+  await page.evaluate('window.scrollTo(0, 0)');
+  // Force any still-unloaded image (native lazy loading may not have fired) to fetch and decode.
+  await page.evaluate(
+    'Promise.all(Array.from(document.images).map(function(i){return i.complete?0:i.decode().catch(function(){return 0})}))',
+  );
+  await page.waitForLoadState('networkidle');
+}
+
 export async function captureScreenshots(bundle: RenderedBundle): Promise<ScreenshotOutcome> {
   const { chromium } = await import('playwright');
   const shotDir = join(bundle.outDir, 'screenshots');
@@ -189,6 +210,10 @@ export async function captureScreenshots(bundle: RenderedBundle): Promise<Screen
         const page = await context.newPage();
         await page.goto(`http://127.0.0.1:${String(port)}/${target.file}?lang=${target.language}`, { waitUntil: 'load' });
         await page.emulateMedia({ reducedMotion: 'reduce' });
+        // A full-page capture must never record an approved asset as a blank box: lazy images below
+        // the fold have not loaded at `load`. Scroll the whole page to trigger native lazy-loading,
+        // force-decode every image, then return to the top before the screenshot.
+        await ensureImagesLoaded(page);
         const name = `${target.kind.toLowerCase()}-${target.language}-${viewport.toLowerCase()}.png`;
         const path = join(shotDir, name);
         await page.screenshot({ path, fullPage: true });

@@ -216,6 +216,48 @@ describe.skipIf(skip)('Demo V2 rendered preview (real Chromium, local only)', ()
     }
   });
 
+  // Scroll the whole page so native lazy-loading fires, then force-decode every image.
+  async function loadAllImages(page: Page): Promise<void> {
+    const height = Number(await page.evaluate('document.body.scrollHeight'));
+    for (let y = 0; y <= height; y += 500) {
+      await page.evaluate(`window.scrollTo(0, ${String(y)})`);
+      await page.waitForTimeout(20);
+    }
+    await page.evaluate('window.scrollTo(0, 0)');
+    await page.evaluate(
+      'Promise.all(Array.from(document.images).map(function(i){return i.complete?0:i.decode().catch(function(){return 0})}))',
+    );
+  }
+
+  it('renders the team portrait and gallery images — never a blank placeholder box (390x844)', async () => {
+    const { context, page } = await open('MOBILE');
+    await loadAllImages(page);
+    for (const component of ['DoctorFeature', 'InteriorGallery', 'TreatmentSpotlight'] as const) {
+      const natural = Number(await page.evaluate(
+        `document.querySelector('[data-dv2-component="${component}"] img').naturalWidth`));
+      expect(natural, `${component} image must have decoded`).toBeGreaterThan(0);
+    }
+    // A rendered figure never wraps empty space — it always contains a loaded image.
+    const emptyFigures = Number(await page.evaluate(
+      "Array.from(document.querySelectorAll('figure')).filter(function(f){return !f.querySelector('img')}).length"));
+    expect(emptyFigures).toBe(0);
+    await context.close();
+  });
+
+  it('keeps body and FAQ copy readable on mobile (390x844)', async () => {
+    const { context, page } = await open('MOBILE');
+    const bodyFs = Number(await page.evaluate(
+      'parseFloat(getComputedStyle(document.body).fontSize)'));
+    expect(bodyFs).toBeGreaterThanOrEqual(16);
+    const faqFs = Number(await page.evaluate(
+      "parseFloat(getComputedStyle(document.querySelector('.dv2-faq__item dd')).fontSize)"));
+    expect(faqFs).toBeGreaterThanOrEqual(15);
+    // The primary appointment button is a comfortable touch target with real padding.
+    const btn = await page.locator('.dv2-mobilebar a.dv2-btn').boundingBox();
+    expect(btn!.height).toBeGreaterThanOrEqual(44);
+    await context.close();
+  });
+
   it('switches all content together from the mobile menu, German↔English (390x844)', async () => {
     const { context, page } = await open('MOBILE');
     expect(await page.getAttribute('html', 'lang')).toBe('de');
