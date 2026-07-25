@@ -207,18 +207,21 @@ export function renderDemoV2(input: RenderInput): RenderResult {
     }
   }
 
-  const assetFiles: RenderedFile[] = [];
+  // Catalogue the approved, hash-verified assets. The bundle's files and used-asset hashes are
+  // derived LATER from the assets actually placed into a rendered section, so an approved asset that
+  // no section renders is never written or advertised (a phantom asset reads as incomplete).
+  const bytesById = new Map<string, Buffer>();
   const assetByCategory = new Map<string, RenderAsset[]>();
-  const usedAssetHashes: string[] = [];
   for (const binding of [...input.assets].sort((a, b) => a.asset.id.localeCompare(b.asset.id))) {
-    const path = `assets/${binding.asset.id}.png`;
-    assetFiles.push({ path, bytes: binding.bytes });
-    usedAssetHashes.push(binding.asset.contentHash);
+    bytesById.set(binding.asset.id, binding.bytes);
     const rendered: RenderAsset = {
       id: binding.asset.id,
       category: binding.asset.category,
-      href: path,
+      href: `assets/${binding.asset.id}.png`,
+      // Native-language alt from the source page; `altEnglish` keeps the English render fully
+      // English, since asset alt text is not part of the (text-only) translation package.
       alt: binding.asset.altText ?? binding.asset.nearbyCaption ?? binding.selection.intendedUse,
+      altEnglish: binding.selection.intendedUse,
       width: binding.asset.width,
       height: binding.asset.height,
       focalX: binding.selection.focalPoint.x,
@@ -229,16 +232,30 @@ export function renderDemoV2(input: RenderInput): RenderResult {
   }
 
   const composition = compositionFor(input.referenceFamily);
-  const takeAssets = (spec: ComponentSpec, used: Set<string>): RenderAsset[] => {
-    if (spec.maxAssets === 0) return [];
+  // How many verified people the team components will actually render a card (and image slot) for.
+  const teamCount = input.primary.items.filter(
+    (item) => item.contentKey.startsWith('team.') && item.textValue !== null,
+  ).length;
+  // The number of image slots a component genuinely renders. Allocation must never RESERVE more
+  // approved assets than a component will place — a portrait rail with more approved portraits than
+  // verified people would otherwise consume, and silently drop, the surplus approved asset.
+  const renderCapacity = (spec: ComponentSpec, componentId: string): number => {
+    if (componentId === 'SpecialistPortraitRail' || componentId === 'TeamEditorialGrid') {
+      return Math.min(spec.maxAssets, teamCount);
+    }
+    if (componentId === 'DoctorFeature') return Math.min(spec.maxAssets, teamCount, 1);
+    return spec.maxAssets;
+  };
+  const takeAssets = (spec: ComponentSpec, capacity: number, used: Set<string>): RenderAsset[] => {
+    if (capacity <= 0) return [];
     const picked: RenderAsset[] = [];
     for (const category of spec.allowedAssetCategories) {
       for (const asset of assetByCategory.get(category) ?? []) {
-        if (used.has(asset.id) || picked.length >= spec.maxAssets) continue;
+        if (used.has(asset.id) || picked.length >= capacity) continue;
         picked.push(asset);
         used.add(asset.id);
       }
-      if (picked.length >= spec.maxAssets) break;
+      if (picked.length >= capacity) break;
     }
     return picked;
   };
@@ -264,7 +281,7 @@ export function renderDemoV2(input: RenderInput): RenderResult {
       order: planned.order,
       componentId,
       contentKeys: [...spec.requiredContentKeys, ...spec.optionalContentKeys],
-      assets: takeAssets(spec, usedAssets),
+      assets: takeAssets(spec, renderCapacity(spec, componentId), usedAssets),
       rhythm,
       anchor,
     });
@@ -272,6 +289,20 @@ export function renderDemoV2(input: RenderInput): RenderResult {
   if (!sections.some((section) => section.componentId === 'ConceptDisclosureBar')) {
     throw new Error('demo_v2_render_missing_disclosure');
   }
+
+  // Files and used-asset hashes reflect ONLY assets actually placed into a rendered section, in a
+  // deterministic (asset id) order. An approved-but-unplaced asset is intentionally absent from the
+  // bundle rather than written and advertised as a rendered asset.
+  const placedAssets = new Map<string, RenderAsset>();
+  for (const section of sections) {
+    for (const asset of section.assets) placedAssets.set(asset.id, asset);
+  }
+  const placedInOrder = [...placedAssets.values()].sort((a, b) => a.id.localeCompare(b.id));
+  const assetFiles: RenderedFile[] = placedInOrder.map((asset) => ({
+    path: `assets/${asset.id}.png`,
+    bytes: bytesById.get(asset.id)!,
+  }));
+  const usedAssetHashes: string[] = placedInOrder.map((asset) => asset.contentHash);
 
   const css = buildStylesheet(input.referenceFamily);
   const script = buildRuntimeScript();

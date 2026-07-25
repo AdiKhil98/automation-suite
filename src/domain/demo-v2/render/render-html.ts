@@ -14,7 +14,10 @@ export interface RenderAsset {
   category: string;
   /** Bundle-relative path — always local, never a remote origin. */
   href: string;
+  /** Native-language alt (matches the primary render's language). */
   alt: string;
+  /** English descriptor used when the document language is English, so no source-language alt leaks. */
+  altEnglish: string;
   width: number;
   height: number;
   focalX: number;
@@ -69,6 +72,9 @@ const A = escapeHtml;
 /** Reset per document in {@link renderDocument}; rendering is synchronous so this stays isolated. */
 let focal = new Map<string, string>();
 
+/** Language of the document currently rendering; set in {@link renderDocument} to localize alt text. */
+let renderLanguage = '';
+
 function text(model: RenderModel, key: string): string | null {
   const value = model.content[key];
   return value && value.trim() !== '' ? value : null;
@@ -97,7 +103,10 @@ function focalClass(asset: RenderAsset, focal: Map<string, string>): string {
 
 function img(asset: RenderAsset, sizes: string, lazy: boolean, focal: Map<string, string>): string {
   const cls = focalClass(asset, focal);
-  return `<img src="${A(asset.href)}" alt="${A(asset.alt)}" width="${asset.width}" height="${asset.height}"`
+  // An English document uses the approved English descriptor; every other language uses the native
+  // alt. This guarantees an English render never carries a source-language alt string.
+  const alt = renderLanguage === 'en' ? (asset.altEnglish || asset.alt) : asset.alt;
+  return `<img src="${A(asset.href)}" alt="${A(alt)}" width="${asset.width}" height="${asset.height}"`
     + ` sizes="${A(sizes)}" class="${cls}"`
     + ` ${lazy ? 'loading="lazy" decoding="async"' : 'loading="eager" fetchpriority="high" decoding="sync"'}>`;
 }
@@ -528,6 +537,7 @@ h1{font-size:22px;margin:0 0 12px}ul{padding-inline-start:20px}p{margin:0 0 8px}
 export function renderDocument(model: RenderModel): string {
   const composition = compositionFor(model.referenceFamily);
   focal = new Map<string, string>();
+  renderLanguage = model.language;
   // Pass 1: render every section except navigation, so we learn which anchors actually exist.
   const parts = model.sections.map((section) => {
     requireComponent(section.componentId);

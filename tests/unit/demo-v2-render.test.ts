@@ -190,11 +190,37 @@ describe('Demo V2 deterministic renderer', () => {
 
   it('verifies every bundled asset hash and never hotlinks', async () => {
     const { result, input } = await render();
-    for (const binding of input.assets) {
-      const file = result.files.find((candidate) => candidate.path === `assets/${binding.asset.id}.png`)!;
-      expect(imageSha256(file.bytes)).toBe(binding.asset.contentHash);
+    const bindingByPath = new Map(input.assets.map((binding) => [`assets/${binding.asset.id}.png`, binding]));
+    const assetFiles = result.files.filter((file) => file.path.startsWith('assets/'));
+    expect(assetFiles.length).toBeGreaterThan(0);
+    // Every bundled asset file is an approved binding whose bytes match its recorded content hash.
+    for (const file of assetFiles) {
+      const binding = bindingByPath.get(file.path);
+      expect(binding).toBeDefined();
+      expect(imageSha256(file.bytes)).toBe(binding!.asset.contentHash);
     }
-    expect(result.usedAssetHashes.length).toBeGreaterThan(0);
+    // The advertised used-asset hashes correspond exactly to the assets actually bundled/rendered —
+    // no phantom asset is written or advertised without appearing in a section.
+    expect(result.usedAssetHashes.length).toBe(assetFiles.length);
+    expect([...result.usedAssetHashes].sort()).toEqual(assetFiles.map((file) => imageSha256(file.bytes)).sort());
+  });
+
+  it('renders every bundled asset and advertises no phantom (reserved-but-dropped) asset', async () => {
+    const { result, input } = await render();
+    const bundledAssetPaths = result.files
+      .filter((file) => file.path.startsWith('assets/')).map((file) => file.path).sort();
+    // The bundle never carries more approved assets than any component actually renders (a portrait
+    // rail with more approved portraits than verified people used to reserve and silently drop one).
+    expect(bundledAssetPaths.length).toBeLessThanOrEqual(input.assets.length);
+    expect(bundledAssetPaths.length).toBe(result.usedAssetHashes.length);
+    for (const document of result.documents) {
+      const imgAssetSrcs = [...document.html.matchAll(/<img[^>]+src="([^"]+)"/gi)]
+        .map((match) => match[1]!).filter((src) => src.startsWith('assets/'));
+      // Every bundled asset is rendered exactly once, and no <img> references an unbundled asset:
+      // advertised == rendered, so no approved asset is reserved yet dropped.
+      expect([...new Set(imgAssetSrcs)].sort()).toEqual(bundledAssetPaths);
+      expect(imgAssetSrcs.length).toBe(bundledAssetPaths.length);
+    }
   });
 
   it('applies focal points and intrinsic dimensions to every image', async () => {
@@ -241,6 +267,29 @@ describe('Demo V2 multilingual behaviour', () => {
     const { result, input } = await render();
     const quality = checks(result, input.faq.entries.length);
     expect(quality.issues.filter((issue) => issue.code === 'mixed_language')).toHaveLength(0);
+  });
+
+  it('renders English treatment names and image alt text with no German source leak', async () => {
+    const { result } = await render();
+    const en = result.documents.find((doc) => doc.language === 'en')!.html;
+    // Verified treatment labels resolve to their vetted English names, never the German source label.
+    expect(en).toContain('Periodontology');
+    expect(en).toContain('Aesthetic dentistry');
+    for (const german of ['Parodontologie', 'Ästhetische Zahnheilkunde', 'Implantologie', 'Prophylaxe']) {
+      expect(en).not.toContain(german);
+    }
+    // Image alt text on the English page carries no source-page (German) alt strings.
+    const altTexts = [...en.matchAll(/<img[^>]*\balt="([^"]*)"/gi)].map((match) => match[1]!);
+    expect(altTexts.length).toBeGreaterThan(0);
+    for (const alt of altTexts) {
+      for (const german of ['Innenansicht', 'Fassade', 'Praxisräume', 'Behandlung', 'ruhigen']) {
+        expect(alt).not.toContain(german);
+      }
+    }
+    // The German primary page still carries the native labels and alt text.
+    const de = result.documents.find((doc) => doc.language === 'de')!.html;
+    expect(de).toContain('Parodontologie');
+    expect(de.match(/<img[^>]*\balt="[^"]*(Innenansicht|Fassade)[^"]*"/i)).not.toBeNull();
   });
 
   it('persists language locally without any network translation', async () => {

@@ -247,13 +247,25 @@ export class MockDemoV2TranslationProvider implements DemoV2TranslationProvider 
   }>> {
     return primary.items.filter((item) => item.translatable).map((item) => {
       const known = Object.entries(UI[primary.language]).find(([, value]) => value === item.textValue)?.[0];
+      // Vetted English for the fictional acceptance clinics' verified service names, so an English
+      // render is fully English rather than echoing a source-language treatment label. Every service
+      // name used by the acceptance fixtures (DE/FR/HE/AR) is covered here.
       const factualTranslations: Record<string, string> = {
         Implantologie: 'Implant dentistry',
         Prophylaxe: 'Preventive care',
+        Parodontologie: 'Periodontology',
+        'Ästhetische Zahnheilkunde': 'Aesthetic dentistry',
         'Soins préventifs': 'Preventive care',
+        'Dentisterie esthétique': 'Aesthetic dentistry',
         'רפואת שיניים משמרת': 'Preventive dentistry',
+        'רפואה מונעת': 'Preventive care',
+        פריודונטיה: 'Periodontology',
+        'רפואת שיניים אסתטית': 'Aesthetic dentistry',
         שתלים: 'Dental implants',
         'طب الأسنان الوقائي': 'Preventive dentistry',
+        'الطب الوقائي': 'Preventive care',
+        'أمراض اللثة': 'Periodontology',
+        'طب الأسنان التجميلي': 'Aesthetic dentistry',
         'زراعة الأسنان': 'Dental implants',
       };
       // Vetted UI and FAQ concierge strings resolve to their prepared English wording; verified
