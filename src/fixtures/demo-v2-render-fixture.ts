@@ -1,6 +1,9 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { orchestrateDemoV2Fixture, type DemoV2FixtureInput } from '../domain/demo-v2/orchestration-service.js';
 import { type RenderAssetBinding, type RenderInput, type TeamVisualMode } from '../domain/demo-v2/render/renderer.js';
 import { assetSelectionProposalSchema } from '../domain/demo-v2/orchestration-types.js';
+import { type AllowedAssetCategory } from '../domain/demo-v2/render/components.js';
 import { demoV2Hash } from '../domain/demo-v2/hash.js';
 import { fictionalPng, imageSha256 } from './demo-v2-images.js';
 
@@ -46,6 +49,98 @@ export function fictionalClinicImages(): Record<keyof typeof IMAGES, GeneratedIm
   return imageCache;
 }
 
+/**
+ * The five committed, context-readable fictional clinic photographs used by THIS fictional
+ * acceptance fixture (the German premium demo). They are synthetic, locally supplied fixture
+ * imagery — not real clinic or patient photography — tracked under design-library and read directly
+ * from disk. The tracked design-library files are the single source of truth; nothing is ever
+ * sourced from the gitignored demos/ output. The FR/HE/AR multilang fixtures keep the deterministic
+ * `fictionalClinicImages` pack above; this replacement is scoped to the fictional acceptance demo.
+ */
+export const FICTIONAL_CLINIC_ASSET_PROVENANCE =
+  'synthetic, locally supplied fictional fixture imagery (design-library/fictional-clinic-assets); no real clinic, patient, person, or address';
+
+const CLINIC_ASSET_DIR = 'design-library/fictional-clinic-assets';
+
+export type ClinicPhotoKey = 'hero' | 'story' | 'treatment' | 'team' | 'location';
+
+interface ClinicPhotoSpec {
+  key: ClinicPhotoKey;
+  /** Tracked source file under {@link CLINIC_ASSET_DIR}; the single source of truth. */
+  file: string;
+  /** Fictional CDN path used as the page <img src> and by asset discovery. */
+  path: string;
+  /**
+   * EXPLICIT asset category, stored here rather than inferred from the PNG filename. The build
+   * asserts production discovery classifies the image to exactly this category and fails closed
+   * otherwise, so the five images land deterministically in their intended sections:
+   * HERO→hero, CLINIC_INTERIOR→clinic story/reception, TREATMENT→treatment, TEAM→team,
+   * EXTERIOR→location/interior gallery.
+   */
+  category: AllowedAssetCategory;
+  /** Native-language (German) alt text; also the discovery classification signal. */
+  altDe: string;
+}
+
+/**
+ * hero-interior → hero / clinic interior; reception-story → practice story / reception;
+ * treatment-room → treatment; team-group → Team; entrance-exterior → location / exterior / gallery.
+ */
+export const CLINIC_PHOTO_SPECS: readonly ClinicPhotoSpec[] = [
+  { key: 'hero', file: 'hero-interior.png', path: '/media/praxis-hero.png', category: 'HERO',
+    altDe: 'Heller, einladender Empfangsbereich der Praxis' },
+  { key: 'story', file: 'reception-story.png', path: '/media/empfang-innenansicht.png', category: 'CLINIC_INTERIOR',
+    altDe: 'Innenansicht des Empfangs- und Wartebereichs' },
+  { key: 'treatment', file: 'treatment-room.png', path: '/media/behandlungszimmer.png', category: 'TREATMENT',
+    altDe: 'Modernes Behandlungszimmer mit Behandlungsstuhl' },
+  { key: 'team', file: 'team-group.png', path: '/media/praxisteam.png', category: 'TEAM',
+    altDe: 'Das Praxisteam im Empfangsbereich' },
+  { key: 'location', file: 'entrance-exterior.png', path: '/media/praxis-fassade.png', category: 'EXTERIOR',
+    altDe: 'Eingang und Fassade der Praxis von außen' },
+] as const;
+
+export interface ClinicPhoto {
+  url: string;
+  bytes: Buffer;
+  width: number;
+  height: number;
+  /** SHA-256 of the actual file bytes read from disk. */
+  hash: string;
+  category: AllowedAssetCategory;
+  altDe: string;
+  /** Recorded provenance: synthetic, locally supplied fictional fixture imagery. */
+  provenance: string;
+}
+
+let photoCache: Record<ClinicPhotoKey, ClinicPhoto> | null = null;
+
+/** Read a PNG's intrinsic dimensions from its IHDR chunk (big-endian uint32 at offsets 16/20). */
+function pngDimensions(bytes: Buffer): { width: number; height: number } {
+  if (bytes.length < 24 || bytes.readUInt32BE(0) !== 0x89504e47) {
+    throw new Error('fixture_clinic_asset_not_png');
+  }
+  return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
+}
+
+/**
+ * Load the five tracked clinic photographs, reading the actual bytes and computing a SHA-256 hash
+ * over them. Cached per process (byte-stable) so repeated fixture builds do not re-read from disk.
+ */
+export function fictionalClinicPhotos(): Record<ClinicPhotoKey, ClinicPhoto> {
+  if (photoCache) return photoCache;
+  const out = {} as Record<ClinicPhotoKey, ClinicPhoto>;
+  for (const spec of CLINIC_PHOTO_SPECS) {
+    const bytes = readFileSync(resolve(CLINIC_ASSET_DIR, spec.file));
+    const { width, height } = pngDimensions(bytes);
+    out[spec.key] = {
+      url: `${BASE}${spec.path}`, bytes, width, height, hash: imageSha256(bytes),
+      category: spec.category, altDe: spec.altDe, provenance: FICTIONAL_CLINIC_ASSET_PROVENANCE,
+    };
+  }
+  photoCache = out;
+  return photoCache;
+}
+
 /** The exact 14-section experience plan for the acceptance fixture. */
 export const ACCEPTANCE_PLAN_SECTIONS = [
   { order: 1, componentFamily: 'disclosure' },
@@ -67,7 +162,7 @@ export const ACCEPTANCE_PLAN_SECTIONS = [
 export function germanClinicFixtureInput(manifests: {
   componentVersion: string; componentHash: string; referenceVersion: string; referenceHash: string;
 }): DemoV2FixtureInput {
-  const images = fictionalClinicImages();
+  const photos = fictionalClinicPhotos();
   const source = (
     id: string,
     kind: 'LEAD_FACT' | 'AUDIT_FINDING' | 'CAPTURE_EVIDENCE',
@@ -107,22 +202,24 @@ export function germanClinicFixtureInput(manifests: {
       id: 'lindenhof-page-home',
       url: BASE,
       captureEvidenceId: null,
+      // Each <img> alt is the explicit native-language description that production asset-discovery
+      // classifies from; buildAcceptanceFixture asserts the resulting category matches the EXPLICIT
+      // category stored on each photo spec (fail-closed), so the five images are never mis-placed.
       html: `<html lang="de"><head></head><body><main>`
         + `<section><h1>Zahnarztpraxis Lindenhof</h1>`
-        + `<img src="${images.interior.url}" alt="Innenansicht der ruhigen Praxisräume"></section>`
-        + `<section><img src="${images.architecture.url}" alt="Fassade und Architektur der Praxis"></section>`
-        + `<section><figure><img src="${images.doctor.url}" alt="Dr. Beispiel, Zahnärztin">`
+        + `<img src="${photos.hero.url}" alt="${photos.hero.altDe}"></section>`
+        + `<section><img src="${photos.story.url}" alt="${photos.story.altDe}"></section>`
+        + `<section><img src="${photos.treatment.url}" alt="${photos.treatment.altDe}"></section>`
+        + `<section><figure><img src="${photos.team.url}" alt="${photos.team.altDe}">`
         + `<figcaption>Verifiziertes Praxisteam</figcaption></figure></section>`
-        + `<section><img src="${images.team.url}" alt="Praxisteam im Empfangsbereich"></section>`
-        + `<section><img src="${images.treatment.url}" alt="Behandlungssituation im Behandlungszimmer"></section>`
-        + `<section><img src="${images.location.url}" alt="Standort und Eingang der Praxis"></section>`
+        + `<section><img src="${photos.location.url}" alt="${photos.location.altDe}"></section>`
         + `</main></body></html>`,
     }],
     officialWebsiteUrl: BASE,
     approvedCdnHosts: [],
-    assetFetchResults: Object.fromEntries(Object.values(images).map((image) => [image.url, {
-      finalUrl: image.url, redirectUrls: [] as string[], mimeType: 'image/png',
-      bytes: image.bytes.length, width: image.width, height: image.height, contentHash: image.hash,
+    assetFetchResults: Object.fromEntries(Object.values(photos).map((photo) => [photo.url, {
+      finalUrl: photo.url, redirectUrls: [] as string[], mimeType: 'image/png',
+      bytes: photo.bytes.length, width: photo.width, height: photo.height, contentHash: photo.hash,
     }])),
     componentRegistry: { version: manifests.componentVersion, hash: manifests.componentHash },
     referenceLibrary: { version: manifests.referenceVersion, hash: manifests.referenceHash },
@@ -164,20 +261,32 @@ export async function buildAcceptanceFixture(manifests: {
   referenceFamily?: string;
   planSections?: readonly { order: number; componentFamily: string }[];
   /**
-   * DoctorFeature presentation mode. Default `doctor-portrait` preserves the approved-portrait
-   * behaviour so the fixture's general renderer behaviour still exercises the doctor image. The
-   * fictional demo bundle (renderFixtureBundle) opts into `group-photo`; `text-only` is also
-   * supported. This is an explicit config value, never inferred.
+   * DoctorFeature presentation mode. Default `group-photo` is the fictional demo's canonical form:
+   * it features the approved verified TEAM group photograph in the team section (the five-photo pack
+   * has no DOCTOR portrait). `text-only` and `doctor-portrait` remain supported for renderer
+   * coverage. This is an explicit config value, never inferred.
    */
   teamVisualMode?: TeamVisualMode;
 } = {}): Promise<AcceptanceFixture> {
-  const teamVisualMode: TeamVisualMode = options.teamVisualMode ?? 'doctor-portrait';
+  const teamVisualMode: TeamVisualMode = options.teamVisualMode ?? 'group-photo';
   const input = germanClinicFixtureInput(manifests);
   const orchestration = await orchestrateDemoV2Fixture(input);
-  const images = fictionalClinicImages();
+  const photos = fictionalClinicPhotos();
   const bytesByHash = new Map<string, Buffer>(
-    Object.values(images).map((image) => [image.hash, image.bytes]),
+    Object.values(photos).map((photo) => [photo.hash, photo.bytes]),
   );
+
+  // Fail closed if production asset-discovery ever classifies a fixture photo differently from its
+  // EXPLICIT stored category. Categories are declared on CLINIC_PHOTO_SPECS, never inferred from the
+  // PNG filename; this assertion keeps the declared category authoritative and the five images
+  // deterministically placed in their intended sections.
+  for (const photo of Object.values(photos)) {
+    const discovered = orchestration.assets.find((candidate) => candidate.contentHash === photo.hash);
+    if (!discovered) throw new Error(`fixture_clinic_asset_not_discovered:${photo.url}`);
+    if (discovered.category !== photo.category) {
+      throw new Error(`fixture_clinic_asset_category_mismatch:${photo.url}:${discovered.category}!=${photo.category}`);
+    }
+  }
 
   const assets: RenderAssetBinding[] = orchestration.selections.map((selection) => {
     const asset = orchestration.assets.find((candidate) => candidate.id === selection.assetId)!;
@@ -187,11 +296,12 @@ export async function buildAcceptanceFixture(manifests: {
     return { selection, asset, bytes, reuseApproved: true };
   });
 
-  // Group-photo mode: approve the verified TEAM group photograph for the team section. It is a real
-  // discovered candidate (SHA-256-bound, first-party, SUITABLE) that the default priority caps out
-  // of the top selections; approving it here is the explicit operator decision to feature the group
-  // photo and intentionally exclude the low-quality DOCTOR portrait. Provenance and the record/content
-  // hash bindings are preserved, so deterministic allocation still governs what is bundled.
+  // Group-photo mode: feature the verified TEAM group photograph in the team section. It is a real
+  // discovered candidate (SHA-256-bound, first-party, SUITABLE). With the five-photo pack it is
+  // already among the deterministic selections, so we keep it as-is; only when an older selection
+  // budget caps it out do we add the explicit approval selection below. Either way the intentional
+  // decision is to feature the group photo and never a DOCTOR portrait (there is none), and the
+  // record/content hash bindings are preserved so deterministic allocation governs what is bundled.
   if (teamVisualMode === 'group-photo') {
     const team = orchestration.assets.find((candidate) => candidate.category === 'TEAM'
       && candidate.quality === 'SUITABLE' && candidate.availability === 'AVAILABLE'
@@ -199,9 +309,8 @@ export async function buildAcceptanceFixture(manifests: {
     if (!team) throw new Error('fixture_group_photo_team_asset_missing');
     const bytes = bytesByHash.get(team.contentHash);
     if (!bytes) throw new Error(`fixture_group_photo_team_bytes_missing:${team.id}`);
-    if (assets.some((binding) => binding.asset.id === team.id)) {
-      throw new Error(`fixture_group_photo_team_already_selected:${team.id}`);
-    }
+    const alreadySelected = assets.some((binding) => binding.asset.id === team.id);
+    if (!alreadySelected) {
     const base = {
       id: `selection-${team.id}`,
       selectionKey: 'team-and-specialist-presentation-group',
@@ -214,12 +323,13 @@ export async function buildAcceptanceFixture(manifests: {
       overlayGuidance: 'No text overlay.',
       contrastRequirement: 'WCAG AA text contrast when text is present.',
       fallbackBehavior: 'Use a layout without photography; never replace with unrelated third-party imagery.',
-      justification: 'Approved verified TEAM group photograph; the low-quality DOCTOR portrait is intentionally excluded.',
+      justification: 'Approved verified TEAM group photograph featured in the team section; no DOCTOR portrait exists in the pack.',
       boundAssetRecordHash: team.recordHash,
       status: 'REUSE_REVIEW_REQUIRED' as const,
     };
     const selection = assetSelectionProposalSchema.parse({ ...base, selectionHash: demoV2Hash(base) });
     assets.push({ selection, asset: team, bytes, reuseApproved: true });
+    }
   }
 
   const renderInput: RenderInput = {

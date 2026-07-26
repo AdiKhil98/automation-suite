@@ -10,7 +10,7 @@ import { buildTypographyCss } from '../../src/domain/demo-v2/render/typography.j
 import {
   renderDocument, type RenderAsset, type RenderModel, type RenderSection,
 } from '../../src/domain/demo-v2/render/render-html.js';
-import { buildAcceptanceFixture, fictionalClinicImages } from '../../src/fixtures/demo-v2-render-fixture.js';
+import { buildAcceptanceFixture, fictionalClinicPhotos, fictionalClinicImages } from '../../src/fixtures/demo-v2-render-fixture.js';
 
 /**
  * Regressions for the fictional Demo V2 visual-composition polish pass. These are structural
@@ -50,7 +50,11 @@ async function renderLuxury() {
   if (!cached) cached = await renderLuxuryOnce();
   return cached;
 }
-beforeAll(async () => { await renderLuxury(); }, 60_000);
+beforeAll(async () => {
+  await renderLuxury();
+  // Warm the (slow, per-pixel) synthetic pack once so the abstract-asset assertions are instant.
+  fictionalClinicImages();
+}, 60_000);
 
 /** Extract the innerHTML of the first section carrying a given component id. */
 function section(html: string, componentId: string): string {
@@ -85,19 +89,18 @@ describe('Demo V2 team group-photo presentation', () => {
     expect(team).not.toContain('dv2-people');
   });
 
-  it('uses an approved TEAM asset and excludes the DOCTOR portrait from files, hashes, and counts', async () => {
+  it('features the real TEAM group photograph and never an old abstract asset in files, hashes, and counts', async () => {
     const { result } = await renderLuxury();
-    const teamHash = fictionalClinicImages().team.hash;
-    const doctorHash = fictionalClinicImages().doctor.hash;
+    const teamHash = fictionalClinicPhotos().team.hash;
+    const abstractHashes = new Set(Object.values(fictionalClinicImages()).map((image) => image.hash));
     const pngHashes = result.files
       .filter((file) => file.path.startsWith('assets/') && file.path.endsWith('.png'))
       .map((file) => createHash('sha256').update(file.bytes).digest('hex'));
-    // The TEAM group photo is genuinely bundled and advertised...
+    // The real TEAM group photo is genuinely bundled and advertised...
     expect(pngHashes).toContain(teamHash);
     expect(result.usedAssetHashes).toContain(teamHash);
-    // ...and the DOCTOR portrait is neither bundled, advertised, nor counted.
-    expect(pngHashes).not.toContain(doctorHash);
-    expect(result.usedAssetHashes).not.toContain(doctorHash);
+    // ...and no old abstract/generated asset is bundled, advertised, or counted.
+    for (const hash of result.usedAssetHashes) expect(abstractHashes.has(hash)).toBe(false);
     // usedAssetHashes advertises exactly the assets actually bundled — nothing extra, nothing missing.
     expect([...result.usedAssetHashes].sort()).toEqual([...pngHashes].sort());
   });
@@ -109,20 +112,18 @@ describe('Demo V2 team group-photo presentation', () => {
     expect(team).not.toMatch(/<figure[^>]*>\s*<\/figure>/);
   });
 
-  it('default mode still renders a valid approved DOCTOR portrait for future demos', async () => {
+  it('default mode is the canonical group-photo demo (features the TEAM group photograph)', async () => {
+    // The five-photo pack has no DOCTOR portrait; the fixture default is group-photo.
     const { renderInput } = await buildAcceptanceFixture(manifests, { referenceFamily: FAMILY });
     const result = renderDemoV2(renderInput);
     const de = result.documents.find((document) => document.language === 'de')!.html;
     const team = section(de, 'DoctorFeature');
-    expect(team).toContain('dv2-feature__portrait');
+    expect(team).toContain('dv2-feature--group');
     expect(team).toMatch(/<figure class="dv2-feature__portrait"><img [^>]*src="assets\/[^"]+\.png"/);
-    expect(team).not.toContain('dv2-feature--group');
     expect(team).not.toContain('dv2-feature--text');
     expect(team).toContain('Dr. Beispiel');
     expect(team).toContain('Zahnärztin');
-    // Default mode places the DOCTOR portrait and never the TEAM photo.
-    expect(result.usedAssetHashes).toContain(fictionalClinicImages().doctor.hash);
-    expect(result.usedAssetHashes).not.toContain(fictionalClinicImages().team.hash);
+    expect(result.usedAssetHashes).toContain(fictionalClinicPhotos().team.hash);
   });
 
   it('text-only mode renders the polished text-only feature and allocates no image', async () => {
@@ -135,8 +136,8 @@ describe('Demo V2 team group-photo presentation', () => {
     expect(team).not.toContain('<img');
     expect(team).toContain('Dr. Beispiel');
     expect(team).toContain('Zahnärztin');
-    expect(result.usedAssetHashes).not.toContain(fictionalClinicImages().doctor.hash);
-    expect(result.usedAssetHashes).not.toContain(fictionalClinicImages().team.hash);
+    // No team image is allocated in text-only mode.
+    expect(result.usedAssetHashes).not.toContain(fictionalClinicPhotos().team.hash);
   });
 
   it('never renders a blank asset box — a figure only exists when it wraps a real image', async () => {

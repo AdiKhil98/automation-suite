@@ -218,8 +218,11 @@ describe('Demo V2 deterministic renderer', () => {
       const spec = requireComponent(componentId);
       for (const match of block.matchAll(/assets\/(asset-[0-9a-f]+)\.png/g)) {
         const category = categoryById.get(match[1]!)!;
-        // Every rendered image's category is one the component is eligible to place.
-        expect(spec.allowedAssetCategories).toContain(category);
+        // Every rendered image's category is one the component is eligible to place. The team
+        // feature draws the TEAM group photo (group-photo mode) rather than a DOCTOR portrait.
+        const allowed = componentId === 'DoctorFeature'
+          ? [...spec.allowedAssetCategories, 'TEAM'] : spec.allowedAssetCategories;
+        expect(allowed).toContain(category);
         // A people section only ever shows a person image — never an interior/exterior/treatment.
         if (peopleComponents.has(componentId)) {
           expect(peopleCategories.has(category)).toBe(true);
