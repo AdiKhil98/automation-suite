@@ -61,6 +61,9 @@ ul,ol{margin:0;padding:0;list-style:none}
 .dv2-lang{display:inline-flex;gap:.25rem;align-items:center;font-size:var(--fs-xs)}
 .dv2-lang a{text-decoration:none;padding:.35rem .5rem;min-height:32px;display:inline-flex;align-items:center;border-radius:var(--r-sm);color:var(--c-ink-muted)}
 .dv2-lang a[aria-current=true]{background:var(--c-accent);color:var(--c-ink-on-accent);font-weight:700}
+/* Compact header-bar language switcher: hidden on desktop (the nav__links control is shown there),
+   revealed in the mobile header below so the closed-menu default always exposes DE/EN. */
+.dv2-nav__langbar{display:none}
 .dv2-nav__toggle{display:none;min-height:44px;min-width:44px;align-items:center;justify-content:center;background:transparent;border:1px solid var(--c-line);border-radius:var(--r-sm);font-size:var(--fs-sm);cursor:pointer;color:var(--c-ink)}
 .dv2-mobilenav{display:none;position:fixed;inset:0;z-index:var(--z-sticky);background:var(--c-surface);padding:var(--s6) var(--s4);flex-direction:column;gap:var(--s4);overflow-y:auto}
 .dv2-mobilenav[data-open=true]{display:flex}
@@ -187,7 +190,13 @@ const RESPONSIVE_CSS = `
 }
 @media (max-width:1023.98px){
 .dv2-nav__links{display:none}
-.dv2-nav__toggle{display:inline-flex}
+.dv2-nav__toggle{display:inline-flex;flex:0 0 auto}
+/* Always-visible compact DE/EN switcher in the header bar (brand | langbar | menu). Brand may
+   ellipsize before it would ever push into the switcher or menu button, so nothing overlaps. */
+.dv2-nav__inner{gap:var(--s2)}
+.dv2-nav__brand{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dv2-nav__langbar{display:inline-flex;flex:0 0 auto}
+.dv2-nav__langbar .dv2-lang a{min-height:44px;min-width:44px;padding:.5rem .7rem}
 .dv2-mobilebar{display:block}
 body[data-mobilebar=true]{padding-block-end:76px}
 /* The opened full-screen mobile menu carries its own appointment action and language switcher; the

@@ -165,10 +165,18 @@ function navigation(model: RenderModel, section: RenderSection, renderedAnchors:
   const appointment = model.appointmentHref
     ? `<a class="dv2-btn" href="${A(model.appointmentHref)}">${A(text(model, 'appointment.heading') ?? model.labels.appointment ?? '')}</a>`
     : '';
+  // Compact language switcher that lives in the header bar itself, so the mobile default (closed
+  // menu) always exposes the DE/EN control without opening the menu. Rendered only when a reviewed
+  // alternate language exists (languageSwitcher returns '' otherwise), and shown by CSS only below
+  // the mobile breakpoint — the desktop control inside dv2-nav__links is unchanged.
+  const compactLang = model.alternate
+    ? `<div class="dv2-nav__langbar" data-dv2-component="LanguageSwitcher">${languageSwitcher(model)}</div>`
+    : '';
   return `<header id="${A(section.anchor)}" class="dv2-nav" data-dv2-component="PremiumEditorialNavigation">`
     + `<div class="dv2-wrap dv2-wrap--wide dv2-nav__inner">`
     + `<a class="dv2-nav__brand" href="#top">${A(model.businessName)}</a>`
     + `<nav class="dv2-nav__links" aria-label="${A(model.labels.primaryNav ?? 'Primary')}">${linkHtml}${languageSwitcher(model)}${appointment}</nav>`
+    + compactLang
     + `<button class="dv2-nav__toggle" type="button" aria-expanded="false" aria-controls="dv2-mobilenav">`
     + `${A(model.labels.menu ?? 'Menu')}</button>`
     + `</div>`

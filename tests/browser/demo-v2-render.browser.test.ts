@@ -352,4 +352,132 @@ describe.skipIf(skip)('Demo V2 rendered preview (real Chromium, local only)', ()
     expect(await page.getAttribute('html', 'lang')).toBe('de');
     await context.close();
   });
+
+  // --- Always-visible compact header language switcher (the closed-menu mobile default) ---
+
+  it('shows the compact language switcher in the mobile header with the menu closed (390x844)', async () => {
+    for (const path of ['index.html', 'en.html'] as const) {
+      const { context, page } = await open('MOBILE', { path });
+      const langbar = page.locator('.dv2-nav__langbar');
+      // Visible without opening the menu, and never revealed only on hover.
+      expect(await langbar.isVisible(), `${path} visible`).toBe(true);
+      expect(await page.locator('.dv2-mobilenav').getAttribute('data-open')).toBe('false');
+      // Current language is clearly indicated via aria-current on the active link.
+      const currentCode = path === 'en.html' ? 'en' : 'de';
+      const current = page.locator(`.dv2-nav__langbar .dv2-lang a[hreflang="${currentCode}"]`);
+      expect(await current.getAttribute('aria-current')).toBe('true');
+      // Both DE and EN links are present and fully on-screen.
+      for (const code of ['de', 'en'] as const) {
+        const box = await page.locator(`.dv2-nav__langbar .dv2-lang a[hreflang="${code}"]`).boundingBox();
+        expect(box, `${path} ${code}`).not.toBeNull();
+        expect(box!.y + box!.height).toBeLessThanOrEqual(844);
+      }
+      // Keyboard focusable (a real link, reachable without pointer input).
+      const en = page.locator('.dv2-nav__langbar .dv2-lang a[hreflang="en"]');
+      await en.focus();
+      const focusedHreflang = await page.evaluate(() => {
+        const doc = (globalThis as unknown as {
+          document: { activeElement: { getAttribute: (n: string) => string | null } | null };
+        }).document;
+        return doc.activeElement?.getAttribute('hreflang') ?? '';
+      });
+      expect(focusedHreflang, `${path} keyboard`).toBe('en');
+      await context.close();
+    }
+  });
+
+  it('gives the compact header language links a ≥44px touch target on mobile (390x844)', async () => {
+    const { context, page } = await open('MOBILE');
+    for (const code of ['de', 'en'] as const) {
+      const box = await page.locator(`.dv2-nav__langbar .dv2-lang a[hreflang="${code}"]`).boundingBox();
+      expect(box, code).not.toBeNull();
+      expect(box!.height, `${code} height`).toBeGreaterThanOrEqual(44);
+      expect(box!.width, `${code} width`).toBeGreaterThanOrEqual(44);
+    }
+    await context.close();
+  });
+
+  it('keeps the compact header switcher clear of the logo, menu button, sticky CTA and concierge (390x844)', async () => {
+    type Box = { x: number; y: number; width: number; height: number };
+    const { context, page } = await open('MOBILE');
+    const rect = async (selector: string): Promise<Box> => {
+      const box = await page.locator(selector).first().boundingBox();
+      expect(box, selector).not.toBeNull();
+      return box!;
+    };
+    const lang = await rect('.dv2-nav__langbar');
+    const overlaps = (a: Box, b: Box): boolean =>
+      a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+    for (const selector of ['.dv2-nav__brand', '.dv2-nav__toggle', '.dv2-mobilebar', '.dv2-concierge__launcher']) {
+      expect(overlaps(lang, await rect(selector)), selector).toBe(false);
+    }
+    // Fully inside the viewport horizontally — never clipped at the edge.
+    expect(lang.x).toBeGreaterThanOrEqual(0);
+    expect(lang.x + lang.width).toBeLessThanOrEqual(390);
+    // Nothing paints over the switcher's centre point (it is the topmost layer there).
+    const onTop = await page.evaluate(({ x, y }) => {
+      const doc = (globalThis as unknown as {
+        document: { elementFromPoint: (x: number, y: number) => { closest: (s: string) => unknown } | null };
+      }).document;
+      const el = doc.elementFromPoint(x, y);
+      return el != null && el.closest('.dv2-nav__langbar') != null;
+    }, { x: lang.x + lang.width / 2, y: lang.y + lang.height / 2 });
+    expect(onTop).toBe(true);
+    await context.close();
+  });
+
+  it('switches the whole page DE→EN and EN→DE straight from the compact header switcher (390x844)', async () => {
+    const { context, page } = await open('MOBILE');
+    expect(await page.getAttribute('html', 'lang')).toBe('de');
+    // The switch happens from the header — the menu is never opened.
+    await page.locator('.dv2-nav__langbar .dv2-lang a[hreflang="en"]').click();
+    await page.waitForLoadState('networkidle');
+    expect(await page.getAttribute('html', 'lang')).toBe('en');
+    expect(await page.locator('.dv2-mobilenav').getAttribute('data-open')).toBe('false');
+    expect((await page.locator('.dv2-mobilebar a.dv2-btn').innerText()).toLowerCase()).toContain('appointment');
+    // From the English page the header offers German and switches the whole page back.
+    const backToGerman = page.locator('.dv2-nav__langbar .dv2-lang a[hreflang="de"]');
+    expect(await backToGerman.isVisible()).toBe(true);
+    await backToGerman.click();
+    await page.waitForLoadState('networkidle');
+    expect(await page.getAttribute('html', 'lang')).toBe('de');
+    await context.close();
+  });
+});
+
+// The compact header switcher must disappear entirely when the English package is incomplete or
+// unreviewed — the page then renders German only and offers no language control at all.
+describe.skipIf(skip)('Demo V2 compact switcher hidden when English is unavailable (real Chromium, local only)', () => {
+  let browser: Browser;
+  let dir: string;
+  let server: Server;
+  let port: number;
+
+  beforeAll(async () => {
+    const { renderInput } = await buildAcceptanceFixture(manifests, { teamVisualMode: 'group-photo' });
+    // An unreviewed English package: the renderer serves the primary language only.
+    const result = renderDemoV2({ ...renderInput, translationReviewed: false });
+    dir = await mkdtemp(join(tmpdir(), 'dv2-noen-'));
+    await mkdir(join(dir, 'assets'), { recursive: true });
+    for (const file of result.files) await writeFile(join(dir, file.path), file.bytes);
+    ({ server, port } = await startPreviewServer(dir, 0));
+    browser = await chromium.launch();
+  }, 60_000);
+
+  afterAll(async () => {
+    if (browser) await browser.close();
+    if (server) server.close();
+    if (dir) await rm(dir, { recursive: true, force: true });
+  });
+
+  it('renders no language switcher at all when English is unavailable (390x844)', async () => {
+    const context = await browser.newContext({ viewport: VIEWPORTS.MOBILE });
+    const page = await context.newPage();
+    await page.goto(`http://127.0.0.1:${String(port)}/index.html`, { waitUntil: 'networkidle' });
+    expect(await page.getAttribute('html', 'lang')).toBe('de');
+    // No alternate language → no header langbar and no switcher markup anywhere.
+    expect(await page.locator('.dv2-nav__langbar').count()).toBe(0);
+    expect(await page.locator('.dv2-lang').count()).toBe(0);
+    await context.close();
+  });
 });
