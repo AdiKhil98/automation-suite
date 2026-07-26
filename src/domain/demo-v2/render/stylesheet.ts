@@ -106,6 +106,9 @@ ul,ol{margin:0;padding:0;list-style:none}
 .dv2-feature__portrait img{width:100%;aspect-ratio:4/5;object-fit:cover}
 .dv2-feature__body h2{margin-block-end:var(--s4)}
 .dv2-feature--text{max-width:var(--w-narrow);margin-inline:auto}
+/* Group-photo team feature: a wide editorial frame (never the taller single-portrait crop). */
+.dv2-feature--group .dv2-feature__portrait{max-width:38rem}
+.dv2-feature--group .dv2-feature__portrait img{aspect-ratio:3/2}
 .dv2-person__role{color:var(--c-ink-muted);font-size:var(--fs-md);margin-block-start:var(--s1)}
 .dv2-gallery{display:grid;gap:var(--s3);margin-block-start:var(--s6)}
 .dv2-gallery img{width:100%;object-fit:cover;border-radius:var(--r-md)}
@@ -209,6 +212,29 @@ body[data-navopen=true] .dv2-mobilebar,body[data-navopen=true] .dv2-concierge__l
 .dv2-hero--full .dv2-hero__body{color:var(--c-ink);padding-block:var(--s6)}
 .dv2-hero--full .dv2-hero__body .dv2-eyebrow{color:var(--c-ink-muted)}
 .dv2-hero--full .dv2-hero__overlay{display:none}
+}
+/* Mobile legibility (≤640px, incl. the 390px review viewport): body copy already renders ≥16px via
+   the fluid type scale; here the token-driven micro-labels, secondary copy, and interactive controls
+   are enlarged, given more line-height, and — for the footer note — higher contrast, so nothing reads
+   as tiny or faint. Touch targets stay ≥44px. Desktop is untouched. */
+@media (max-width:640px){
+.dv2-disclosure{font-size:0.86rem;line-height:1.5;padding-block:var(--s3)}
+.dv2-strip{gap:var(--s6)}
+.dv2-strip__item dt,.dv2-panel dt{font-size:0.9rem;letter-spacing:.08em}
+.dv2-strip__item dd,.dv2-panel dd{font-size:1.02rem;line-height:1.55}
+.dv2-index__num{font-size:1.02rem}
+.dv2-index__name{font-size:1.16rem}
+.dv2-journey{gap:var(--s6)}
+.dv2-journey li{line-height:1.6}
+.dv2-faq__item dd{line-height:1.7}
+.dv2-faq__more{font-size:1rem}
+.dv2-footer{font-size:1.02rem}
+.dv2-footer__note{font-size:0.9rem;line-height:1.65;color:rgba(255,255,255,.9)}
+.dv2-lang{font-size:1rem}
+.dv2-lang a{min-height:44px;padding:.5rem .8rem}
+.dv2-concierge__title,.dv2-concierge__msg{font-size:0.95rem}
+.dv2-concierge__suggestion,.dv2-concierge__escalate a,.dv2-concierge__note{font-size:0.86rem}
+.dv2-concierge__suggestion,.dv2-concierge__escalate a{min-height:44px}
 }
 [dir=rtl] .dv2-index__num,[dir=rtl] .dv2-journey__num{text-align:end}
 `;

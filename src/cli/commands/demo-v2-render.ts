@@ -4,7 +4,7 @@ import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { extname, join, normalize, resolve, sep } from 'node:path';
 import { parseComponentRegistry } from '../../domain/demo-v2/manifests/component-registry.js';
 import { parseReferenceLibrary } from '../../domain/demo-v2/manifests/reference-library.js';
-import { renderDemoV2, type RenderResult } from '../../domain/demo-v2/render/renderer.js';
+import { renderDemoV2, type RenderResult, type TeamVisualMode } from '../../domain/demo-v2/render/renderer.js';
 import { runQualityChecks, type QualityCheckResult } from '../../domain/demo-v2/render/quality-checks.js';
 import { VIEWPORTS, type ViewportName } from '../../domain/demo-v2/render/design-system.js';
 import {
@@ -52,6 +52,8 @@ export interface RenderedBundle {
   componentRegistryHash: string;
   referenceLibraryHash: string;
   referenceFamily: string;
+  /** DoctorFeature presentation used for this bundle; drives the review-package Team annotation. */
+  teamVisualMode?: TeamVisualMode;
 }
 
 /** Render the fictional fixture to a local directory and run the deterministic checks. */
@@ -62,9 +64,9 @@ export async function renderFixtureBundle(options: {
   const manifest = await manifests();
   const language: RenderLanguage = options.language ?? 'de';
   const { renderInput, orchestration } = language === 'de'
-    // This fictional demo intentionally uses the polished text-only doctor feature: the approved
-    // portrait is technically valid but reads as a censored placeholder and hurts credibility.
-    ? await buildAcceptanceFixture(manifest, { referenceFamily: options.referenceFamily, textOnlyDoctorFeature: true })
+    // This fictional demo features the approved verified TEAM group photograph and intentionally
+    // excludes the low-quality DOCTOR portrait (which read as a censored placeholder).
+    ? await buildAcceptanceFixture(manifest, { referenceFamily: options.referenceFamily, teamVisualMode: 'group-photo' })
     : await buildLanguageAcceptanceFixture(language, manifest, { withEnglish: options.withEnglish });
   const render = renderDemoV2(renderInput);
 
@@ -97,6 +99,7 @@ export async function renderFixtureBundle(options: {
     componentRegistryHash: manifest.componentHash,
     referenceLibraryHash: manifest.referenceHash,
     referenceFamily: renderInput.referenceFamily,
+    teamVisualMode: renderInput.teamVisualMode ?? 'doctor-portrait',
   };
 }
 
@@ -246,7 +249,18 @@ export function buildReviewPackage(bundle: RenderedBundle, shots: ScreenshotOutc
     primaryLanguage: bundle.render.primaryLanguage,
     supportedLanguages: [...bundle.render.supportedLanguages],
     creativeBrief: bundle.brief,
-    experiencePlan: bundle.plan,
+    // The Team section explicitly records the team-visual decision for the reviewer: which approved
+    // asset was featured and that the unusable portrait was intentionally excluded.
+    experiencePlan: bundle.teamVisualMode === 'group-photo'
+      ? {
+          ...bundle.plan,
+          teamVisual: {
+            mode: 'group-photo',
+            selected: 'approved verified TEAM group photograph',
+            excluded: 'low-quality DOCTOR portrait intentionally excluded (not bundled, hashed, or counted)',
+          },
+        }
+      : bundle.plan,
     hashes: {
       intelligence: bundle.intelligenceHash,
       content: bundle.contentHash,

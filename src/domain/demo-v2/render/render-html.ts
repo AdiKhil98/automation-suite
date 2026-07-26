@@ -288,16 +288,21 @@ function people(model: RenderModel, section: RenderSection): string {
   if (section.componentId === 'DoctorFeature') {
     const person = list[0]!;
     const asset = section.assets[0];
+    // A TEAM group photograph reads as a wide editorial frame; a single DOCTOR portrait keeps the
+    // taller portrait crop. Either way the verified name/role sit beside (desktop) or below (mobile).
+    const isGroup = asset?.category === 'TEAM';
     const comma = person.value.indexOf(',');
     const name = comma === -1 ? person.value : person.value.slice(0, comma).trim();
     const role = comma === -1 ? '' : person.value.slice(comma + 1).trim();
     const body = `<div class="dv2-feature__body"><h2>${A(heading)}</h2>`
       + `<p class="dv2-person__name">${A(name)}</p>`
       + `${role ? `<p class="dv2-person__role">${A(role)}</p>` : ''}</div>`;
+    const modifier = asset ? (isGroup ? ' dv2-feature--group' : '') : ' dv2-feature--text';
+    const sizes = isGroup ? '(min-width:768px) 46vw, 100vw' : '(min-width:768px) 40vw, 100vw';
     return `<section id="${A(section.anchor)}" class="dv2-section" data-rhythm="${A(section.rhythm)}"`
       + ` data-motion="${asset ? 'IMAGE_REVEAL' : 'TEXT_REVEAL'}" data-dv2-component="DoctorFeature">`
-      + `<div class="dv2-wrap dv2-wrap--wide dv2-feature${asset ? '' : ' dv2-feature--text'}">`
-      + `${asset ? `<figure class="dv2-feature__portrait">${img(asset, '(min-width:768px) 40vw, 100vw', true, focal)}</figure>` : ''}`
+      + `<div class="dv2-wrap dv2-wrap--wide dv2-feature${modifier}">`
+      + `${asset ? `<figure class="dv2-feature__portrait">${img(asset, sizes, true, focal)}</figure>` : ''}`
       + `${body}</div></section>`;
   }
   const assets = section.assets.slice(0, 2);

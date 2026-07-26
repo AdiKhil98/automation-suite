@@ -28,8 +28,8 @@ const manifests = {
 };
 
 async function renderLuxuryOnce() {
-  // The fictional demo bundle: luxury family with the intentional text-only doctor feature.
-  const { renderInput } = await buildAcceptanceFixture(manifests, { referenceFamily: FAMILY, textOnlyDoctorFeature: true });
+  // The fictional demo bundle: luxury family featuring the approved TEAM group photograph.
+  const { renderInput } = await buildAcceptanceFixture(manifests, { referenceFamily: FAMILY, teamVisualMode: 'group-photo' });
   const result = renderDemoV2(renderInput);
   const de = result.documents.find((document) => document.language === 'de')!;
   const en = result.documents.find((document) => document.language === 'en')!;
@@ -67,50 +67,76 @@ describe('Demo V2 visual polish — deterministic validation stays clean', () =>
   });
 });
 
-describe('Demo V2 team portrait presentation', () => {
-  it('the fictional demo (textOnlyDoctorFeature) renders the polished text-only doctor feature', async () => {
+describe('Demo V2 team group-photo presentation', () => {
+  it('the fictional demo features the approved TEAM group photograph beside the verified name and role', async () => {
     const { de } = await renderLuxury();
     const team = section(de, 'DoctorFeature');
-    // Intentional text-only path for this fictional demo: name + role, no portrait figure.
-    expect(team).toContain('dv2-feature--text');
+    // Wide group-photo frame carrying a real, hash-addressed image (never a blank/reserved frame).
+    expect(team).toContain('dv2-feature--group');
+    expect(team).toContain('dv2-feature__portrait');
+    expect(team).toMatch(/<figure class="dv2-feature__portrait"><img [^>]*src="assets\/[^"]+\.png"/);
+    // Verified people info stays present and connected to the image.
     expect(team).toContain('dv2-person__name');
     expect(team).toContain('Dr. Beispiel');
     expect(team).toContain('dv2-person__role');
     expect(team).toContain('Zahnärztin');
-    // No portrait, no empty/reserved image box, no blank figure, no stranded grid card.
-    expect(team).not.toContain('dv2-feature__portrait');
-    expect(team).not.toContain('<figure');
-    expect(team).not.toContain('<img');
+    // Neither the multi-card grid nor the text-only fallback.
+    expect(team).not.toContain('dv2-feature--text');
     expect(team).not.toContain('dv2-people');
   });
 
-  it('excludes the unused doctor portrait from files, usedAssetHashes, and counts', async () => {
+  it('uses an approved TEAM asset and excludes the DOCTOR portrait from files, hashes, and counts', async () => {
     const { result } = await renderLuxury();
+    const teamHash = fictionalClinicImages().team.hash;
     const doctorHash = fictionalClinicImages().doctor.hash;
     const pngHashes = result.files
       .filter((file) => file.path.startsWith('assets/') && file.path.endsWith('.png'))
       .map((file) => createHash('sha256').update(file.bytes).digest('hex'));
-    // The approved portrait is never placed: absent from the bundled asset files and the hash list.
+    // The TEAM group photo is genuinely bundled and advertised...
+    expect(pngHashes).toContain(teamHash);
+    expect(result.usedAssetHashes).toContain(teamHash);
+    // ...and the DOCTOR portrait is neither bundled, advertised, nor counted.
     expect(pngHashes).not.toContain(doctorHash);
     expect(result.usedAssetHashes).not.toContain(doctorHash);
     // usedAssetHashes advertises exactly the assets actually bundled — nothing extra, nothing missing.
     expect([...result.usedAssetHashes].sort()).toEqual([...pngHashes].sort());
   });
 
-  it('flag false preserves the approved framed doctor portrait beside name and role', async () => {
-    const { renderInput } = await buildAcceptanceFixture(manifests, {
-      referenceFamily: FAMILY, textOnlyDoctorFeature: false,
-    });
+  it('renders the TEAM image visibly (real src + intrinsic dimensions, no blank frame)', async () => {
+    const { de } = await renderLuxury();
+    const team = section(de, 'DoctorFeature');
+    expect(team).toMatch(/<img [^>]*src="assets\/[^"]+\.png"[^>]*width="\d+"[^>]*height="\d+"/);
+    expect(team).not.toMatch(/<figure[^>]*>\s*<\/figure>/);
+  });
+
+  it('default mode still renders a valid approved DOCTOR portrait for future demos', async () => {
+    const { renderInput } = await buildAcceptanceFixture(manifests, { referenceFamily: FAMILY });
     const result = renderDemoV2(renderInput);
     const de = result.documents.find((document) => document.language === 'de')!.html;
     const team = section(de, 'DoctorFeature');
     expect(team).toContain('dv2-feature__portrait');
     expect(team).toMatch(/<figure class="dv2-feature__portrait"><img [^>]*src="assets\/[^"]+\.png"/);
+    expect(team).not.toContain('dv2-feature--group');
     expect(team).not.toContain('dv2-feature--text');
     expect(team).toContain('Dr. Beispiel');
     expect(team).toContain('Zahnärztin');
-    // The approved portrait is now genuinely placed, bundled, and advertised.
+    // Default mode places the DOCTOR portrait and never the TEAM photo.
     expect(result.usedAssetHashes).toContain(fictionalClinicImages().doctor.hash);
+    expect(result.usedAssetHashes).not.toContain(fictionalClinicImages().team.hash);
+  });
+
+  it('text-only mode renders the polished text-only feature and allocates no image', async () => {
+    const { renderInput } = await buildAcceptanceFixture(manifests, { referenceFamily: FAMILY, teamVisualMode: 'text-only' });
+    const result = renderDemoV2(renderInput);
+    const de = result.documents.find((document) => document.language === 'de')!.html;
+    const team = section(de, 'DoctorFeature');
+    expect(team).toContain('dv2-feature--text');
+    expect(team).not.toContain('<figure');
+    expect(team).not.toContain('<img');
+    expect(team).toContain('Dr. Beispiel');
+    expect(team).toContain('Zahnärztin');
+    expect(result.usedAssetHashes).not.toContain(fictionalClinicImages().doctor.hash);
+    expect(result.usedAssetHashes).not.toContain(fictionalClinicImages().team.hash);
   });
 
   it('never renders a blank asset box — a figure only exists when it wraps a real image', async () => {
@@ -123,7 +149,7 @@ describe('Demo V2 team portrait presentation', () => {
     }
   });
 
-  it('fails closed to a polished text-only feature (name/role, no figure) when no portrait exists', () => {
+  it('fails closed to a polished text-only feature (name/role, no figure) when no image exists', () => {
     const model = teamOnlyModel([]);
     const html = renderDocument(model);
     const team = section(html, 'DoctorFeature');

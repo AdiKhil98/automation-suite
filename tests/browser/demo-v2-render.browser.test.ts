@@ -29,7 +29,8 @@ describe.skipIf(skip)('Demo V2 rendered preview (real Chromium, local only)', ()
   let port: number;
 
   beforeAll(async () => {
-    const { renderInput } = await buildAcceptanceFixture(manifests);
+    // Serve the shipped fictional demo: the approved TEAM group photograph in the team section.
+    const { renderInput } = await buildAcceptanceFixture(manifests, { teamVisualMode: 'group-photo' });
     const result = renderDemoV2(renderInput);
     dir = await mkdtemp(join(tmpdir(), 'dv2-'));
     await mkdir(join(dir, 'assets'), { recursive: true });
@@ -255,6 +256,81 @@ describe.skipIf(skip)('Demo V2 rendered preview (real Chromium, local only)', ()
     // The primary appointment button is a comfortable touch target with real padding.
     const btn = await page.locator('.dv2-mobilebar a.dv2-btn').boundingBox();
     expect(btn!.height).toBeGreaterThanOrEqual(44);
+    await context.close();
+  });
+
+  it('keeps secondary labels and metadata legible — no tiny text on mobile (390x844)', async () => {
+    const { context, page } = await open('MOBILE');
+    const fontSize = (selector: string) => page.evaluate((sel) => {
+      const el = (globalThis as unknown as { document: { querySelector: (s: string) => unknown } }).document.querySelector(sel);
+      const gcs = (globalThis as unknown as { getComputedStyle: (e: unknown) => { fontSize: string } }).getComputedStyle;
+      return el ? Number.parseFloat(gcs(el).fontSize) : NaN;
+    }, selector);
+    // Trust/value labels, contact-detail labels, and footer copy must not read as tiny metadata.
+    for (const selector of ['.dv2-strip__item dt', '.dv2-panel dt', '.dv2-footer__note']) {
+      expect(await fontSize(selector), `${selector} legible`).toBeGreaterThanOrEqual(14);
+    }
+    // Their associated values stay at comfortable body size.
+    for (const selector of ['.dv2-strip__item dd', '.dv2-panel dd']) {
+      expect(await fontSize(selector), `${selector} value`).toBeGreaterThanOrEqual(16);
+    }
+    await context.close();
+  });
+
+  it('gives the footer note sufficient contrast on mobile (390x844)', async () => {
+    const { context, page } = await open('MOBILE');
+    // Composite the (semi-transparent) note colour over its footer background and compute the WCAG
+    // contrast ratio as a readability proxy for muted text.
+    const ratio = await page.evaluate(() => {
+      const g = globalThis as unknown as {
+        document: { querySelector: (s: string) => unknown };
+        getComputedStyle: (e: unknown) => { color: string; backgroundColor: string };
+      };
+      const parse = (value: string): [number, number, number, number] => {
+        const m = value.match(/rgba?\(([^)]+)\)/);
+        const p = (m ? m[1] : '0,0,0').split(',').map((n) => Number.parseFloat(n));
+        return [p[0] ?? 0, p[1] ?? 0, p[2] ?? 0, p[3] ?? 1];
+      };
+      const lin = (c: number) => { const s = c / 255; return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4; };
+      const lum = (r: number, gc: number, b: number) => 0.2126 * lin(r) + 0.7152 * lin(gc) + 0.0722 * lin(b);
+      const note = g.document.querySelector('.dv2-footer__note');
+      const footer = g.document.querySelector('.dv2-footer');
+      const [fr, fg, fb] = parse(g.getComputedStyle(footer).backgroundColor);
+      const [tr, tg, tb, ta] = parse(g.getComputedStyle(note).color);
+      // Alpha-composite text over the footer background.
+      const cr = tr * ta + fr * (1 - ta), cg = tg * ta + fg * (1 - ta), cb = tb * ta + fb * (1 - ta);
+      const l1 = lum(cr, cg, cb), l2 = lum(fr, fg, fb);
+      const [hi, lo] = l1 > l2 ? [l1, l2] : [l2, l1];
+      return (hi + 0.05) / (lo + 0.05);
+    });
+    expect(ratio).toBeGreaterThanOrEqual(4.5);
+    await context.close();
+  });
+
+  it('gives the in-menu language controls a ≥44px touch target on mobile (390x844)', async () => {
+    const { context, page } = await open('MOBILE');
+    await page.locator('.dv2-nav__toggle').click();
+    for (const code of ['en', 'de'] as const) {
+      const box = await page.locator(`.dv2-mobilenav .dv2-lang a[hreflang="${code}"]`).boundingBox();
+      expect(box, code).not.toBeNull();
+      expect(box!.height, `${code} touch target`).toBeGreaterThanOrEqual(44);
+    }
+    await context.close();
+  });
+
+  it('shows the approved TEAM group photograph in the team section on mobile (390x844)', async () => {
+    const { context, page } = await open('MOBILE');
+    await loadAllImages(page);
+    // A wide group-photo frame carrying a decoded image (never a blank placeholder).
+    expect(await page.locator('[data-dv2-component="DoctorFeature"].dv2-section .dv2-feature--group').count())
+      .toBeGreaterThan(0);
+    const natural = Number(await page.evaluate(
+      `document.querySelector('[data-dv2-component="DoctorFeature"] .dv2-feature__portrait img').naturalWidth`));
+    expect(natural).toBeGreaterThan(0);
+    // The verified name and role remain present beside the image.
+    const teamText = await page.locator('[data-dv2-component="DoctorFeature"]').innerText();
+    expect(teamText).toContain('Dr. Beispiel');
+    expect(teamText).toContain('Zahnärztin');
     await context.close();
   });
 

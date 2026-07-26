@@ -20,6 +20,15 @@ export const DEMO_V2_RENDERER_VERSION = 'demo-v2-renderer-1';
 
 type Language = 'de' | 'en' | 'fr' | 'he' | 'ar';
 
+/**
+ * How the DoctorFeature people-variant presents the team.
+ * - `doctor-portrait` (default): allocate an approved DOCTOR portrait beside the name/role.
+ * - `text-only`: allocate no image and render the polished text-only feature (name/role).
+ * - `group-photo`: allocate an approved TEAM group photograph (never a DOCTOR portrait) beside the
+ *   verified name/role.
+ */
+export type TeamVisualMode = 'doctor-portrait' | 'text-only' | 'group-photo';
+
 /** Maps an ExperiencePlan component family onto a concrete component, honouring family variants. */
 export function resolveComponentId(componentFamily: string, referenceFamily: string): string {
   const composition = compositionFor(referenceFamily);
@@ -93,13 +102,13 @@ export interface RenderInput {
   /** English FAQ rendering uses the translated question/answer records. */
   planSections: readonly { order: number; componentFamily: string }[];
   /**
-   * Component configuration (ExperiencePlan-level). When true the DoctorFeature people-variant is
-   * allocated no image and renders its polished text-only path (name + role, no portrait figure),
-   * even when an approved, hash-verified DOCTOR asset exists. Default (false/undefined) preserves the
-   * approved-portrait behaviour so future demos still render a doctor image. This is an explicit
-   * configuration flag: the renderer never infers it from clinic name, ids, filenames, or pixels.
+   * Component configuration (ExperiencePlan-level) for the DoctorFeature people-variant. Default
+   * (undefined) is `doctor-portrait`, preserving the approved-portrait behaviour so future demos
+   * still render a doctor image. `group-photo` allocates an approved TEAM asset instead of a DOCTOR
+   * portrait. This is an explicit configuration value: the renderer never infers it from clinic
+   * name, ids, filenames, or pixels.
    */
-  textOnlyDoctorFeature?: boolean;
+  teamVisualMode?: TeamVisualMode;
   assets: readonly RenderAssetBinding[];
   intelligenceHash: string;
   creativeBriefHash: string;
@@ -247,21 +256,28 @@ export function renderDemoV2(input: RenderInput): RenderResult {
   // The number of image slots a component genuinely renders. Allocation must never RESERVE more
   // approved assets than a component will place — a portrait rail with more approved portraits than
   // verified people would otherwise consume, and silently drop, the surplus approved asset.
+  const teamVisualMode: TeamVisualMode = input.teamVisualMode ?? 'doctor-portrait';
   const renderCapacity = (spec: ComponentSpec, componentId: string): number => {
     if (componentId === 'SpecialistPortraitRail' || componentId === 'TeamEditorialGrid') {
       return Math.min(spec.maxAssets, teamCount);
     }
     if (componentId === 'DoctorFeature') {
-      // Explicit demo configuration may render the polished text-only doctor feature: no image is
-      // allocated, so the approved portrait is never placed, bundled, hashed, or counted.
-      return input.textOnlyDoctorFeature ? 0 : Math.min(spec.maxAssets, teamCount, 1);
+      // text-only: allocate no image (the approved portrait is never placed, bundled, or counted).
+      // group-photo & doctor-portrait: allocate a single team-section image.
+      return teamVisualMode === 'text-only' ? 0 : Math.min(spec.maxAssets, teamCount, 1);
     }
     return spec.maxAssets;
   };
-  const takeAssets = (spec: ComponentSpec, capacity: number, used: Set<string>): RenderAsset[] => {
+  // In group-photo mode the DoctorFeature draws from the approved TEAM group photograph rather than
+  // the DOCTOR portrait; every other component keeps its declared categories, so the low-quality
+  // portrait is left unplaced (and therefore excluded from files, hashes, and counts).
+  const allowedCategoriesFor = (spec: ComponentSpec, componentId: string): readonly string[] =>
+    componentId === 'DoctorFeature' && teamVisualMode === 'group-photo'
+      ? ['TEAM'] : spec.allowedAssetCategories;
+  const takeAssets = (categories: readonly string[], capacity: number, used: Set<string>): RenderAsset[] => {
     if (capacity <= 0) return [];
     const picked: RenderAsset[] = [];
-    for (const category of spec.allowedAssetCategories) {
+    for (const category of categories) {
       for (const asset of assetByCategory.get(category) ?? []) {
         if (used.has(asset.id) || picked.length >= capacity) continue;
         picked.push(asset);
@@ -293,7 +309,7 @@ export function renderDemoV2(input: RenderInput): RenderResult {
       order: planned.order,
       componentId,
       contentKeys: [...spec.requiredContentKeys, ...spec.optionalContentKeys],
-      assets: takeAssets(spec, renderCapacity(spec, componentId), usedAssets),
+      assets: takeAssets(allowedCategoriesFor(spec, componentId), renderCapacity(spec, componentId), usedAssets),
       rhythm,
       anchor,
     });

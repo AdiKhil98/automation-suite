@@ -1,5 +1,7 @@
 import { orchestrateDemoV2Fixture, type DemoV2FixtureInput } from '../domain/demo-v2/orchestration-service.js';
-import { type RenderAssetBinding, type RenderInput } from '../domain/demo-v2/render/renderer.js';
+import { type RenderAssetBinding, type RenderInput, type TeamVisualMode } from '../domain/demo-v2/render/renderer.js';
+import { assetSelectionProposalSchema } from '../domain/demo-v2/orchestration-types.js';
+import { demoV2Hash } from '../domain/demo-v2/hash.js';
 import { fictionalPng, imageSha256 } from './demo-v2-images.js';
 
 /**
@@ -162,13 +164,14 @@ export async function buildAcceptanceFixture(manifests: {
   referenceFamily?: string;
   planSections?: readonly { order: number; componentFamily: string }[];
   /**
-   * When true the DoctorFeature people-variant renders its polished text-only path (name + role, no
-   * portrait). Default false preserves the approved-portrait behaviour. The fictional demo bundle
-   * (renderFixtureBundle) opts in explicitly; here it stays false so the fixture's general renderer
-   * behaviour still exercises the approved-portrait path.
+   * DoctorFeature presentation mode. Default `doctor-portrait` preserves the approved-portrait
+   * behaviour so the fixture's general renderer behaviour still exercises the doctor image. The
+   * fictional demo bundle (renderFixtureBundle) opts into `group-photo`; `text-only` is also
+   * supported. This is an explicit config value, never inferred.
    */
-  textOnlyDoctorFeature?: boolean;
+  teamVisualMode?: TeamVisualMode;
 } = {}): Promise<AcceptanceFixture> {
+  const teamVisualMode: TeamVisualMode = options.teamVisualMode ?? 'doctor-portrait';
   const input = germanClinicFixtureInput(manifests);
   const orchestration = await orchestrateDemoV2Fixture(input);
   const images = fictionalClinicImages();
@@ -184,6 +187,41 @@ export async function buildAcceptanceFixture(manifests: {
     return { selection, asset, bytes, reuseApproved: true };
   });
 
+  // Group-photo mode: approve the verified TEAM group photograph for the team section. It is a real
+  // discovered candidate (SHA-256-bound, first-party, SUITABLE) that the default priority caps out
+  // of the top selections; approving it here is the explicit operator decision to feature the group
+  // photo and intentionally exclude the low-quality DOCTOR portrait. Provenance and the record/content
+  // hash bindings are preserved, so deterministic allocation still governs what is bundled.
+  if (teamVisualMode === 'group-photo') {
+    const team = orchestration.assets.find((candidate) => candidate.category === 'TEAM'
+      && candidate.quality === 'SUITABLE' && candidate.availability === 'AVAILABLE'
+      && (candidate.ownership === 'FIRST_PARTY' || candidate.ownership === 'APPROVED_FIRST_PARTY_CDN'));
+    if (!team) throw new Error('fixture_group_photo_team_asset_missing');
+    const bytes = bytesByHash.get(team.contentHash);
+    if (!bytes) throw new Error(`fixture_group_photo_team_bytes_missing:${team.id}`);
+    if (assets.some((binding) => binding.asset.id === team.id)) {
+      throw new Error(`fixture_group_photo_team_already_selected:${team.id}`);
+    }
+    const base = {
+      id: `selection-${team.id}`,
+      selectionKey: 'team-and-specialist-presentation-group',
+      assetId: team.id,
+      intendedSection: 'team and specialist presentation',
+      intendedUse: 'verified team group photograph',
+      desktopCrop: { mode: 'cover' as const, aspectRatio: 1.5 },
+      mobileCrop: { mode: 'cover' as const, aspectRatio: 1.2 },
+      focalPoint: { x: 0.5, y: 0.45 },
+      overlayGuidance: 'No text overlay.',
+      contrastRequirement: 'WCAG AA text contrast when text is present.',
+      fallbackBehavior: 'Use a layout without photography; never replace with unrelated third-party imagery.',
+      justification: 'Approved verified TEAM group photograph; the low-quality DOCTOR portrait is intentionally excluded.',
+      boundAssetRecordHash: team.recordHash,
+      status: 'REUSE_REVIEW_REQUIRED' as const,
+    };
+    const selection = assetSelectionProposalSchema.parse({ ...base, selectionHash: demoV2Hash(base) });
+    assets.push({ selection, asset: team, bytes, reuseApproved: true });
+  }
+
   const renderInput: RenderInput = {
     artifactId: 'artifact-lindenhof-premium-de',
     referenceFamily: options.referenceFamily ?? orchestration.report.referenceFamily,
@@ -194,7 +232,7 @@ export async function buildAcceptanceFixture(manifests: {
     translationReviewed: true,
     faq: orchestration.content.faq,
     planSections: options.planSections ?? ACCEPTANCE_PLAN_SECTIONS,
-    textOnlyDoctorFeature: options.textOnlyDoctorFeature ?? false,
+    teamVisualMode,
     assets,
     intelligenceHash: orchestration.intelligence.package.packageHash,
     creativeBriefHash: orchestration.creativeBrief.briefHash,
