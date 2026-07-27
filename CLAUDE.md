@@ -27,13 +27,24 @@ outbound-outreach pipeline for a web-design / AI-automation services business:
 
 ## Current approved phase
 
-**Phases 0-16 are complete, committed, and tagged. Demo Engine V2 Milestone 1 is approved for an additive,
-disabled-by-default foundation only. V1 remains authoritative (`DEMO_ENGINE_VERSION=v1`,
-`DEMO_V2_ENABLED=false`).** No V2 generation, translation, asset download, rendering, visual review,
+**Phases 0-16 are complete, committed, and tagged. Demo Engine V2 fictional validation is complete (a
+fictional acceptance package reached a live Sol score of 79 with zero blockers). Phase 3C-A is approved for
+exactly ONE guarded, read-only KU64 evidence export.** V1 remains authoritative (`DEMO_ENGINE_VERSION=v1`,
+`DEMO_V2_ENABLED=false`). No V2 generation, translation, asset download, rendering, visual review,
 deployment, email, Gmail, or provider behavior is authorized. No live Gmail operation, OAuth
 reauthorization, real-data restoration, real credential ACL change, readiness approval, schedule,
 or email send is authorized. All sending flags remain disabled and the mock provider remains the
 default. `docs/CURRENT_STATUS.md` and `docs/ROADMAP.md` are the authoritative current handoff.
+
+**Phase 3C-A scope (read-only).** The `ku64-v2-export-evidence` CLI may read the operational database
+SELECT-only, under a session opened `default_transaction_read_only=on`, to export ONE lead's already-stored,
+redacted evidence into `.local-data/ku64-v2/evidence.json` (git-ignored; never staged or committed). It
+requires both `--confirm-production-read` and `ALLOW_PRODUCTION_READ_EXPORT=true`, and binds only to a lead
+whose normalized domain is exactly `ku64.de` (www accepted). It performs zero writes and never renders,
+crawls the live site, downloads KU64 media, calls Sol, deploys, drafts, schedules, or sends. It exports no
+email drafts/approvals, Gmail records, scheduling records, or outreach copy, and no raw HTML, page bodies,
+verbatim website text, or screenshot binaries. Phase 3C-B (any KU64 use of the exported evidence) remains
+blocked until the local evidence is reviewed and approved.
 
 ## Historical Phase 6 approval record (superseded)
 

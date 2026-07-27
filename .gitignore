@@ -32,6 +32,9 @@ eval-reports/
 # Generated prospect-specific demo sites (local, private until human-approved)
 /demos/
 
+# Phase 3C-A guarded KU64 evidence export (production-derived; never committed)
+/.local-data/
+
 # Local database volumes / dumps
 /.postgres-data/
 *.sql.bak

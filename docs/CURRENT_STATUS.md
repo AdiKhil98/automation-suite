@@ -2,7 +2,11 @@
 
 ## Current phase
 
-Phases 0-16 are committed and tagged. Demo Engine V2 Milestones 1, 2, 3A, 3B1, and 3B2A are implemented and locally
+Phases 0-16 are committed and tagged. Demo Engine V2 fictional validation is complete: the fictional
+acceptance package reached a live Sol score of 79 with zero blockers. Phase 3C-A — a guarded, read-only KU64
+evidence export — is approved and implemented (details below). Phase 3C-B (any KU64 use of the exported
+evidence: rendering, asset reuse, deployment, outreach) remains blocked until the local evidence is reviewed
+and approved. Demo Engine V2 Milestones 1, 2, 3A, 3B1, and 3B2A are implemented and locally
 verified. Milestone 3A adds a deterministic, code-native renderer that turns an approved fictional
 ExperiencePlan into a self-contained, responsive, bilingual (DE/EN) local website bundle with a chatbot-style
 FAQ concierge, plus deterministic structural quality checks, mock-only visual-review and revision contracts,
@@ -10,6 +14,34 @@ and local render/preview/screenshot/review-package tooling. V1 remains authorita
 `DEMO_ENGINE_VERSION=v1`, `DEMO_V2_ENABLED=false`, and every V2 provider defaults to mock. No live provider,
 paid call, deployment, screenshot-review model, email, Gmail, or scheduling path was added; the lifecycle
 still cannot reach a real AUTO_REVIEW_PASSED, HUMAN_APPROVED, or deployment-eligible state.
+
+## Phase 3C-A — guarded read-only KU64 evidence export
+
+- A new `ku64-v2-export-evidence` CLI exports exactly ONE lead's already-stored, redacted pipeline evidence
+  into `.local-data/ku64-v2/evidence.json` for private V2 preparation. `.local-data/` is git-ignored and is
+  never staged or committed.
+- Fail-closed gates (all required): `--confirm-production-read`, `ALLOW_PRODUCTION_READ_EXPORT=true`, an
+  existing `--lead-id`, an `--expected-domain` that normalizes to exactly `ku64.de` (www accepted), the lead's
+  own normalized domain matching that domain, a single-lead result, and an output path inside
+  `.local-data/ku64-v2/`. Any unrelated/dangling record fails the export closed.
+- Database access is SELECT-only. The pool opens every session `default_transaction_read_only=on` (the
+  authoritative write barrier), and a Proxy guard additionally throws if any write-capable executor method
+  (`insert`/`update`/`delete`/`execute`) is even reached. No INSERT/UPDATE/DELETE/DDL, migration, lock,
+  mutation callback, or export-timestamp write occurs under any path.
+- Exported source record types: `lead`, `lead_fact`, `qualification_result` (+ supporting lead-fact ids),
+  `audit_run`, `audit_finding` (+ bound capture-evidence ids), `audit_review`, `audit_review_finding`,
+  `opportunity_assessment`, `evidence` (metadata + normalized factual fields only), `capture_run`,
+  `captured_page`, and `capture_evidence` (metadata only).
+- Excluded by construction (never selected or emitted): raw HTML, copied page bodies, long verbatim website
+  text, screenshot binaries and paths, KU64 image/media URLs, secrets/credentials, unrelated leads, and all
+  email drafts/approvals/bodies, Gmail ids, and scheduling data.
+- The export format is deterministic: `schemaVersion`, `leadId`, `normalizedDomain`, `exportedAt`, per-record
+  `recordId`/`sourceType`/canonical `payload`/`payloadSha256`, and an aggregate `recordsSha256`. Hashing uses
+  canonical (stable-sorted key) JSON over stable-sorted records and excludes `exportedAt`, so the payload and
+  aggregate hashes are identical across runs.
+- Status: implemented, unit-tested (21 focused cases), lint/typecheck/build green. The one authorized live
+  read-only export against the operational database is an operator-run step (production read + remote target);
+  the exact command is in `docs/OPERATIONS.md`.
 
 ## Demo Engine V2 Milestone 1
 

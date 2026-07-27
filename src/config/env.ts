@@ -273,6 +273,12 @@ const envSchema = z.object({
   // Phase 15 send-time account cap. Confirmed sends only; default intentionally conservative.
   SENDING_DAILY_CAP: z.coerce.number().int().positive().default(1),
 
+  // --- Phase 3C-A: guarded read-only KU64 evidence export ---
+  // Off by default. The export CLI ALSO requires --confirm-production-read and an
+  // exact ku64.de domain binding. It performs SELECT-only reads and never writes,
+  // renders, deploys, drafts, schedules, or sends.
+  ALLOW_PRODUCTION_READ_EXPORT: boolString(false),
+
   // --- Phase 16: production safety hardening ---
   // A separate read-only Gmail preflight switch. It never authorizes sending and is off by default.
   GMAIL_SEND_PREFLIGHT_ENABLED: boolString(false),

@@ -24,6 +24,33 @@ pnpm cli lead-state <id>
 pnpm cli reset-test-data     # clears local test data only
 ```
 
+## Phase 3C-A — guarded read-only KU64 evidence export
+
+`ku64-v2-export-evidence` exports exactly ONE lead's already-stored, redacted pipeline evidence into
+`.local-data/ku64-v2/evidence.json` (git-ignored; never staged or committed) for private Demo Engine V2
+preparation. It reads the operational `DATABASE_URL` **SELECT-only** — the pool opens every session
+`default_transaction_read_only=on`, and a Proxy guard rejects any write-capable executor method — so no
+INSERT/UPDATE/DELETE/DDL/migration/lock/export-timestamp write can occur. It never renders, crawls the live
+site, downloads KU64 media, calls Sol, deploys, drafts, schedules, or sends, and it exports no raw HTML, page
+bodies, verbatim website text, screenshot binaries, media URLs, secrets, or any email/Gmail/scheduling record.
+
+It refuses to run unless ALL hold: `--confirm-production-read`, `ALLOW_PRODUCTION_READ_EXPORT=true`, an
+existing `--lead-id`, and an `--expected-domain` that normalizes to exactly `ku64.de` (www accepted) and
+matches the lead's own normalized domain. A missing/duplicate lead, domain mismatch, unrelated record, or
+out-of-tree output path fails the export closed.
+
+Because this is a production-database read against the remote Supabase target, it is an explicit
+operator-run step (it is not run from CI, tests, or an automated agent). Run it manually:
+
+```bash
+$env:ALLOW_PRODUCTION_READ_EXPORT="true"; pnpm cli ku64-v2-export-evidence --lead-id 287a6614-e2d7-44f6-8c7d-9adb0924b963 --expected-domain ku64.de --confirm-production-read
+```
+
+After it succeeds, validate the printed lead id / normalized domain binding, confirm zero writes (the command
+opens a read-only session and reports the record counts by source type and the deterministic `recordsSha256`),
+and review `.local-data/ku64-v2/evidence.json` before considering Phase 3C-B. The file is deliberately outside
+version control; do not stage or commit it.
+
 ## Operational vs. integration-test databases
 
 `DATABASE_URL` is the Supabase production database connection. It must never be used by integration tests or

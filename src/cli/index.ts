@@ -43,6 +43,7 @@ import {
   demoV2ReviewCommand, demoV2ReviseCommand, demoV2ReviewHistoryCommand, demoV2ReviewLoopCommand,
 } from './commands/demo-v2-review.js';
 import { demoV2ReviewLoopLiveCommand } from './commands/demo-v2-review-loop-live.js';
+import { ku64ExportEvidenceCommand } from './commands/ku64-v2-export-evidence.js';
 import { type MockReviewFixture } from '../domain/demo-v2/render/visual-review.js';
 
 const program = new Command();
@@ -153,6 +154,20 @@ program
   .option('--out <dir>', 'output directory', './demos/demo-v2')
   .option('--family <name>', 'override the reference family')
   .action((opts: { out?: string; family?: string }) => demoV2RenderHashCommand(opts));
+
+program
+  .command('ku64-v2-export-evidence')
+  .description([
+    'Phase 3C-A: guarded, read-only export of ONE lead\'s stored evidence into .local-data/ku64-v2/evidence.json for private V2 prep.',
+    'SELECT-only; session is opened read-only. Refuses to run without --confirm-production-read AND ALLOW_PRODUCTION_READ_EXPORT=true,',
+    'and only binds to a lead whose normalized domain is exactly ku64.de (www accepted).',
+    'Never renders, deploys, downloads media, drafts, schedules, sends, or writes to the database.',
+  ].join(' '))
+  .requiredOption('--lead-id <id>', 'exact internal lead id to export')
+  .requiredOption('--expected-domain <domain>', 'must normalize to ku64.de (www accepted)')
+  .option('--confirm-production-read', 'REQUIRED: explicitly acknowledge this reads the production database')
+  .action((opts: { leadId: string; expectedDomain: string; confirmProductionRead?: boolean }) =>
+    withConfigOnly((config, logger) => ku64ExportEvidenceCommand(config, logger, opts)));
 
 program
   .command('create-sample-leads')

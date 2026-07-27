@@ -2,11 +2,14 @@
 
 **Status:** Phases 0-16 are complete, committed and tagged through
 `phase-16-production-safety-hardening` (`9092606`). Bounded radius prospecting is committed (`2fe45de`).
-A post-Phase-16 controlled validation orchestrator remains non-sendable. Demo Engine V2 Milestones 1 and 2 are
-implemented as an isolated, disabled-by-default, mock-only intelligence/content/asset/design foundation. No V2
-render, approval, deployment, or live-provider path exists. Phase 9 email generation uses Cold Email Copy
-Standard v2 with deterministic and independent-reviewer quality gates.
-**Last updated:** 2026-07-23
+A post-Phase-16 controlled validation orchestrator remains non-sendable. Demo Engine V2 fictional validation
+is complete — a fictional acceptance package reached a live Sol score of 79 with zero blockers. **Phase 3C-A —
+a guarded, read-only KU64 evidence export — is approved and implemented.** Phase 3C-B (any KU64 use of the
+exported evidence) remains blocked until the local evidence is reviewed and approved. Demo Engine V2
+Milestones 1 and 2 are implemented as an isolated, disabled-by-default, mock-only intelligence/content/asset/
+design foundation. No V2 render, approval, deployment, or live-provider path exists. Phase 9 email generation
+uses Cold Email Copy Standard v2 with deterministic and independent-reviewer quality gates.
+**Last updated:** 2026-07-27
 
 One phase at a time. Each phase ends with tests, a commit, an annotated tag, and an explicit approval gate.
 No phase begins before the previous one is approved with `APPROVE PHASE X`.
@@ -50,6 +53,17 @@ review is advisory only and cannot authorize deployment. See D-0037.
 Milestone 2 writes versioned Milestone 1 packages from accepted source records and exact fingerprints. Its
 bounded mock providers make zero paid calls; translation and asset reuse remain human-review gated; lifecycle
 advancement stops at `HUMAN_REVIEW_REQUIRED`. V1 remains selected and unchanged. See D-0039.
+
+> **Phase 3C-A — guarded read-only KU64 evidence export:** a single `ku64-v2-export-evidence` CLI reads the
+> operational database SELECT-only (session `default_transaction_read_only=on`, plus a write-method Proxy
+> guard) to export ONE lead's already-stored, redacted evidence into `.local-data/ku64-v2/evidence.json`
+> (git-ignored). It requires `--confirm-production-read` and `ALLOW_PRODUCTION_READ_EXPORT=true`, binds only to
+> a lead whose normalized domain is exactly `ku64.de` (www accepted), and fails closed on a missing gate,
+> missing/duplicate lead, domain mismatch, unrelated/dangling record, reachable write method, or an output
+> path outside `.local-data/ku64-v2/`. The deterministic export excludes raw HTML, page bodies, verbatim
+> website text, screenshot binaries, media URLs, secrets, and all email/Gmail/scheduling/outreach records.
+> It does NOT authorize rendering, deployment, email, scheduling, live-site crawling, asset reuse, Sol calls,
+> or database writes. **Phase 3C-B remains blocked** until the exported local evidence is reviewed and approved.
 
 > **Controlled prospect validation extension:** the normal prospect continuation remains conservative.
 > An explicit `--controlled-test` mode may process exactly one qualified lead through the existing capture,
