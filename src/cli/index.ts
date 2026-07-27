@@ -44,6 +44,7 @@ import {
 } from './commands/demo-v2-review.js';
 import { demoV2ReviewLoopLiveCommand } from './commands/demo-v2-review-loop-live.js';
 import { ku64ExportEvidenceCommand } from './commands/ku64-v2-export-evidence.js';
+import { demoV2RenderEvidenceCommand } from './commands/demo-v2-render-evidence.js';
 import { type MockReviewFixture } from '../domain/demo-v2/render/visual-review.js';
 
 const program = new Command();
@@ -66,6 +67,16 @@ program
   .option('--out <dir>', 'output directory', './demos/demo-v2')
   .option('--family <name>', 'override the reference family')
   .action((opts: { out?: string; family?: string }) => demoV2RenderCommand(opts));
+
+program
+  .command('demo-v2-render-evidence')
+  .description('Render a private, local review bundle from an already-exported redacted evidence JSON, using the tracked synthetic illustrative image pool (clearly disclosed). Reads only the local file; never touches a database, live site, Sol, deployment, Gmail, email, or scheduling. Output is git-ignored and never committed.')
+  .requiredOption('--evidence <path>', 'path to an exported evidence JSON (e.g. .local-data/ku64-v2/evidence.json)')
+  .option('--out <dir>', 'output directory (git-ignored)', './demos/ku64-v2')
+  .option('--family <name>', 'override the reference family')
+  .option('--review-package', 'also capture screenshots and write review-package.json')
+  .action((opts: { evidence: string; out?: string; family?: string; reviewPackage?: boolean }) =>
+    demoV2RenderEvidenceCommand(opts));
 
 program
   .command('demo-v2-preview')

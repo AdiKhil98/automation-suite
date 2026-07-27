@@ -48,6 +48,11 @@ export interface RenderModel {
   referenceFamily: string;
   businessName: string;
   content: Readonly<Record<string, string>>;
+  /**
+   * Optional illustrative/provenance notice for this document's language, shown inside the concept
+   * disclosure bar. Absent/`null` (the default) renders the disclosure bar exactly as before.
+   */
+  assetDisclosure?: string | null;
   faq: readonly RenderFaqEntry[];
   sections: readonly RenderSection[];
   /** Present only when a complete reviewed secondary package exists. */
@@ -155,8 +160,15 @@ function languageSwitcher(model: RenderModel): string {
 function conceptDisclosureBar(model: RenderModel, section: RenderSection): string {
   const value = text(model, 'disclosure.text');
   if (!value) throw new Error('demo_v2_render_missing_required_content:disclosure.text');
+  // Optional illustrative-imagery notice appended as a second line inside the same note. When absent
+  // (the default) the disclosure bar renders byte-identically to before, so existing renders and
+  // their hashes are unchanged.
+  const hasNote = model.assetDisclosure != null && model.assetDisclosure.trim() !== '';
+  const inner = hasNote
+    ? `<span>${A(value)}</span> <span class="dv2-disclosure__assets">${A(model.assetDisclosure!)}</span>`
+    : A(value);
   return `<div id="${A(section.anchor)}" class="dv2-disclosure" role="note"`
-    + ` data-dv2-component="ConceptDisclosureBar">${A(value)}</div>`;
+    + ` data-dv2-component="ConceptDisclosureBar">${inner}</div>`;
 }
 
 function navigation(model: RenderModel, section: RenderSection, renderedAnchors: ReadonlySet<string>): string {

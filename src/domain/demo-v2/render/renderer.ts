@@ -125,6 +125,16 @@ export interface RenderInput {
     whatsappUrl: string | null;
     locationUrl: string | null;
   };
+  /**
+   * Optional, general, per-language provenance/illustrative notice for the imagery used in this
+   * render, keyed by language code. When a render reuses stock, synthetic, or otherwise
+   * illustrative assets that are NOT first-party photographs of the business, this notice is shown
+   * inside the concept disclosure bar so the reviewer is never misled about what the images depict.
+   * It is a plain string per language (never markup) and is entirely optional: when absent the
+   * disclosure bar renders byte-identically to before. Each string should avoid the marker words of
+   * OTHER supported languages so a single-language document never reads as mixed-language.
+   */
+  assetDisclosure?: Readonly<Record<string, string>> | null;
 }
 
 export interface RenderedFile {
@@ -354,12 +364,18 @@ export function renderDemoV2(input: RenderInput): RenderResult {
     })).filter((entry) => content[`faq.${entry.topic}.question`] !== undefined);
 
     const alternateLanguage = languages.find((candidate) => candidate !== language) ?? null;
+    // The illustrative-asset notice, resolved to this document's language (falling back to the
+    // primary language, then omitted). It is never inferred from ids, filenames, or pixels.
+    const assetDisclosure = input.assetDisclosure
+      ? input.assetDisclosure[language] ?? input.assetDisclosure[primaryLanguage] ?? null
+      : null;
     const model: RenderModel = {
       language,
       direction: expectedDirection(language),
       referenceFamily: input.referenceFamily,
       businessName: input.businessName,
       content,
+      assetDisclosure,
       faq: faqEntries,
       sections,
       alternate: alternateLanguage

@@ -4,8 +4,10 @@
 `phase-16-production-safety-hardening` (`9092606`). Bounded radius prospecting is committed (`2fe45de`).
 A post-Phase-16 controlled validation orchestrator remains non-sendable. Demo Engine V2 fictional validation
 is complete — a fictional acceptance package reached a live Sol score of 79 with zero blockers. **Phase 3C-A —
-a guarded, read-only KU64 evidence export — is approved and implemented.** Phase 3C-B (any KU64 use of the
-exported evidence) remains blocked until the local evidence is reviewed and approved. Demo Engine V2
+a guarded, read-only KU64 evidence export — is approved and implemented.** **Phase 3C-B — a private,
+local-only review package rendered from that exported evidence — is approved and implemented** (reusable
+adapter + tests + docs committed; the KU64 render is git-ignored and never committed). No Sol scoring, visual
+review, deployment, or outreach use of the render is authorized. Demo Engine V2
 Milestones 1 and 2 are implemented as an isolated, disabled-by-default, mock-only intelligence/content/asset/
 design foundation. No V2 render, approval, deployment, or live-provider path exists. Phase 9 email generation
 uses Cold Email Copy Standard v2 with deterministic and independent-reviewer quality gates.
@@ -64,6 +66,23 @@ advancement stops at `HUMAN_REVIEW_REQUIRED`. V1 remains selected and unchanged.
 > website text, screenshot binaries, media URLs, secrets, and all email/Gmail/scheduling/outreach records.
 > It does NOT authorize rendering, deployment, email, scheduling, live-site crawling, asset reuse, Sol calls,
 > or database writes. **Phase 3C-B remains blocked** until the exported local evidence is reviewed and approved.
+
+> **Phase 3C-B — private, local-only review package from exported evidence (approved and implemented):** a
+> business-agnostic adapter (`evidence-render-input.ts`) maps the immutable export envelope onto the existing
+> Milestone 2 mock orchestration, so every rendered factual claim stays bound to the exact exported record that
+> authorized it; sparse evidence yields a shorter, honest page rather than fabricated content. A general,
+> additive `assetDisclosure` render field carries a per-language illustrative-imagery notice (absent by default,
+> so existing render hashes are unchanged), and a general `demo-v2-render-evidence` CLI renders any exported
+> bundle using a caller-supplied illustrative image pool. The general renderer gained no business-specific
+> conditional. The KU64 review package (`demos/ku64-v2/`, git-ignored, never committed) was generated locally
+> from the exported evidence: verified identity, the six verified services with clean spacing (F1 de-glue fix),
+> verified address, verified phone as the appointment channel, and an evidence-gated FAQ. Findings F1/F2 inform
+> the build but are never rendered as visitor text; F3 was not restored. The five synthetic clinic assets are
+> the illustrative pool, disclosed on-page as illustrative and not depicting KU64. The render is German-only
+> (English mock-prepared but withheld as un-reviewed), deterministic, zero quality blockers,
+> `deploymentEligible: false`. No Sol, deployment, Gmail, email, scheduling, outbound, database, or live-site
+> action occurred. Sol scoring, visual review, human approval, deployment, and outreach remain blocked pending
+> separate explicit approval.
 
 > **Controlled prospect validation extension:** the normal prospect continuation remains conservative.
 > An explicit `--controlled-test` mode may process exactly one qualified lead through the existing capture,

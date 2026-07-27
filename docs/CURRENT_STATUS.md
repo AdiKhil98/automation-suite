@@ -4,9 +4,10 @@
 
 Phases 0-16 are committed and tagged. Demo Engine V2 fictional validation is complete: the fictional
 acceptance package reached a live Sol score of 79 with zero blockers. Phase 3C-A — a guarded, read-only KU64
-evidence export — is approved and implemented (details below). Phase 3C-B (any KU64 use of the exported
-evidence: rendering, asset reuse, deployment, outreach) remains blocked until the local evidence is reviewed
-and approved. Demo Engine V2 Milestones 1, 2, 3A, 3B1, and 3B2A are implemented and locally
+evidence export — is approved and implemented (details below). Phase 3C-B — a private, local-only review
+package rendered from that exported evidence — is approved and implemented (details below); the KU64 render
+itself is git-ignored and never committed, and no Sol scoring, visual review, deployment, or outreach is
+authorized. Demo Engine V2 Milestones 1, 2, 3A, 3B1, and 3B2A are implemented and locally
 verified. Milestone 3A adds a deterministic, code-native renderer that turns an approved fictional
 ExperiencePlan into a self-contained, responsive, bilingual (DE/EN) local website bundle with a chatbot-style
 FAQ concierge, plus deterministic structural quality checks, mock-only visual-review and revision contracts,
@@ -42,6 +43,39 @@ still cannot reach a real AUTO_REVIEW_PASSED, HUMAN_APPROVED, or deployment-elig
 - Status: implemented, unit-tested (21 focused cases), lint/typecheck/build green. The one authorized live
   read-only export against the operational database is an operator-run step (production read + remote target);
   the exact command is in `docs/OPERATIONS.md`.
+
+## Phase 3C-B — private, local-only review package from exported evidence
+
+- The committed, reusable code is business-agnostic: a generic exported-evidence → render-input adapter
+  (`src/domain/demo-v2/render/evidence-render-input.ts`), a general additive `assetDisclosure` render field
+  (per-language illustrative/provenance notice; absent by default, so existing renders and their hashes are
+  byte-identical), a general `demo-v2-render-evidence` CLI command, and unit tests. The general renderer gained
+  no business-specific conditional. No new schema, migration, provider, or persisted lifecycle state was added.
+- The adapter parses the immutable export envelope and maps whitelisted records onto the existing Milestone 2
+  mock orchestration, so every rendered factual claim stays bound to the exact exported record that authorized
+  it. It fabricates nothing: a section is planned only when the evidence supports its required content, so
+  sparse evidence yields a shorter, honest page. It performs no database, network, live-site, Sol, deployment,
+  Gmail, email, or scheduling work, and makes zero paid calls (bounded mock orchestration only).
+- Imagery is never taken from the export (which carries none). The caller supplies an explicit ILLUSTRATIVE
+  image pool plus a per-language disclosure that is shown in the concept bar; the render therefore states, on
+  the page, that its images are illustrative and do not depict the business, its premises, or its staff.
+- Renders are deterministic: the adapter uses the export's own `exportedAt` timestamp as its clock (never the
+  wall clock), so a given evidence file always produces a byte-identical bundle and stable hashes.
+- The KU64 review package (`demos/ku64-v2/`, git-ignored) was generated locally as the one authorized use of
+  the exported KU64 evidence. It renders KU64's verified identity, the six verified services (presented with
+  clean spacing — the concatenated `ÄsthetischeZahnmedizin` is de-glued to `Ästhetische Zahnmedizin`, directly
+  addressing finding F1 — and otherwise paraphrase-free), the verified address, the verified phone as the
+  appointment/contact channel, and an evidence-gated FAQ (locations, first visit, treatment discovery,
+  escalation). The two persisted audit findings F1 (READABILITY) and F2 (CTA_CLARITY) inform the build but are
+  never rendered as visitor text; F3 was not restored (it does not exist in the export). The five tracked
+  synthetic clinic assets form the illustrative pool (four placed; the team photograph is not placed because no
+  verified person exists), all disclosed as illustrative.
+- The render is primary-language (German) only: an English package is mock-prepared but withheld because it is
+  not human-reviewed. Deterministic quality checks report zero blockers and `structurallyEligible: true`. The
+  review package records `deploymentEligible: false`. Nothing was deployed, scored by Sol, drafted, scheduled,
+  or sent, and no Gmail, OAuth, real-data, or credential state was touched.
+- Still blocked pending separate explicit approval: Sol scoring, visual review/revision, human approval,
+  deployment, and any outreach use of this render.
 
 ## Demo Engine V2 Milestone 1
 
