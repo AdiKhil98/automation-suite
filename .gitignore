@@ -63,5 +63,8 @@ Thumbs.db
 # Phase 12 Gmail OAuth credentials (refresh token) — never commit
 .gmail-credentials.json
 
+# Phase 17A2 read-only Gmail reply-sync credentials (refresh token) — never commit
+.gmail-read-credentials.json
+
 # Phase 12 Google OAuth client JSON (Desktop app credentials) — never commit
 .gmail-oauth-client.json

@@ -12,8 +12,10 @@ Milestones 1 and 2 are implemented as an isolated, disabled-by-default, mock-onl
 design foundation. No V2 render, approval, deployment, or live-provider path exists. Phase 9 email generation
 uses Cold Email Copy Standard v2 with deterministic and independent-reviewer quality gates.
 **Phase 17A — outreach tracking & follow-up operations — is implemented (tracking/synchronization
-infrastructure only; it sends nothing and modifies no Gmail draft). Phase 17B — Controlled First Send
-Smoke Test — remains NOT approved.**
+infrastructure only; it sends nothing and modifies no Gmail draft). Phase 17A2 — guarded live read-only
+Gmail reply sync — is implemented (a real, doubly-gated, strictly read-only reply reader that modifies
+nothing). Phase 17A3 — live Google Sheets writes — and Phase 17B — Controlled First Send Smoke Test —
+remain NOT approved.**
 **Last updated:** 2026-07-28
 
 One phase at a time. Each phase ends with tests, a commit, an annotated tag, and an explicit approval gate.
@@ -149,8 +151,20 @@ advancement stops at `HUMAN_REVIEW_REQUIRED`. V1 remains selected and unchanged.
 > flags default safe: `OUTREACH_TRACKING_ENABLED=false`, `GMAIL_REPLY_SYNC_ENABLED=false`,
 > `GOOGLE_SHEETS_SYNC_ENABLED=false`; all existing sending guards unchanged. See `docs/OPERATIONS.md`.
 >
-> **Phase 17B — Controlled First Send Smoke Test (NOT APPROVED).** The first controlled send, the real
-> Google Sheet write path, and the live read-only Gmail reader are deferred to 17B and remain blocked.
+> **Phase 17A2 — guarded live read-only Gmail reply sync (IMPLEMENTED; reads only, NEVER sends/modifies).**
+> Replaces only the mock reply reader with `HttpGmailThreadReader`, a real reader for the existing read-only
+> `GmailThreadReader` boundary. It reads exactly `GET /gmail/v1/users/me/threads/{trackedThreadId}?format=metadata`
+> for tracked thread ids only — no message bodies, no `messages.list`/`threads.list`/`q=` search, and no
+> send/draft/label/archive/trash/modify method exists on the class. Reading uses a NEW `gmail.readonly` grant
+> stored in a SEPARATE 0600 credential file via a dedicated `gmail-read-auth` command; the sending
+> `gmail.compose` credential is never touched. Any live read is doubly gated by `GMAIL_REPLY_SYNC_ENABLED=true`
+> AND `--confirm-gmail-read`, plus an exact-scope check; otherwise the mock reader is used. Detection,
+> classification, follow-up cancellation, unsubscribe→DNC, and bounce handling are unchanged. See
+> `docs/OPERATIONS.md`.
+>
+> **Phase 17A3 — live Google Sheets writes (NOT APPROVED).** The real Sheet write path remains deferred.
+>
+> **Phase 17B — Controlled First Send Smoke Test (NOT APPROVED).** The first controlled send remains blocked.
 
 ## Phase 0 — Discovery & system specification
 

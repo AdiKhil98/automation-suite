@@ -4,6 +4,12 @@ import { buildAllTabs, syncSheet } from '../../domain/outreach/sheet-sync.js';
 import { runReplySync } from '../../domain/outreach/reply-sync.js';
 import { overdueDays } from '../../domain/outreach/followups.js';
 import { MockGmailThreadReader } from '../../integrations/gmail/mock-reply-provider.js';
+import { HttpGmailThreadReader, liveReplyReadGate } from '../../integrations/gmail/http-reply-provider.js';
+import { type GmailThreadReader } from '../../integrations/gmail/reply-provider.js';
+import { loadGmailClientCredentials } from '../../integrations/gmail/client-config.js';
+import { GoogleOAuthClient } from '../../integrations/gmail/oauth.js';
+import { OAuthAccessTokenProvider } from '../../integrations/gmail/access-token.js';
+import { LocalGmailTokenStore } from '../../integrations/gmail/token-store.js';
 import { MockSheetsProvider } from '../../integrations/google/sheets/mock-sheets.js';
 import { HttpSheetsProvider } from '../../integrations/google/sheets/http-sheets.js';
 import { type SheetsProvider } from '../../integrations/google/sheets/provider.js';
@@ -209,22 +215,82 @@ export async function outreachFollowupsDueCommand(ctx: CliContext): Promise<void
   if (due.length === 0) console.log('  (none)');
 }
 
-/** synchronize Gmail replies — READ-ONLY. Mock reader by default. */
-export async function outreachSyncRepliesCommand(ctx: CliContext): Promise<void> {
+/**
+ * Build the guarded LIVE read-only Gmail reader. Returns a fail-closed reason instead of a
+ * reader unless BOTH gates are satisfied: GMAIL_REPLY_SYNC_ENABLED=true AND --confirm-gmail-read.
+ * The reader uses the SEPARATE readonly credential; a compose/send credential can never reach it.
+ */
+async function buildLiveReader(
+  ctx: CliContext,
+  confirmGmailRead: boolean,
+): Promise<{ reader: HttpGmailThreadReader } | { refused: string }> {
+  const gate = liveReplyReadGate({ syncEnabled: ctx.config.GMAIL_REPLY_SYNC_ENABLED, confirmed: confirmGmailRead });
+  if (!gate.ok) return { refused: gate.reason ?? 'live Gmail read refused.' };
+  const c = ctx.config;
+  const clientCreds = loadGmailClientCredentials({ clientFile: c.GMAIL_OAUTH_CLIENT_FILE, envClientId: c.GMAIL_OAUTH_CLIENT_ID, envClientSecret: c.GMAIL_OAUTH_CLIENT_SECRET });
+  if (!clientCreds) {
+    return { refused: `no OAuth client credentials — save the Google Cloud client JSON to ${c.GMAIL_OAUTH_CLIENT_FILE} (or set GMAIL_OAUTH_CLIENT_ID/SECRET).` };
+  }
+  const oauth = new GoogleOAuthClient({ clientId: clientCreds.clientId, clientSecret: clientCreds.clientSecret, redirectUri: c.GMAIL_OAUTH_REDIRECT_URI, timeoutMs: c.GMAIL_TIMEOUT_MS });
+  const store = new LocalGmailTokenStore(c.GMAIL_READ_CREDENTIALS_FILE);
+  const tokens = new OAuthAccessTokenProvider(oauth, store);
+  const reader = new HttpGmailThreadReader({ tokens, store, logger: ctx.logger, timeoutMs: c.GMAIL_TIMEOUT_MS });
+  const check = await reader.verifyReadAccess();
+  if (!check.ok) return { refused: check.reason ?? 'read-only access precondition failed.' };
+  return { reader };
+}
+
+/**
+ * synchronize Gmail replies — STRICTLY READ-ONLY. Mock reader by default. A LIVE read-only reader
+ * runs ONLY when GMAIL_REPLY_SYNC_ENABLED=true AND --confirm-gmail-read are BOTH present; even then
+ * it only ever reads the specific tracked thread ids (optionally narrowed by --record/--campaign).
+ * Nothing here sends, drafts, labels, archives, or modifies Gmail.
+ */
+export async function outreachSyncRepliesCommand(
+  ctx: CliContext,
+  opts: { confirmGmailRead?: boolean; record?: string; campaign?: string } = {},
+): Promise<void> {
   if (!requireEnabled(ctx)) return;
-  // Phase 17A ships the read-only mock reader as the default and only reader. A real
-  // read-only reader is a Phase 17B setup step and requires GMAIL_REPLY_SYNC_ENABLED.
-  const reader = new MockGmailThreadReader();
   const read = new OutreachReadRepository(ctx.db);
-  const threads = await read.trackedThreads();
+
+  // Resolve an optional campaign-name filter to its id (fail-closed if it does not exist).
+  let campaignId: string | undefined;
+  if (opts.campaign) {
+    const campaign = await read.getCampaignByName(opts.campaign);
+    if (!campaign) {
+      console.log(`Campaign not found: ${opts.campaign}. No action taken.`);
+      return;
+    }
+    campaignId = campaign.id;
+  }
+
+  // Choose the reader. Live reading is doubly gated; anything short of both gates falls back to
+  // the mock reader (default-safe) and prints exactly why the live path was not taken.
+  let reader: GmailThreadReader = new MockGmailThreadReader();
+  const wantsLive = ctx.config.GMAIL_REPLY_SYNC_ENABLED || opts.confirmGmailRead;
+  if (wantsLive) {
+    const live = await buildLiveReader(ctx, opts.confirmGmailRead === true);
+    if ('reader' in live) {
+      reader = live.reader;
+    } else {
+      console.log(`Live Gmail read not enabled: ${live.refused}`);
+      console.log('Falling back to the read-only mock reader (no external Gmail access).');
+    }
+  }
+
+  const threads = await read.trackedThreads({ recordId: opts.record, campaignId });
+  if (threads.length === 0) {
+    console.log('No tracked threads match the selection (need an outbound message with a Gmail thread id). No action taken.');
+    return;
+  }
   const ownEmails = [ctx.config.GMAIL_ACCOUNT_EMAIL].filter((x): x is string => !!x);
   const report = await runReplySync({ reader, service: service(ctx), threads, ownEmails });
   console.log(`\nReply sync (reader=${report.reader}, external=${String(report.readExternally)}): checked ${String(report.threadsChecked)} threads, applied ${String(report.repliesApplied.length)} replies.`);
   for (const r of report.repliesApplied) {
     console.log(`  ${r.threadId}: ${r.classification} from ${r.fromEmail}`);
   }
-  if (!ctx.config.GMAIL_REPLY_SYNC_ENABLED) {
-    console.log('Note: GMAIL_REPLY_SYNC_ENABLED=false — live Gmail reads are disabled; the mock reader found only seeded threads.');
+  if (!report.readExternally) {
+    console.log('Note: mock reader used — no live Gmail access occurred. Enable GMAIL_REPLY_SYNC_ENABLED=true and pass --confirm-gmail-read (after `gmail-read-auth`) for a live read-only sync.');
   }
 }
 

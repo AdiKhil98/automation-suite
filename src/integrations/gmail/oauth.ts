@@ -4,6 +4,14 @@ import { request as httpsRequest } from 'node:https';
  * Phase 12/15 adapter enforces its own narrower fixed endpoint allowlist. The scope is unchanged. */
 export const GMAIL_COMPOSE_SCOPE = 'https://www.googleapis.com/auth/gmail.compose';
 
+/**
+ * Phase 17A2 read-only grant. Strictly READ-ONLY: it permits reading messages/threads and NO
+ * mutation (no send, draft, label, archive, trash, or modify). It is stored in its OWN
+ * credential file, entirely separate from the gmail.compose sending credential, so the two
+ * grants never mix. The reply reader refuses to operate unless the stored scope is exactly this.
+ */
+export const GMAIL_READONLY_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
+
 /** Fixed Google endpoints — never configurable. */
 const AUTH_ENDPOINT = 'https://accounts.google.com/o/oauth2/v2/auth';
 const TOKEN_ENDPOINT = 'https://oauth2.googleapis.com/token';
@@ -30,13 +38,17 @@ export interface TokenExchangeResult {
 export class GoogleOAuthClient {
   constructor(private readonly cfg: OAuthConfig) {}
 
-  /** Build the consent URL. `state` is a CSRF nonce the caller verifies on callback. */
-  authUrl(state: string): string {
+  /**
+   * Build the consent URL. `state` is a CSRF nonce the caller verifies on callback. `scope`
+   * defaults to the compose scope (Phase 12 sending path, unchanged); the Phase 17A2 read-auth
+   * flow passes GMAIL_READONLY_SCOPE for a strictly read-only grant.
+   */
+  authUrl(state: string, scope: string = GMAIL_COMPOSE_SCOPE): string {
     const p = new URLSearchParams({
       client_id: this.cfg.clientId,
       redirect_uri: this.cfg.redirectUri,
       response_type: 'code',
-      scope: GMAIL_COMPOSE_SCOPE,
+      scope,
       access_type: 'offline',
       prompt: 'consent',
       state,

@@ -272,8 +272,34 @@ fail closed. The controlled first send is **Phase 17B — not yet approved.**
   deterministically (positive/neutral/negative/unsubscribe/bounce), records a short safe preview,
   cancels pending follow-ups on any genuine reply, and sets do-not-contact on unsubscribe. It never
   sends, drafts, labels, archives, or modifies Gmail.
-- Phase 17A ships the **mock** reader only. A real reader (Phase 17B) requires
-  `GMAIL_REPLY_SYNC_ENABLED=true` and the read-only Gmail scope on the existing OAuth credentials.
+- Phase 17A ships the **mock** reader as the default. **Phase 17A2** adds a guarded, real, strictly
+  read-only reader (`HttpGmailThreadReader`) for the same boundary.
+
+### Phase 17A2 — live read-only reply sync (reads only; NEVER sends/drafts/modifies)
+
+- The live reader issues exactly one kind of request: `GET /gmail/v1/users/me/threads/{trackedThreadId}?format=metadata`
+  for thread ids that already belong to tracked outreach records. It never downloads message bodies (metadata
+  format → headers + Gmail `snippet` only), never lists or searches the mailbox (no `messages.list`,
+  `threads.list`, or `q=`), and has no send/draft/label/archive/trash/modify method.
+- **Read scope is separate from sending.** Reading requires the `gmail.readonly` scope, which the existing
+  `gmail.compose` sending grant does not have. Grant it once with `gmail-read-auth`; the refresh token is
+  stored in its own git-ignored 0600 file (`GMAIL_READ_CREDENTIALS_FILE`, default `.gmail-read-credentials.json`),
+  entirely separate from the sending credential. The reader refuses to run unless the stored scope is EXACTLY
+  `gmail.readonly`.
+- **Two gates for any live read (fail-closed):** `GMAIL_REPLY_SYNC_ENABLED=true` AND `--confirm-gmail-read`.
+  Missing either → the command uses the mock reader and prints why. All other detection semantics
+  (self-exclusion, after-last-outbound, deterministic classification, follow-up cancellation,
+  unsubscribe→DNC, bounce) are unchanged.
+
+#### One read-only connection test (manual)
+
+```bash
+# 1. One-time consent (opens a loopback OAuth flow; grants gmail.readonly ONLY):
+GMAIL_ACCOUNT_EMAIL=you@yourdomain.tld pnpm cli gmail-read-auth
+# 2. Live read-only sync of a single tracked record (both gates required):
+GMAIL_REPLY_SYNC_ENABLED=true pnpm cli outreach-sync-replies --confirm-gmail-read --record <outreach-record-id>
+#    or one campaign:  --campaign "<name>"   |   or all eligible tracked threads: (no --record/--campaign)
+```
 
 ### Commands
 
@@ -286,7 +312,8 @@ pnpm cli outreach-schedule-followup --record <id> --step 1|2
 pnpm cli outreach-cancel-followup --followup <id> --record <id> [--reason <text>]
 pnpm cli outreach-postpone-followup --followup <id> --record <id> --at <iso> [--reason <text>]
 pnpm cli outreach-followups-due                 # list due follow-ups (never sends)
-pnpm cli outreach-sync-replies                  # read-only Gmail reply sync (mock reader)
+pnpm cli gmail-read-auth                         # one-time gmail.readonly consent (separate 0600 file)
+pnpm cli outreach-sync-replies [--confirm-gmail-read] [--record <id>|--campaign <name>]  # read-only reply sync (mock default; live needs GMAIL_REPLY_SYNC_ENABLED=true + --confirm-gmail-read)
 pnpm cli outreach-sync-sheet [--confirm]        # project to the Sheet (mock by default)
 pnpm cli outreach-timeline --record <id>        # full event + message timeline
 pnpm cli outreach-readiness                     # pre-first-send readiness report (never sends)

@@ -4,7 +4,9 @@
 
 Phases 0-16 are committed and tagged. Phase 17A (outreach tracking & follow-up operations) is implemented —
 tracking/synchronization infrastructure only; it sends nothing and modifies no Gmail draft (details below).
-Phase 17B (Controlled First Send Smoke Test) remains NOT approved. Demo Engine V2 fictional validation is complete: the fictional
+Phase 17A2 (guarded live read-only Gmail reply sync) is implemented — it replaces only the mock reply reader
+with a real, strictly read-only Gmail reader that is doubly gated and modifies nothing (details below).
+Phase 17A3 (live Google Sheets writes) and Phase 17B (Controlled First Send Smoke Test) remain NOT approved. Demo Engine V2 fictional validation is complete: the fictional
 acceptance package reached a live Sol score of 79 with zero blockers. Phase 3C-A — a guarded, read-only KU64
 evidence export — is approved and implemented (details below). Phase 3C-B — a private, local-only review
 package rendered from that exported evidence — is approved and implemented (details below); the KU64 render
@@ -55,6 +57,38 @@ still cannot reach a real AUTO_REVIEW_PASSED, HUMAN_APPROVED, or deployment-elig
   constraint, immutable history, reply→cancel, timeline ordering, idempotent Sheet projection) pass. No
   email, Gmail draft/read, follow-up send, or external Sheet write occurred. **Phase 17B — Controlled First
   Send Smoke Test — is NOT approved.**
+
+## Phase 17A2 — guarded live read-only Gmail reply sync (reads only; NEVER sends/drafts/modifies)
+
+- Replaces ONLY the mock reply reader with `HttpGmailThreadReader`, a real reader for the existing
+  `GmailThreadReader` boundary. It issues exactly one kind of request —
+  `GET /gmail/v1/users/me/threads/{trackedThreadId}?format=metadata` — for thread ids that already belong to
+  tracked outreach records. There is, by construction, no send/draft/label/archive/trash/modify method and no
+  mailbox-wide `messages.list`/`threads.list`/`q=` search on the class. `format=metadata` means message
+  bodies are never downloaded; only `From/Date/Content-Type/Auto-Submitted/List-Unsubscribe` headers plus
+  Gmail's own short `snippet` (stored truncated via `safePreview`) are read.
+- **Scope isolation:** reading needs a read scope the existing `gmail.compose` grant does not have. A new
+  `GMAIL_READONLY_SCOPE = gmail.readonly` is granted by a dedicated one-time `gmail-read-auth` command into a
+  SEPARATE git-ignored 0600 file (`GMAIL_READ_CREDENTIALS_FILE=.gmail-read-credentials.json`), entirely
+  distinct from the sending credential. The reader's `verifyReadAccess()` refuses to operate unless the stored
+  scope is EXACTLY `gmail.readonly` (a mixed or compose scope fails closed). No sending/draft OAuth grant is
+  touched or re-consented.
+- **Fail-closed gates (all required for any live read):** `GMAIL_REPLY_SYNC_ENABLED=true` AND the explicit
+  `--confirm-gmail-read` flag (`liveReplyReadGate`), a present read-only credential, and the exact-scope
+  check. Absent any of these, the command falls back to the read-only mock reader and prints why. The mock
+  reader remains the default; the standard test suite performs no real Gmail read (fake transport only).
+- Detection semantics are unchanged and reused: inbound messages strictly after the latest tracked outbound,
+  excluding the configured account's own messages; the existing deterministic (non-AI) classifier; a genuine
+  reply cancels pending follow-ups; unsubscribe sets `DO_NOT_CONTACT`; bounce handling preserved. Captured per
+  reply: Gmail message id, thread id, received timestamp, and a short safe preview only.
+- CLI: `outreach-sync-replies` now accepts `--confirm-gmail-read`, `--record <id>`, `--campaign <name>` (one
+  record / one campaign / all eligible tracked threads). New `gmail-read-auth` performs the one-time readonly
+  consent.
+- Status: implemented; lint/typecheck/build green; new unit tests cover flag/confirm rejection, exact-scope
+  guard, self-exclusion, inbound detection, old-message exclusion, untracked-thread inaccessibility,
+  follow-up cancellation, unsubscribe→DNC, bounce, zero mutation methods, and GET-only transport — all with
+  mocks. No real Gmail read or modification occurred during implementation. **Phase 17A3 (live Sheets) and
+  Phase 17B (sending) remain NOT approved.**
 
 ## Phase 3C-A — guarded read-only KU64 evidence export
 

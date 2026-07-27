@@ -293,7 +293,12 @@ const envSchema = z.object({
   // Phase 17A performs no send, no Gmail mutation, and no automatic follow-up.
   OUTREACH_TRACKING_ENABLED: boolString(false),
   // Read-only Gmail reply detection. Requires the read-only Gmail scope. Off by default.
+  // Even when true, the live reader ALSO requires the CLI flag --confirm-gmail-read.
   GMAIL_REPLY_SYNC_ENABLED: boolString(false),
+  // Phase 17A2: the read-only reply reader uses its OWN credential file (gmail.readonly scope),
+  // entirely separate from the gmail.compose sending credential. Git-ignored, 0600. Populated by
+  // the one-time `gmail-read-auth` command. NEVER shares a file or scope with the sending path.
+  GMAIL_READ_CREDENTIALS_FILE: z.string().default('./.gmail-read-credentials.json'),
   // Google Sheet projection. Postgres stays authoritative; the Sheet is a read-only
   // operator view. Off by default; a real Sheet write ALSO requires an explicit --confirm.
   GOOGLE_SHEETS_SYNC_ENABLED: boolString(false),

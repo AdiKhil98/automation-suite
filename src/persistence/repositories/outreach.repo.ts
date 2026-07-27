@@ -323,8 +323,18 @@ export class OutreachReadRepository {
     }));
   }
 
-  /** Threads to check during reply sync: records that have at least one outbound message. */
-  async trackedThreads(): Promise<TrackedThread[]> {
+  /**
+   * Threads to check during reply sync: records that have at least one outbound message. An
+   * optional filter narrows to a single record or a single campaign (read-only; the live reader
+   * only ever receives thread ids drawn from this tracked set — never a mailbox-wide list).
+   */
+  async trackedThreads(filter?: { recordId?: string; campaignId?: string }): Promise<TrackedThread[]> {
+    const conditions = [
+      sql`${outreachMessages.gmailThreadId} IS NOT NULL AND ${outreachMessages.sentAt} IS NOT NULL`,
+    ];
+    if (filter?.recordId) conditions.push(eq(outreachMessages.outreachRecordId, filter.recordId));
+    if (filter?.campaignId) conditions.push(eq(outreachRecords.campaignId, filter.campaignId));
+
     const msgRows = await this.db
       .select({
         recordId: outreachMessages.outreachRecordId,
@@ -332,7 +342,8 @@ export class OutreachReadRepository {
         sentAt: outreachMessages.sentAt,
       })
       .from(outreachMessages)
-      .where(sql`${outreachMessages.gmailThreadId} IS NOT NULL AND ${outreachMessages.sentAt} IS NOT NULL`);
+      .innerJoin(outreachRecords, eq(outreachRecords.id, outreachMessages.outreachRecordId))
+      .where(and(...conditions));
 
     const byRecord = new Map<string, { threadId: string; lastOutboundAtMs: number }>();
     for (const m of msgRows) {

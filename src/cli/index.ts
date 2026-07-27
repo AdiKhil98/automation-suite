@@ -13,6 +13,7 @@ import { generateEmailsCommand } from './commands/generate-emails.js';
 import { reviewDashboardCommand } from './commands/review-dashboard.js';
 import { deployDemosCommand } from './commands/deploy-demos.js';
 import { gmailAuthCommand } from './commands/gmail-auth.js';
+import { gmailReadAuthCommand } from './commands/gmail-read-auth.js';
 import { createGmailDraftsCommand } from './commands/create-gmail-drafts.js';
 import { scheduleDraftsCommand } from './commands/schedule-drafts.js';
 import { cancelScheduleCommand, rescheduleCommand, scheduleStatusCommand } from './commands/schedule-ops.js';
@@ -378,6 +379,11 @@ program
   .action(() => withContext((ctx) => gmailAuthCommand(ctx)));
 
 program
+  .command('gmail-read-auth')
+  .description('Phase 17A2: one-time local OAuth setup for READ-ONLY reply detection (scope gmail.readonly only; separate 0600 credential file; never sends/drafts/modifies)')
+  .action(() => withContext((ctx) => gmailReadAuthCommand(ctx)));
+
+program
   .command('create-gmail-drafts')
   .description('Phase 12: create a Gmail DRAFT (never send) for HUMAN_APPROVED leads with an approved finalized email (mock by default)')
   .option('--limit <n>', 'max leads to draft this run')
@@ -579,8 +585,11 @@ program
 
 program
   .command('outreach-sync-replies')
-  .description('Phase 17A: read-only Gmail reply sync over tracked threads (mock reader; NEVER sends/drafts/modifies Gmail)')
-  .action(() => withContext((ctx) => outreachSyncRepliesCommand(ctx)));
+  .description('Phase 17A2: read-only Gmail reply sync over tracked threads (mock by default; live read-only reader requires GMAIL_REPLY_SYNC_ENABLED=true AND --confirm-gmail-read; NEVER sends/drafts/modifies Gmail)')
+  .option('--confirm-gmail-read', 'confirm a LIVE read-only Gmail read (only honored with GMAIL_REPLY_SYNC_ENABLED=true)')
+  .option('--record <id>', 'restrict to one tracked outreach record')
+  .option('--campaign <name>', 'restrict to one campaign')
+  .action((opts: { confirmGmailRead?: boolean; record?: string; campaign?: string }) => withContext((ctx) => outreachSyncRepliesCommand(ctx, opts)));
 
 program
   .command('outreach-sync-sheet')
