@@ -287,6 +287,22 @@ const envSchema = z.object({
   RETENTION_PROVIDER_ID_DAYS: z.coerce.number().int().positive().default(90),
   RETENTION_READINESS_DAYS: z.coerce.number().int().positive().default(365),
   RETENTION_AUDIT_DAYS: z.coerce.number().int().positive().default(730),
+
+  // --- Phase 17A: outreach tracking & follow-up operations (tracking only; NEVER sends) ---
+  // Master switch for the outreach tracking commands. Off by default. Even when on,
+  // Phase 17A performs no send, no Gmail mutation, and no automatic follow-up.
+  OUTREACH_TRACKING_ENABLED: boolString(false),
+  // Read-only Gmail reply detection. Requires the read-only Gmail scope. Off by default.
+  GMAIL_REPLY_SYNC_ENABLED: boolString(false),
+  // Google Sheet projection. Postgres stays authoritative; the Sheet is a read-only
+  // operator view. Off by default; a real Sheet write ALSO requires an explicit --confirm.
+  GOOGLE_SHEETS_SYNC_ENABLED: boolString(false),
+  GOOGLE_SHEETS_PROVIDER: z.enum(['mock', 'http']).default('mock'),
+  GOOGLE_SHEETS_SPREADSHEET_ID: z.string().optional(),
+  // Deterministic default follow-up sequence policy (operator policy; not universal).
+  OUTREACH_FOLLOWUP_1_DELAY_DAYS: z.coerce.number().int().positive().default(3),
+  OUTREACH_FOLLOWUP_2_DELAY_DAYS: z.coerce.number().int().positive().default(5),
+  OUTREACH_FOLLOWUP_DUE_HOUR_LOCAL: z.coerce.number().int().min(0).max(23).default(9),
 });
 
 const refinedEnvSchema = envSchema.superRefine((val, ctx) => {
@@ -320,6 +336,15 @@ const refinedEnvSchema = envSchema.superRefine((val, ctx) => {
       code: 'custom',
       path: ['OPENAI_API_KEY'],
       message: 'OPENAI_API_KEY is required when LLM_PROVIDER=openai and ALLOW_PAID_LLM_CALLS=true',
+    });
+  }
+  // A real Sheet write path needs a spreadsheet id; only required when both the
+  // http provider is selected AND sheet sync is enabled.
+  if (val.GOOGLE_SHEETS_SYNC_ENABLED && val.GOOGLE_SHEETS_PROVIDER === 'http' && !val.GOOGLE_SHEETS_SPREADSHEET_ID) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['GOOGLE_SHEETS_SPREADSHEET_ID'],
+      message: 'GOOGLE_SHEETS_SPREADSHEET_ID is required when GOOGLE_SHEETS_PROVIDER=http and GOOGLE_SHEETS_SYNC_ENABLED=true',
     });
   }
   if (val.DEMO_V2_ENABLED && val.DEMO_ENGINE_VERSION !== 'v2') {

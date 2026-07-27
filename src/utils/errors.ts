@@ -33,6 +33,18 @@ export class InvalidStateTransitionError extends AppError {
   }
 }
 
+/** Thrown when an invalid outreach state transition is attempted (Phase 17A). */
+export class InvalidOutreachTransitionError extends AppError {
+  readonly from: string;
+  readonly to: string;
+
+  constructor(from: string, to: string) {
+    super('INVALID_OUTREACH_TRANSITION', `Invalid outreach state transition: ${from} -> ${to}`);
+    this.from = from;
+    this.to = to;
+  }
+}
+
 /**
  * Thrown when an outbound (external, prospect-facing) action is attempted while
  * the global kill switch is off or dry-run is enabled.

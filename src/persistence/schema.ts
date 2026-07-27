@@ -2094,3 +2094,154 @@ export const demoV2VisualReviews = pgTable(
       + ` AND rubric_hash ~ '${DEMO_V2_HASH_SQL}' AND review_output_hash ~ '${DEMO_V2_HASH_SQL}'`)),
   }),
 );
+
+// --- Phase 17A: outreach tracking & follow-up operations (tracking only; NEVER sends) ---
+//
+// Postgres is the source of truth. These tables model a campaign, per-(lead×campaign×
+// contact) outreach state, immutable message history, follow-up queue, replies, and an
+// immutable per-record event timeline. No row here ever triggers a send or a Gmail mutation.
+
+export const outreachCampaigns = pgTable(
+  'outreach_campaigns',
+  {
+    id: text('id').primaryKey(),
+    name: text('name').notNull(),
+    sequencePolicy: jsonb('sequence_policy').notNull(),
+    timezone: text('timezone').notNull(),
+    status: text('status').notNull().default('ACTIVE'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    nameUk: uniqueIndex('outreach_campaigns_name_uk').on(t.name),
+    statusCk: check('outreach_campaign_status_ck', sql`${t.status} IN ('ACTIVE','PAUSED','ARCHIVED')`),
+  }),
+);
+
+export const outreachRecords = pgTable(
+  'outreach_records',
+  {
+    id: text('id').primaryKey(),
+    campaignId: text('campaign_id').notNull().references(() => outreachCampaigns.id, { onDelete: 'cascade' }),
+    leadId: text('lead_id').notNull().references(() => leads.id, { onDelete: 'cascade' }),
+    contactEmail: text('contact_email').notNull(),
+    status: text('status').notNull().default('DRAFT_READY'),
+    sequenceStep: integer('sequence_step').notNull().default(0),
+    owner: text('owner'),
+    timezone: text('timezone').notNull(),
+    lastSentAt: timestamp('last_sent_at', { withTimezone: true }),
+    nextFollowupAt: timestamp('next_followup_at', { withTimezone: true }),
+    lastReplyAt: timestamp('last_reply_at', { withTimezone: true }),
+    replyCategory: text('reply_category'),
+    doNotContact: boolean('do_not_contact').notNull().default(false),
+    outcome: text('outcome'),
+    notes: text('notes'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    leadIdx: index('outreach_records_lead_idx').on(t.leadId),
+    campaignIdx: index('outreach_records_campaign_idx').on(t.campaignId),
+    contactIdx: index('outreach_records_contact_idx').on(t.contactEmail),
+    // Prevent duplicate ACTIVE outreach for the same (campaign, lead, contact). A record
+    // is "active" while it is not in a terminal state; terminal rows are retained (history).
+    activeUk: uniqueIndex('outreach_records_active_uk')
+      .on(t.campaignId, t.leadId, t.contactEmail)
+      .where(sql`${t.status} NOT IN ('UNSUBSCRIBED','DO_NOT_CONTACT','CLOSED_WON','CLOSED_LOST')`),
+    statusCk: check('outreach_record_status_ck', sql`${t.status} IN (
+      'DRAFT_READY','AWAITING_APPROVAL','APPROVED_TO_SEND','INITIAL_SENT',
+      'FOLLOW_UP_1_DUE','FOLLOW_UP_1_SENT','FOLLOW_UP_2_DUE','FOLLOW_UP_2_SENT',
+      'REPLIED_POSITIVE','REPLIED_NEUTRAL','REPLIED_NEGATIVE','BOUNCED','UNSUBSCRIBED',
+      'DO_NOT_CONTACT','MEETING_BOOKED','CLOSED_WON','CLOSED_LOST')`),
+  }),
+);
+
+export const outreachMessages = pgTable(
+  'outreach_messages',
+  {
+    id: text('id').primaryKey(),
+    outreachRecordId: text('outreach_record_id').notNull().references(() => outreachRecords.id, { onDelete: 'cascade' }),
+    messageType: text('message_type').notNull(),
+    sequenceStep: integer('sequence_step').notNull(),
+    // Exact subject/body snapshot — NEVER updated or deleted after insert.
+    subject: text('subject').notNull(),
+    body: text('body').notNull(),
+    contentHash: text('content_hash').notNull(),
+    emailDraftId: text('email_draft_id').references(() => emailDrafts.id, { onDelete: 'set null' }),
+    finalizedEmailId: text('finalized_email_id').references(() => emailDraftFinalizations.id, { onDelete: 'set null' }),
+    gmailMessageId: text('gmail_message_id'),
+    gmailThreadId: text('gmail_thread_id'),
+    approvedAt: timestamp('approved_at', { withTimezone: true }),
+    sentAt: timestamp('sent_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    recordIdx: index('outreach_messages_record_idx').on(t.outreachRecordId),
+    threadIdx: index('outreach_messages_thread_idx').on(t.gmailThreadId),
+    typeCk: check('outreach_message_type_ck', sql`${t.messageType} IN ('INITIAL','FOLLOW_UP')`),
+  }),
+);
+
+export const outreachFollowups = pgTable(
+  'outreach_followups',
+  {
+    id: text('id').primaryKey(),
+    outreachRecordId: text('outreach_record_id').notNull().references(() => outreachRecords.id, { onDelete: 'cascade' }),
+    step: integer('step').notNull(),
+    dueAt: timestamp('due_at', { withTimezone: true }).notNull(),
+    timezone: text('timezone').notNull(),
+    status: text('status').notNull().default('DUE'),
+    blockedReason: text('blocked_reason'),
+    cancelledReason: text('cancelled_reason'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    recordIdx: index('outreach_followups_record_idx').on(t.outreachRecordId),
+    // At most one pending (DUE) follow-up per record+step; cancelled/postponed rows retained.
+    pendingUk: uniqueIndex('outreach_followups_pending_uk').on(t.outreachRecordId, t.step).where(sql`${t.status} = 'DUE'`),
+    statusCk: check('outreach_followup_status_ck', sql`${t.status} IN ('DUE','CANCELLED','POSTPONED','SENT')`),
+    stepCk: check('outreach_followup_step_ck', sql`${t.step} IN (1,2)`),
+  }),
+);
+
+export const outreachReplies = pgTable(
+  'outreach_replies',
+  {
+    id: text('id').primaryKey(),
+    outreachRecordId: text('outreach_record_id').notNull().references(() => outreachRecords.id, { onDelete: 'cascade' }),
+    gmailThreadId: text('gmail_thread_id').notNull(),
+    gmailMessageId: text('gmail_message_id').notNull(),
+    fromEmail: text('from_email').notNull(),
+    receivedAt: timestamp('received_at', { withTimezone: true }).notNull(),
+    classification: text('classification').notNull(),
+    preview: text('preview').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    recordIdx: index('outreach_replies_record_idx').on(t.outreachRecordId),
+    // A given Gmail message is recorded as a reply at most once (idempotent sync).
+    messageUk: uniqueIndex('outreach_replies_message_uk').on(t.gmailMessageId),
+    classificationCk: check('outreach_reply_classification_ck', sql`${t.classification} IN ('positive','neutral','negative','unsubscribe','bounce')`),
+  }),
+);
+
+
+export const outreachEvents = pgTable(
+  'outreach_events',
+  {
+    id: text('id').primaryKey(),
+    outreachRecordId: text('outreach_record_id').notNull().references(() => outreachRecords.id, { onDelete: 'cascade' }),
+    // 1-based monotonic position within the record's timeline; strictly increasing.
+    seq: integer('seq').notNull(),
+    type: text('type').notNull(),
+    fromStatus: text('from_status'),
+    toStatus: text('to_status'),
+    message: text('message').notNull(),
+    data: jsonb('data'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    recordSeqUk: uniqueIndex('outreach_events_record_seq_uk').on(t.outreachRecordId, t.seq),
+  }),
+);

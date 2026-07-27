@@ -2,7 +2,9 @@
 
 ## Current phase
 
-Phases 0-16 are committed and tagged. Demo Engine V2 fictional validation is complete: the fictional
+Phases 0-16 are committed and tagged. Phase 17A (outreach tracking & follow-up operations) is implemented —
+tracking/synchronization infrastructure only; it sends nothing and modifies no Gmail draft (details below).
+Phase 17B (Controlled First Send Smoke Test) remains NOT approved. Demo Engine V2 fictional validation is complete: the fictional
 acceptance package reached a live Sol score of 79 with zero blockers. Phase 3C-A — a guarded, read-only KU64
 evidence export — is approved and implemented (details below). Phase 3C-B — a private, local-only review
 package rendered from that exported evidence — is approved and implemented (details below); the KU64 render
@@ -15,6 +17,44 @@ and local render/preview/screenshot/review-package tooling. V1 remains authorita
 `DEMO_ENGINE_VERSION=v1`, `DEMO_V2_ENABLED=false`, and every V2 provider defaults to mock. No live provider,
 paid call, deployment, screenshot-review model, email, Gmail, or scheduling path was added; the lifecycle
 still cannot reach a real AUTO_REVIEW_PASSED, HUMAN_APPROVED, or deployment-eligible state.
+
+## Phase 17A — outreach tracking & follow-up operations (tracking only; NEVER sends)
+
+- Migration `0026_outreach_tracking.sql` adds six additive `outreach_*` tables and changes no existing
+  table: `outreach_campaigns`, `outreach_records` (per lead×campaign×contact; 17-state machine),
+  `outreach_messages` (immutable exact subject+body snapshot + content hash), `outreach_followups`
+  (explicit due dates; DUE/CANCELLED/POSTPONED/SENT), `outreach_replies`, and `outreach_events`
+  (immutable, strictly-increasing per-record timeline). Guarded rollback in
+  `scripts/rollback/0026_outreach_tracking_down.sql` refuses while any table holds data.
+- State machine: `DRAFT_READY → AWAITING_APPROVAL → APPROVED_TO_SEND → INITIAL_SENT → FOLLOW_UP_1_* →
+  FOLLOW_UP_2_* → (MEETING_BOOKED → CLOSED_WON/CLOSED_LOST)`; `REPLIED_*`, `BOUNCED`, `UNSUBSCRIBED`,
+  `DO_NOT_CONTACT` may interrupt from any non-terminal state. Invalid transitions are rejected and leave
+  the record unchanged. A partial-unique index prevents duplicate ACTIVE outreach per (campaign, lead,
+  contact); a Gmail message id is recorded as a reply at most once.
+- Rules enforced in code: do-not-contact blocks new outreach; any genuine reply/bounce/unsubscribe cancels
+  all pending follow-ups; unsubscribe sets do-not-contact; follow-ups are calculated + stored but **never
+  sent**. Follow-up due dates are recipient-timezone-aware and DST-correct.
+- Google Sheet is a read-only operator projection (tabs: Outreach, Messages, Follow-ups Due, Replies and
+  Outcomes) with stable row ids and idempotent inserted/updated/unchanged/deleted counts. The mock provider
+  is the default and the only one used in tests; a real write requires `GOOGLE_SHEETS_PROVIDER=http` +
+  `GOOGLE_SHEETS_SYNC_ENABLED=true` + `--confirm` (the http provider fails closed in 17A). Bodies are never
+  dumped to the Sheet — the Messages tab references the version by content hash.
+- Gmail reply-sync is strictly read-only over tracked threads; deterministic classification; excludes the
+  account's own messages; records a short safe preview only; never sends/drafts/labels/archives/modifies.
+  Mock reader only in 17A; `GMAIL_REPLY_SYNC_ENABLED=false` by default.
+- CLI: `outreach-init`, `outreach-track`, `outreach-record-message`, `outreach-transition`,
+  `outreach-schedule-followup`, `outreach-cancel-followup`, `outreach-postpone-followup`,
+  `outreach-followups-due`, `outreach-sync-replies`, `outreach-sync-sheet`, `outreach-timeline`,
+  `outreach-readiness`. New flags default safe: `OUTREACH_TRACKING_ENABLED=false`,
+  `GMAIL_REPLY_SYNC_ENABLED=false`, `GOOGLE_SHEETS_SYNC_ENABLED=false`. All existing sending guards
+  unchanged (`SENDING_ENABLED=false`, `OUTBOUND_ACTIONS_ENABLED=false`, `DRY_RUN=true`,
+  `GMAIL_DRAFT_ACTIONS_ENABLED=false`).
+- Status: implemented; lint/typecheck/build green; 757 unit tests (incl. 42 new outreach cases across state
+  machine, reply classification, follow-up calculation, service behavior, reply-sync, and Sheet sync) and
+  66 PostgreSQL integration tests (incl. a new outreach suite covering migration, duplicate-active
+  constraint, immutable history, reply→cancel, timeline ordering, idempotent Sheet projection) pass. No
+  email, Gmail draft/read, follow-up send, or external Sheet write occurred. **Phase 17B — Controlled First
+  Send Smoke Test — is NOT approved.**
 
 ## Phase 3C-A — guarded read-only KU64 evidence export
 

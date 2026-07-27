@@ -12,6 +12,12 @@ import { assertDestructiveTestDatabasePermit, type DestructiveTestDatabasePermit
 export async function truncateAll(db: Database, permit: DestructiveTestDatabasePermit | undefined): Promise<void> {
   assertDestructiveTestDatabasePermit(permit);
   await db.execute(sql.raw(`
+    DELETE FROM outreach_events;
+    DELETE FROM outreach_replies;
+    DELETE FROM outreach_followups;
+    DELETE FROM outreach_messages;
+    DELETE FROM outreach_records;
+    DELETE FROM outreach_campaigns;
     DELETE FROM demo_v2_review_packages;
     DELETE FROM demo_v2_screenshots;
     DELETE FROM demo_v2_render_versions;

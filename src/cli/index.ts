@@ -44,6 +44,20 @@ import {
 } from './commands/demo-v2-review.js';
 import { demoV2ReviewLoopLiveCommand } from './commands/demo-v2-review-loop-live.js';
 import { ku64ExportEvidenceCommand } from './commands/ku64-v2-export-evidence.js';
+import {
+  outreachCancelFollowupCommand,
+  outreachFollowupsDueCommand,
+  outreachInitCommand,
+  outreachPostponeFollowupCommand,
+  outreachReadinessCommand,
+  outreachRecordMessageCommand,
+  outreachScheduleFollowupCommand,
+  outreachSyncRepliesCommand,
+  outreachSyncSheetCommand,
+  outreachTimelineCommand,
+  outreachTrackCommand,
+  outreachTransitionCommand,
+} from './commands/outreach.js';
 import { demoV2RenderEvidenceCommand } from './commands/demo-v2-render-evidence.js';
 import { type MockReviewFixture } from '../domain/demo-v2/render/visual-review.js';
 
@@ -491,6 +505,99 @@ program
   .description("Serve a lead's generated demo locally (loopback only; never public)")
   .requiredOption('--lead <id>', 'lead id')
   .action((opts: { lead: string }) => withContext((ctx) => previewDemoCommand(ctx, opts)));
+
+// --- Phase 17A: outreach tracking & follow-up operations (tracking only; NEVER sends) ---
+
+program
+  .command('outreach-init')
+  .description('Phase 17A: verify outreach tracking tables/flags; optionally create a campaign. Never sends.')
+  .option('--create-campaign <name>', 'create a campaign with this name if absent')
+  .option('--timezone <iana>', 'campaign IANA timezone (default UTC)')
+  .action((opts: { createCampaign?: string; timezone?: string }) => withContext((ctx) => outreachInitCommand(ctx, opts)));
+
+program
+  .command('outreach-track')
+  .description('Phase 17A: create a tracked outreach record for (campaign, lead, contact). Never sends.')
+  .requiredOption('--campaign <name>', 'campaign name')
+  .requiredOption('--lead <id>', 'lead id')
+  .requiredOption('--contact <email>', 'contact email')
+  .option('--timezone <iana>', 'override recipient timezone')
+  .option('--owner <name>', 'owner')
+  .action((opts: { campaign: string; lead: string; contact: string; timezone?: string; owner?: string }) =>
+    withContext((ctx) => outreachTrackCommand(ctx, opts)));
+
+program
+  .command('outreach-record-message')
+  .description('Phase 17A: record an immutable message snapshot (exact subject + body). Never sends.')
+  .requiredOption('--record <id>', 'outreach record id')
+  .requiredOption('--type <type>', 'INITIAL | FOLLOW_UP')
+  .requiredOption('--step <n>', 'sequence step (0=initial, 1, 2)')
+  .requiredOption('--subject <text>', 'exact subject')
+  .requiredOption('--body <text>', 'exact body')
+  .option('--gmail-message-id <id>', 'Gmail message id (if already sent elsewhere)')
+  .option('--gmail-thread-id <id>', 'Gmail thread id')
+  .option('--sent', 'mark this message as already sent (records sent timestamp)')
+  .action((opts: { record: string; type: string; step: string; subject: string; body: string; gmailMessageId?: string; gmailThreadId?: string; sent?: boolean }) =>
+    withContext((ctx) => outreachRecordMessageCommand(ctx, opts)));
+
+program
+  .command('outreach-transition')
+  .description('Phase 17A: transition an outreach record status (validated; never sends)')
+  .requiredOption('--record <id>', 'outreach record id')
+  .requiredOption('--to <status>', 'target status')
+  .option('--reason <text>', 'reason')
+  .action((opts: { record: string; to: string; reason?: string }) => withContext((ctx) => outreachTransitionCommand(ctx, opts)));
+
+program
+  .command('outreach-schedule-followup')
+  .description('Phase 17A: compute + store a follow-up due date (never sends)')
+  .requiredOption('--record <id>', 'outreach record id')
+  .requiredOption('--step <n>', 'follow-up step (1 or 2)')
+  .action((opts: { record: string; step: string }) => withContext((ctx) => outreachScheduleFollowupCommand(ctx, opts)));
+
+program
+  .command('outreach-cancel-followup')
+  .description('Phase 17A: cancel a pending follow-up')
+  .requiredOption('--followup <id>', 'follow-up id')
+  .requiredOption('--record <id>', 'outreach record id')
+  .option('--reason <text>', 'reason')
+  .action((opts: { followup: string; record: string; reason?: string }) => withContext((ctx) => outreachCancelFollowupCommand(ctx, opts)));
+
+program
+  .command('outreach-postpone-followup')
+  .description('Phase 17A: postpone a pending follow-up to a new explicit instant')
+  .requiredOption('--followup <id>', 'follow-up id')
+  .requiredOption('--record <id>', 'outreach record id')
+  .requiredOption('--at <iso>', 'new due instant (ISO 8601)')
+  .option('--reason <text>', 'reason')
+  .action((opts: { followup: string; record: string; at: string; reason?: string }) => withContext((ctx) => outreachPostponeFollowupCommand(ctx, opts)));
+
+program
+  .command('outreach-followups-due')
+  .description('Phase 17A: list follow-ups due (read-only; NEVER sends)')
+  .action(() => withContext((ctx) => outreachFollowupsDueCommand(ctx)));
+
+program
+  .command('outreach-sync-replies')
+  .description('Phase 17A: read-only Gmail reply sync over tracked threads (mock reader; NEVER sends/drafts/modifies Gmail)')
+  .action(() => withContext((ctx) => outreachSyncRepliesCommand(ctx)));
+
+program
+  .command('outreach-sync-sheet')
+  .description('Phase 17A: sync the Google Sheet projection (mock by default; real writes require --confirm + GOOGLE_SHEETS_SYNC_ENABLED)')
+  .option('--confirm', 'confirm an external Sheet write (only honored with GOOGLE_SHEETS_SYNC_ENABLED=true)')
+  .action((opts: { confirm?: boolean }) => withContext((ctx) => outreachSyncSheetCommand(ctx, opts)));
+
+program
+  .command('outreach-timeline')
+  .description('Phase 17A: show one outreach record\'s complete timeline (events + messages)')
+  .requiredOption('--record <id>', 'outreach record id')
+  .action((opts: { record: string }) => withContext((ctx) => outreachTimelineCommand(ctx, opts)));
+
+program
+  .command('outreach-readiness')
+  .description('Phase 17A: report readiness for the first controlled send; NEVER sends')
+  .action(() => withContext((ctx) => outreachReadinessCommand(ctx)));
 
 program
   .command('reset-test-data')

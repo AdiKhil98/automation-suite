@@ -11,7 +11,10 @@ review, deployment, or outreach use of the render is authorized. Demo Engine V2
 Milestones 1 and 2 are implemented as an isolated, disabled-by-default, mock-only intelligence/content/asset/
 design foundation. No V2 render, approval, deployment, or live-provider path exists. Phase 9 email generation
 uses Cold Email Copy Standard v2 with deterministic and independent-reviewer quality gates.
-**Last updated:** 2026-07-27
+**Phase 17A — outreach tracking & follow-up operations — is implemented (tracking/synchronization
+infrastructure only; it sends nothing and modifies no Gmail draft). Phase 17B — Controlled First Send
+Smoke Test — remains NOT approved.**
+**Last updated:** 2026-07-28
 
 One phase at a time. Each phase ends with tests, a commit, an annotated tag, and an explicit approval gate.
 No phase begins before the previous one is approved with `APPROVE PHASE X`.
@@ -134,6 +137,20 @@ advancement stops at `HUMAN_REVIEW_REQUIRED`. V1 remains selected and unchanged.
 > 2. **Monitor fabricated evidence-reference rates** on real audits (the Gate A repair + the degraded run both showed the generator can cite out-of-package evidence IDs).
 > 3. **Improve evidence-citation prompting** if the fabricated-reference rate is material.
 > 4. **Run future paid evaluations in small foreground batches with explicit stop points** (not a single 48-call background run).
+
+> **Phase 17A — outreach tracking & follow-up operations (IMPLEMENTED; tracking only, NEVER sends).**
+> Adds Postgres as the source of truth for outreach (migration `0026`, six additive `outreach_*` tables:
+> campaigns, per-(lead×campaign×contact) records with a 17-state machine, immutable message snapshots,
+> a follow-up queue, replies, and an immutable per-record event timeline). A Google Sheet is a read-only,
+> idempotent operator projection (four tabs; mock provider default; real writes gated behind
+> `GOOGLE_SHEETS_SYNC_ENABLED` + `--confirm`). Gmail reply-sync is strictly read-only over tracked threads
+> (deterministic classification; excludes self-messages; a genuine reply/bounce/unsubscribe cancels pending
+> follow-ups; unsubscribe → do-not-contact). Follow-ups are calculated and stored but **never sent**. New
+> flags default safe: `OUTREACH_TRACKING_ENABLED=false`, `GMAIL_REPLY_SYNC_ENABLED=false`,
+> `GOOGLE_SHEETS_SYNC_ENABLED=false`; all existing sending guards unchanged. See `docs/OPERATIONS.md`.
+>
+> **Phase 17B — Controlled First Send Smoke Test (NOT APPROVED).** The first controlled send, the real
+> Google Sheet write path, and the live read-only Gmail reader are deferred to 17B and remain blocked.
 
 ## Phase 0 — Discovery & system specification
 

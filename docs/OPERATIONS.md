@@ -222,3 +222,84 @@ CLI-first. Each pipeline stage is idempotent and resumable; a `pipeline_runs` re
 
 - Migrations are additive and reversible; no destructive migration without a backup path.
 - Local DB backup/restore procedure and resumable-run recovery documented at Phase 12.
+
+## Phase 17A — outreach tracking & follow-up operations (tracking only; NEVER sends)
+
+Phase 17A adds the tracking/synchronization layer required before controlled sending. It sends
+nothing, creates/modifies no Gmail draft, and runs no automatic follow-up. Postgres is the source of
+truth; a Google Sheet is a read-only operator projection. All external reads/writes are flag-gated and
+fail closed. The controlled first send is **Phase 17B — not yet approved.**
+
+### Setup
+
+1. Apply the migration (adds the six `outreach_*` tables):
+
+   ```bash
+   pnpm db:migrate
+   ```
+
+2. Verify and (optionally) create a campaign:
+
+   ```bash
+   pnpm cli outreach-init --create-campaign "q3-dental" --timezone "Europe/Berlin"
+   ```
+
+3. Enable tracking when ready (still no sending):
+
+   ```text
+   OUTREACH_TRACKING_ENABLED=true
+   ```
+
+### Google Sheet configuration
+
+- Default is the **mock** provider (`GOOGLE_SHEETS_PROVIDER=mock`): zero network I/O, used for tracking
+  and all tests. `outreach-sync-sheet` builds the four tabs and reports inserted/updated/unchanged/deleted.
+- Tabs: **Outreach** (per-lead state), **Messages** (immutable subject + body-version hash + Gmail ids),
+  **Follow-ups Due** (with days-overdue), **Replies and Outcomes**.
+- Rows carry stable ids (`outreach:<id>`, `message:<id>`, `followup:<id>`, `reply:<id>`), so sync is
+  idempotent and never duplicates. Manual Sheet edits are **never** read back as database mutations.
+- A real Sheet write (Phase 17B) requires all of: `GOOGLE_SHEETS_PROVIDER=http`,
+  `GOOGLE_SHEETS_SYNC_ENABLED=true`, `GOOGLE_SHEETS_SPREADSHEET_ID=<id>`, and the explicit `--confirm`
+  flag. Credentials required then: a Google service account (or OAuth client) with scope
+  `https://www.googleapis.com/auth/spreadsheets`, the spreadsheet shared with that principal, and a
+  git-ignored 0600 credentials file (never in `.env`, DB, logs, or git). In Phase 17A the http provider
+  fails closed by design.
+
+### Gmail read-only configuration
+
+- Reply sync is **read-only**: it reads only the threads of tracked outreach records, excludes the
+  account's own messages, considers only inbound messages after the last outbound, classifies
+  deterministically (positive/neutral/negative/unsubscribe/bounce), records a short safe preview,
+  cancels pending follow-ups on any genuine reply, and sets do-not-contact on unsubscribe. It never
+  sends, drafts, labels, archives, or modifies Gmail.
+- Phase 17A ships the **mock** reader only. A real reader (Phase 17B) requires
+  `GMAIL_REPLY_SYNC_ENABLED=true` and the read-only Gmail scope on the existing OAuth credentials.
+
+### Commands
+
+```bash
+pnpm cli outreach-init [--create-campaign <name> --timezone <iana>]   # verify tables/flags; create campaign
+pnpm cli outreach-track --campaign <name> --lead <id> --contact <email> [--owner <name>]
+pnpm cli outreach-record-message --record <id> --type INITIAL|FOLLOW_UP --step <n> --subject <s> --body <b> [--sent --gmail-message-id <id> --gmail-thread-id <id>]
+pnpm cli outreach-transition --record <id> --to <status> [--reason <text>]
+pnpm cli outreach-schedule-followup --record <id> --step 1|2
+pnpm cli outreach-cancel-followup --followup <id> --record <id> [--reason <text>]
+pnpm cli outreach-postpone-followup --followup <id> --record <id> --at <iso> [--reason <text>]
+pnpm cli outreach-followups-due                 # list due follow-ups (never sends)
+pnpm cli outreach-sync-replies                  # read-only Gmail reply sync (mock reader)
+pnpm cli outreach-sync-sheet [--confirm]        # project to the Sheet (mock by default)
+pnpm cli outreach-timeline --record <id>        # full event + message timeline
+pnpm cli outreach-readiness                     # pre-first-send readiness report (never sends)
+```
+
+### Recovery & reconciliation
+
+- **Reply/bounce/unsubscribe already handled:** reply sync is idempotent — a Gmail message id is recorded
+  as a reply at most once (`outreach_replies_message_uk`); re-running applies nothing new.
+- **Wrong follow-up date:** `outreach-postpone-followup` sets a new explicit due instant; every change is
+  an immutable event. `outreach-cancel-followup` cancels a pending follow-up (history retained).
+- **Mis-tracked record:** transition it to the correct state (`outreach-transition`); terminal states
+  (`UNSUBSCRIBED`, `DO_NOT_CONTACT`, `CLOSED_WON`, `CLOSED_LOST`) free the active-uniqueness slot so a new
+  record can be created later if appropriate. Message/reply/event history is never overwritten.
+- **Rollback:** `scripts/rollback/0026_outreach_tracking_down.sql` drops the tables but **refuses** while
+  any outreach table holds data (history must be exported/cleared first).
