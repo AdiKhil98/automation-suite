@@ -49,7 +49,7 @@ still cannot reach a real AUTO_REVIEW_PASSED, HUMAN_APPROVED, or deployment-elig
   `GMAIL_REPLY_SYNC_ENABLED=false`, `GOOGLE_SHEETS_SYNC_ENABLED=false`. All existing sending guards
   unchanged (`SENDING_ENABLED=false`, `OUTBOUND_ACTIONS_ENABLED=false`, `DRY_RUN=true`,
   `GMAIL_DRAFT_ACTIONS_ENABLED=false`).
-- Status: implemented; lint/typecheck/build green; 757 unit tests (incl. 42 new outreach cases across state
+- Status: implemented; lint/typecheck/build green; 757 unit tests (incl. 37 new outreach cases across state
   machine, reply classification, follow-up calculation, service behavior, reply-sync, and Sheet sync) and
   66 PostgreSQL integration tests (incl. a new outreach suite covering migration, duplicate-active
   constraint, immutable history, reply→cancel, timeline ordering, idempotent Sheet projection) pass. No
