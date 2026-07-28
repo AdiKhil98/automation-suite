@@ -1,4 +1,5 @@
 import {
+  type ApplyTabOptions,
   type SheetRow,
   type SheetSyncCounts,
   type SheetsProvider,
@@ -23,7 +24,8 @@ export class MockSheetsProvider implements SheetsProvider {
     return [...t.entries()].map(([rowId, cells]) => ({ rowId, cells: [...cells] }));
   }
 
-  async applyTab(snapshot: SheetTabSnapshot): Promise<SheetSyncCounts> {
+  async applyTab(snapshot: SheetTabSnapshot, options?: ApplyTabOptions): Promise<SheetSyncCounts> {
+    const deleteStale = options?.deleteStale ?? true;
     const current = this.tabs.get(snapshot.tab) ?? new Map<string, string[]>();
     const desiredIds = new Set(snapshot.rows.map((r) => r.rowId));
     const counts: SheetSyncCounts = { inserted: 0, updated: 0, unchanged: 0, deleted: 0 };
@@ -40,11 +42,14 @@ export class MockSheetsProvider implements SheetsProvider {
         counts.unchanged += 1;
       }
     }
-    // Rows that no longer exist in Postgres are removed from the projection.
-    for (const id of [...current.keys()]) {
-      if (!desiredIds.has(id)) {
-        current.delete(id);
-        counts.deleted += 1;
+    // In a FULL sync, rows that no longer exist in Postgres are removed. A SCOPED (upsert-only)
+    // sync leaves other rows untouched so it never disturbs another campaign's projection.
+    if (deleteStale) {
+      for (const id of [...current.keys()]) {
+        if (!desiredIds.has(id)) {
+          current.delete(id);
+          counts.deleted += 1;
+        }
       }
     }
     this.tabs.set(snapshot.tab, current);

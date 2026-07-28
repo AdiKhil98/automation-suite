@@ -41,6 +41,44 @@ export function liveReplyReadGate(opts: { syncEnabled: boolean; confirmed: boole
   return { ok: true };
 }
 
+/**
+ * Deterministic, side-effect-free reader-selection decision for `outreach-sync-replies`.
+ *
+ * Phase 17A3 correction to the Phase 17A2 behavior: a LIVE read is selected the moment the operator
+ * signals intent (GMAIL_REPLY_SYNC_ENABLED=true OR --confirm-gmail-read). When live is selected the
+ * caller MUST attempt the live reader and, if any live guard fails, exit nonzero — it must NEVER
+ * silently downgrade to the mock reader. The mock reader runs ONLY when it is explicitly selected
+ * with --mock. Selecting neither (or both) is refused so nothing runs by accident.
+ */
+export type ReplyReaderSelection =
+  | { kind: 'live' }
+  | { kind: 'mock' }
+  | { kind: 'refuse'; reason: string };
+
+export function selectReplyReader(opts: {
+  syncEnabled: boolean;
+  confirmed: boolean;
+  mock: boolean;
+}): ReplyReaderSelection {
+  const wantsLive = opts.syncEnabled || opts.confirmed;
+  if (wantsLive && opts.mock) {
+    return {
+      kind: 'refuse',
+      reason:
+        'conflicting reader selection: --mock cannot be combined with a live Gmail read ' +
+        '(GMAIL_REPLY_SYNC_ENABLED=true or --confirm-gmail-read). Choose exactly one.',
+    };
+  }
+  if (wantsLive) return { kind: 'live' };
+  if (opts.mock) return { kind: 'mock' };
+  return {
+    kind: 'refuse',
+    reason:
+      'no reader selected: pass --mock to use the offline mock reader, or set ' +
+      'GMAIL_REPLY_SYNC_ENABLED=true and pass --confirm-gmail-read for a live read-only sync.',
+  };
+}
+
 interface GmailHeader {
   name?: unknown;
   value?: unknown;

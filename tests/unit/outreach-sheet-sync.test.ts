@@ -88,4 +88,14 @@ describe('Google Sheet sync', () => {
   it('mock provider never writes externally', () => {
     expect(new MockSheetsProvider().writesExternally).toBe(false);
   });
+
+  it('scoped upsert-only sync (deleteStale=false) never removes rows absent from the snapshot', async () => {
+    const provider = new MockSheetsProvider();
+    await syncSheet(provider, buildAllTabs(projection(), NOW));
+    // A scoped sync that no longer includes rec-1 must NOT delete it when deleteStale is false.
+    const empty: OutreachProjection = { outreach: [], messages: [], followupsDue: [], replies: [] };
+    const report = await syncSheet(provider, buildAllTabs(empty, NOW), { deleteStale: false });
+    expect(report.totals.deleted).toBe(0);
+    expect(Object.keys(provider.dump(OUTREACH_TABS.outreach))).toEqual(['outreach:rec-1']); // survives
+  });
 });

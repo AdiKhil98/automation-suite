@@ -373,8 +373,15 @@ export class OutreachReadRepository {
     }));
   }
 
-  /** Full projection for the Google Sheet. */
-  async projection(): Promise<OutreachProjection> {
+  /**
+   * Full projection for the Google Sheet. An optional `campaignId` narrows every tab to a single
+   * campaign (used by a SCOPED, upsert-only Sheet sync); omitting it projects all outreach. This is
+   * read-only and never mutates anything.
+   */
+  async projection(filter?: { campaignId?: string }): Promise<OutreachProjection> {
+    const campaignId = filter?.campaignId;
+    const recWhere = campaignId ? eq(outreachRecords.campaignId, campaignId) : undefined;
+
     const recRows = await this.db
       .select({
         r: outreachRecords,
@@ -385,6 +392,7 @@ export class OutreachReadRepository {
       .from(outreachRecords)
       .innerJoin(leads, eq(leads.id, outreachRecords.leadId))
       .innerJoin(outreachCampaigns, eq(outreachCampaigns.id, outreachRecords.campaignId))
+      .where(recWhere)
       .orderBy(asc(outreachRecords.createdAt));
 
     const leadIds = [...new Set(recRows.map((x) => x.r.leadId))];
@@ -422,6 +430,7 @@ export class OutreachReadRepository {
       .innerJoin(outreachRecords, eq(outreachRecords.id, outreachMessages.outreachRecordId))
       .innerJoin(leads, eq(leads.id, outreachRecords.leadId))
       .innerJoin(outreachCampaigns, eq(outreachCampaigns.id, outreachRecords.campaignId))
+      .where(recWhere)
       .orderBy(asc(outreachMessages.createdAt));
     const messages: MessageRowView[] = msgRows.map((x) => ({
       messageId: x.m.id,
@@ -449,7 +458,7 @@ export class OutreachReadRepository {
       .from(outreachFollowups)
       .innerJoin(outreachRecords, eq(outreachRecords.id, outreachFollowups.outreachRecordId))
       .innerJoin(leads, eq(leads.id, outreachRecords.leadId))
-      .where(eq(outreachFollowups.status, 'DUE'))
+      .where(campaignId ? and(eq(outreachFollowups.status, 'DUE'), eq(outreachRecords.campaignId, campaignId)) : eq(outreachFollowups.status, 'DUE'))
       .orderBy(asc(outreachFollowups.dueAt));
     const followupsDue: FollowupRowView[] = fuRows.map((x) => ({
       followupId: x.f.id,
@@ -473,6 +482,7 @@ export class OutreachReadRepository {
       .from(outreachReplies)
       .innerJoin(outreachRecords, eq(outreachRecords.id, outreachReplies.outreachRecordId))
       .innerJoin(leads, eq(leads.id, outreachRecords.leadId))
+      .where(recWhere)
       .orderBy(asc(outreachReplies.receivedAt));
     const replies: ReplyRowView[] = repRows.map((x) => ({
       replyId: x.rep.id,

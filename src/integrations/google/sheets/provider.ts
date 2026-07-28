@@ -29,7 +29,29 @@ export interface SheetSyncCounts {
   inserted: number;
   updated: number;
   unchanged: number;
+  /** Rows removed because they are no longer present in Postgres (stale). */
   deleted: number;
+}
+
+/**
+ * Per-apply options. `deleteStale` controls whether rows present in the Sheet but absent from the
+ * desired (Postgres) snapshot are removed. A FULL sync (all outreach) deletes stale rows so the
+ * projection exactly mirrors Postgres. A SCOPED sync (one campaign) is upsert-only (deleteStale=false)
+ * so rows belonging to other campaigns are never touched. Postgres is always authoritative; a Sheet
+ * value is never read back as a database mutation.
+ */
+export interface ApplyTabOptions {
+  deleteStale?: boolean;
+}
+
+/** Result of a non-mutating credential/spreadsheet access check (readiness/verification). */
+export interface SheetsAccessCheck {
+  ok: boolean;
+  reason?: string;
+  /** Spreadsheet title (when reachable). Never a secret. */
+  title?: string;
+  /** Tab titles that already exist in the spreadsheet. */
+  existingTabs?: string[];
 }
 
 export interface SheetsProvider {
@@ -39,5 +61,5 @@ export interface SheetsProvider {
   /** Current rows of a tab, keyed by rowId (for idempotent diffing). */
   readTab(tab: string): Promise<SheetRow[]>;
   /** Apply the desired snapshot idempotently and return the change counts. */
-  applyTab(snapshot: SheetTabSnapshot): Promise<SheetSyncCounts>;
+  applyTab(snapshot: SheetTabSnapshot, options?: ApplyTabOptions): Promise<SheetSyncCounts>;
 }

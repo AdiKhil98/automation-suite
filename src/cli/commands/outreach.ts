@@ -1,18 +1,19 @@
 import { OutreachService } from '../../domain/outreach/outreach-service.js';
 import { type SequencePolicy } from '../../domain/outreach/followups.js';
-import { buildAllTabs, syncSheet } from '../../domain/outreach/sheet-sync.js';
+import { buildAllTabs, OUTREACH_TABS, syncSheet } from '../../domain/outreach/sheet-sync.js';
 import { runReplySync } from '../../domain/outreach/reply-sync.js';
 import { overdueDays } from '../../domain/outreach/followups.js';
 import { MockGmailThreadReader } from '../../integrations/gmail/mock-reply-provider.js';
-import { HttpGmailThreadReader, liveReplyReadGate } from '../../integrations/gmail/http-reply-provider.js';
+import { HttpGmailThreadReader, liveReplyReadGate, selectReplyReader } from '../../integrations/gmail/http-reply-provider.js';
 import { type GmailThreadReader } from '../../integrations/gmail/reply-provider.js';
+import { AppError } from '../../utils/errors.js';
 import { loadGmailClientCredentials } from '../../integrations/gmail/client-config.js';
 import { GoogleOAuthClient } from '../../integrations/gmail/oauth.js';
 import { OAuthAccessTokenProvider } from '../../integrations/gmail/access-token.js';
 import { LocalGmailTokenStore } from '../../integrations/gmail/token-store.js';
 import { MockSheetsProvider } from '../../integrations/google/sheets/mock-sheets.js';
-import { HttpSheetsProvider } from '../../integrations/google/sheets/http-sheets.js';
-import { type SheetsProvider } from '../../integrations/google/sheets/provider.js';
+import { GOOGLE_SHEETS_SCOPE, HttpSheetsProvider } from '../../integrations/google/sheets/http-sheets.js';
+import { type SheetTabSnapshot } from '../../integrations/google/sheets/provider.js';
 import { DrizzleOutreachUnitOfWork } from '../../persistence/outreach-unit-of-work.js';
 import { OutreachReadRepository } from '../../persistence/repositories/outreach.repo.js';
 import { isValidTimeZone } from '../../domain/schedule/timezone.js';
@@ -241,14 +242,20 @@ async function buildLiveReader(
 }
 
 /**
- * synchronize Gmail replies — STRICTLY READ-ONLY. Mock reader by default. A LIVE read-only reader
- * runs ONLY when GMAIL_REPLY_SYNC_ENABLED=true AND --confirm-gmail-read are BOTH present; even then
- * it only ever reads the specific tracked thread ids (optionally narrowed by --record/--campaign).
- * Nothing here sends, drafts, labels, archives, or modifies Gmail.
+ * synchronize Gmail replies — STRICTLY READ-ONLY. Nothing here sends, drafts, labels, archives, or
+ * modifies Gmail.
+ *
+ * Reader selection is FAIL-CLOSED (Phase 17A3):
+ *  - LIVE is selected whenever GMAIL_REPLY_SYNC_ENABLED=true OR --confirm-gmail-read is passed. Once
+ *    live is selected, EVERY live guard (both gates, present readonly credential, exact readonly
+ *    scope) must pass; if any fails the command throws (nonzero exit) — it NEVER downgrades to mock.
+ *  - The mock reader runs ONLY when it is explicitly selected with --mock.
+ *  - Selecting neither (or both) is refused with a nonzero exit, so nothing runs by accident.
+ * A live read only ever reads the specific tracked thread ids (optionally narrowed by --record/--campaign).
  */
 export async function outreachSyncRepliesCommand(
   ctx: CliContext,
-  opts: { confirmGmailRead?: boolean; record?: string; campaign?: string } = {},
+  opts: { confirmGmailRead?: boolean; mock?: boolean; record?: string; campaign?: string } = {},
 ): Promise<void> {
   if (!requireEnabled(ctx)) return;
   const read = new OutreachReadRepository(ctx.db);
@@ -264,18 +271,27 @@ export async function outreachSyncRepliesCommand(
     campaignId = campaign.id;
   }
 
-  // Choose the reader. Live reading is doubly gated; anything short of both gates falls back to
-  // the mock reader (default-safe) and prints exactly why the live path was not taken.
-  let reader: GmailThreadReader = new MockGmailThreadReader();
-  const wantsLive = ctx.config.GMAIL_REPLY_SYNC_ENABLED || opts.confirmGmailRead;
-  if (wantsLive) {
+  // Deterministic reader selection. A live request that cannot satisfy every guard throws instead
+  // of silently falling back to mock; mock runs only when explicitly selected.
+  const selection = selectReplyReader({
+    syncEnabled: ctx.config.GMAIL_REPLY_SYNC_ENABLED,
+    confirmed: opts.confirmGmailRead === true,
+    mock: opts.mock === true,
+  });
+  if (selection.kind === 'refuse') {
+    throw new AppError('GMAIL_READ_REFUSED', selection.reason);
+  }
+  let reader: GmailThreadReader;
+  if (selection.kind === 'live') {
     const live = await buildLiveReader(ctx, opts.confirmGmailRead === true);
-    if ('reader' in live) {
-      reader = live.reader;
-    } else {
-      console.log(`Live Gmail read not enabled: ${live.refused}`);
-      console.log('Falling back to the read-only mock reader (no external Gmail access).');
+    if ('refused' in live) {
+      // Live was explicitly requested but a guard failed. Exit nonzero — never fall back to mock.
+      throw new AppError('GMAIL_READ_REFUSED', `Live Gmail read refused: ${live.refused}`);
     }
+    reader = live.reader;
+  } else {
+    reader = new MockGmailThreadReader();
+    console.log('Using the OFFLINE mock reader (--mock): no external Gmail access occurs.');
   }
 
   const threads = await read.trackedThreads({ recordId: opts.record, campaignId });
@@ -290,35 +306,159 @@ export async function outreachSyncRepliesCommand(
     console.log(`  ${r.threadId}: ${r.classification} from ${r.fromEmail}`);
   }
   if (!report.readExternally) {
-    console.log('Note: mock reader used — no live Gmail access occurred. Enable GMAIL_REPLY_SYNC_ENABLED=true and pass --confirm-gmail-read (after `gmail-read-auth`) for a live read-only sync.');
+    console.log('Note: mock reader explicitly selected — no live Gmail access occurred. Enable GMAIL_REPLY_SYNC_ENABLED=true and pass --confirm-gmail-read (after `gmail-read-auth`) for a live read-only sync.');
   }
 }
 
-function buildSheetsProvider(ctx: CliContext): SheetsProvider {
-  if (ctx.config.GOOGLE_SHEETS_PROVIDER === 'http') {
-    return new HttpSheetsProvider(ctx.config.GOOGLE_SHEETS_SPREADSHEET_ID);
+/**
+ * Build the REAL Google Sheets provider. Reuses the existing Google OAuth loopback pattern, but with
+ * a SEPARATE 0600 credential file (GOOGLE_SHEETS_CREDENTIALS_FILE) and the minimum Sheets scope — no
+ * Gmail credential is read or touched.
+ */
+function buildHttpSheetsProvider(ctx: CliContext): HttpSheetsProvider {
+  const c = ctx.config;
+  const clientCreds = loadGmailClientCredentials({ clientFile: c.GMAIL_OAUTH_CLIENT_FILE, envClientId: c.GMAIL_OAUTH_CLIENT_ID, envClientSecret: c.GMAIL_OAUTH_CLIENT_SECRET });
+  if (!clientCreds) {
+    throw new AppError('SHEETS_NO_OAUTH_CLIENT', `no OAuth client credentials — save the Google Cloud client JSON to ${c.GMAIL_OAUTH_CLIENT_FILE} (or set GMAIL_OAUTH_CLIENT_ID/SECRET).`);
   }
-  return new MockSheetsProvider();
+  const oauth = new GoogleOAuthClient({ clientId: clientCreds.clientId, clientSecret: clientCreds.clientSecret, redirectUri: c.GMAIL_OAUTH_REDIRECT_URI, timeoutMs: c.GMAIL_TIMEOUT_MS });
+  const store = new LocalGmailTokenStore(c.GOOGLE_SHEETS_CREDENTIALS_FILE);
+  const tokens = new OAuthAccessTokenProvider(oauth, store);
+  return new HttpSheetsProvider({ spreadsheetId: c.GOOGLE_SHEETS_SPREADSHEET_ID, tokens, store, logger: ctx.logger, timeoutMs: c.GMAIL_TIMEOUT_MS });
 }
 
-/** synchronize the Google Sheet projection. Real writes require --confirm + flag. */
-export async function outreachSyncSheetCommand(ctx: CliContext, opts: { confirm?: boolean }): Promise<void> {
+function printProjectionCounts(snapshots: SheetTabSnapshot[]): void {
+  for (const s of snapshots) console.log(`    ${s.tab}: ${String(s.rows.length)} rows`);
+}
+
+/**
+ * Synchronize the Google Sheet operator projection (a ONE-WAY mirror of Postgres; manual Sheet edits
+ * are never imported back). Postgres stays authoritative.
+ *
+ *  - `--preview`            : build the projection and print row counts; write NOTHING (any provider).
+ *  - `--campaign <name>`    : scope to one campaign (upsert-only; other campaigns' rows untouched).
+ *  - (default)              : full sync of all outreach records (removes rows no longer in Postgres).
+ *
+ * A real (http) write is FAIL-CLOSED and requires ALL of: GOOGLE_SHEETS_PROVIDER=http,
+ * GOOGLE_SHEETS_SYNC_ENABLED=true, --confirm-sheet-write, a configured spreadsheet id, and valid
+ * credentials with exactly the Sheets scope. Missing any → nonzero exit, no mock fallback, no partial
+ * write. The default provider is mock (in-memory only; no external effect).
+ */
+export async function outreachSyncSheetCommand(
+  ctx: CliContext,
+  opts: { preview?: boolean; confirmSheetWrite?: boolean; campaign?: string },
+): Promise<void> {
   const read = new OutreachReadRepository(ctx.db);
-  const projection = await read.projection();
+
+  let campaignId: string | undefined;
+  if (opts.campaign) {
+    const campaign = await read.getCampaignByName(opts.campaign);
+    if (!campaign) {
+      console.log(`Campaign not found: ${opts.campaign}. No action taken.`);
+      return;
+    }
+    campaignId = campaign.id;
+  }
+  const scoped = campaignId !== undefined;
+  const projection = await read.projection({ campaignId });
   const snapshots = buildAllTabs(projection, Date.now());
 
-  const provider = buildSheetsProvider(ctx);
-  const wantsExternal = provider.writesExternally;
-  if (wantsExternal && !(ctx.config.GOOGLE_SHEETS_SYNC_ENABLED && opts.confirm)) {
-    console.log('Refusing external Sheet write: requires GOOGLE_SHEETS_SYNC_ENABLED=true AND --confirm. No write performed.');
+  if (opts.preview) {
+    console.log(`\nSheet projection preview${scoped ? ` (campaign="${opts.campaign ?? ''}")` : ' (all outreach)'} — NO write performed:\n`);
+    printProjectionCounts(snapshots);
+    console.log('\n(Preview only. Postgres is authoritative; the Sheet is a one-way projection.)');
     return;
   }
-  const report = await syncSheet(provider, snapshots);
-  console.log(`\nSheet sync (provider=${report.provider}, external=${String(report.wroteExternally)}):`);
+
+  const deleteStale = !scoped; // full sync mirrors exactly; scoped sync is upsert-only.
+
+  if (ctx.config.GOOGLE_SHEETS_PROVIDER === 'http') {
+    // LIVE write path — fail closed on any missing requirement; never fall back to mock.
+    const c = ctx.config;
+    const missing: string[] = [];
+    if (!c.GOOGLE_SHEETS_SYNC_ENABLED) missing.push('GOOGLE_SHEETS_SYNC_ENABLED=true');
+    if (!opts.confirmSheetWrite) missing.push('--confirm-sheet-write');
+    if (!c.GOOGLE_SHEETS_SPREADSHEET_ID) missing.push('GOOGLE_SHEETS_SPREADSHEET_ID=<id>');
+    if (missing.length > 0) {
+      throw new AppError('SHEETS_WRITE_REFUSED', `Refusing external Sheet write — missing: ${missing.join(', ')}. No write performed; the mock provider is NOT used as a fallback.`);
+    }
+    const provider = buildHttpSheetsProvider(ctx);
+    const access = await provider.verifyAccess();
+    if (!access.ok) {
+      throw new AppError('SHEETS_WRITE_REFUSED', `Refusing external Sheet write — ${access.reason ?? 'credential/access precondition failed'}. No write performed.`);
+    }
+    const report = await syncSheet(provider, snapshots, { deleteStale });
+    printSheetReport(report, scoped);
+    return;
+  }
+
+  // Default: the mock provider is in-memory only (no external write). Explicitly selected via
+  // GOOGLE_SHEETS_PROVIDER=mock (the default).
+  const provider = new MockSheetsProvider();
+  const report = await syncSheet(provider, snapshots, { deleteStale });
+  printSheetReport(report, scoped);
+  console.log('  (mock provider: in-memory only — no external Sheet was written.)');
+}
+
+function printSheetReport(report: { provider: string; wroteExternally: boolean; perTab: { tab: string; counts: { inserted: number; updated: number; unchanged: number; deleted: number } }[]; totals: { inserted: number; updated: number; unchanged: number; deleted: number } }, scoped: boolean): void {
+  console.log(`\nSheet sync (provider=${report.provider}, external=${String(report.wroteExternally)}${scoped ? ', scoped upsert-only' : ', full'}):`);
   for (const t of report.perTab) {
     console.log(`  ${t.tab}: +${String(t.counts.inserted)} ~${String(t.counts.updated)} =${String(t.counts.unchanged)} -${String(t.counts.deleted)}`);
   }
-  console.log(`  totals: inserted=${String(report.totals.inserted)} updated=${String(report.totals.updated)} unchanged=${String(report.totals.unchanged)} deleted=${String(report.totals.deleted)}`);
+  console.log(`  totals: inserted=${String(report.totals.inserted)} updated=${String(report.totals.updated)} unchanged=${String(report.totals.unchanged)} removed/stale=${String(report.totals.deleted)}`);
+  if (scoped) console.log('  (scoped campaign sync: upsert-only; rows for other campaigns were not touched, so removed/stale is not evaluated.)');
+}
+
+/**
+ * Readiness/verification for the Google Sheet projection. Confirms configuration and, for the http
+ * provider, credentials + spreadsheet/tab access — WITHOUT modifying any data. Prints the projection
+ * that WOULD be written but writes nothing.
+ */
+export async function outreachSheetVerifyCommand(ctx: CliContext, opts: { campaign?: string } = {}): Promise<void> {
+  const c = ctx.config;
+  console.log('\nGoogle Sheet readiness (verification only — never writes):\n');
+  console.log(`  provider selection:  GOOGLE_SHEETS_PROVIDER=${c.GOOGLE_SHEETS_PROVIDER}`);
+  console.log(`  sync flag:           GOOGLE_SHEETS_SYNC_ENABLED=${String(c.GOOGLE_SHEETS_SYNC_ENABLED)}`);
+  console.log(`  spreadsheet id:      ${c.GOOGLE_SHEETS_SPREADSHEET_ID ? 'set' : 'MISSING'}`);
+
+  if (c.GOOGLE_SHEETS_PROVIDER !== 'http') {
+    console.log('  credentials:         not required — mock provider selected (no external access).');
+  } else {
+    let provider: HttpSheetsProvider | null = null;
+    try {
+      provider = buildHttpSheetsProvider(ctx);
+    } catch (err) {
+      console.log(`  credentials/access:  FAIL — ${err instanceof Error ? err.message : String(err)}`);
+    }
+    if (provider) {
+      const access = await provider.verifyAccess();
+      if (access.ok) {
+        console.log(`  credentials/scope:   OK (exactly ${GOOGLE_SHEETS_SCOPE})`);
+        console.log(`  spreadsheet:         reachable — "${access.title ?? ''}"`);
+        for (const t of Object.values(OUTREACH_TABS)) {
+          const present = access.existingTabs?.includes(t) ?? false;
+          console.log(`    tab "${t}": ${present ? 'present' : 'absent (created on first sync)'}`);
+        }
+      } else {
+        console.log(`  credentials/access:  FAIL — ${access.reason ?? 'unknown'}`);
+      }
+    }
+  }
+
+  const read = new OutreachReadRepository(ctx.db);
+  let campaignId: string | undefined;
+  if (opts.campaign) {
+    const campaign = await read.getCampaignByName(opts.campaign);
+    if (!campaign) {
+      console.log(`\n  Campaign not found: ${opts.campaign}. (No projection preview.)`);
+      return;
+    }
+    campaignId = campaign.id;
+  }
+  const projection = await read.projection({ campaignId });
+  const snapshots = buildAllTabs(projection, Date.now());
+  console.log(`\n  Projection that WOULD be written${opts.campaign ? ` (campaign="${opts.campaign}")` : ' (all outreach)'} — no write performed:`);
+  printProjectionCounts(snapshots);
 }
 
 /** show one record's (or lead's) complete outreach timeline. */

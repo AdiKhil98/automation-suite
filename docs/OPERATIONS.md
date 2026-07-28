@@ -252,18 +252,16 @@ fail closed. The controlled first send is **Phase 17B — not yet approved.**
 
 ### Google Sheet configuration
 
-- Default is the **mock** provider (`GOOGLE_SHEETS_PROVIDER=mock`): zero network I/O, used for tracking
-  and all tests. `outreach-sync-sheet` builds the four tabs and reports inserted/updated/unchanged/deleted.
+- Default is the **mock** provider (`GOOGLE_SHEETS_PROVIDER=mock`): in-memory only, zero network I/O, used
+  for tracking and all tests. `outreach-sync-sheet` builds the four tabs and reports
+  inserted/updated/unchanged/removed-stale.
 - Tabs: **Outreach** (per-lead state), **Messages** (immutable subject + body-version hash + Gmail ids),
   **Follow-ups Due** (with days-overdue), **Replies and Outcomes**.
-- Rows carry stable ids (`outreach:<id>`, `message:<id>`, `followup:<id>`, `reply:<id>`), so sync is
-  idempotent and never duplicates. Manual Sheet edits are **never** read back as database mutations.
-- A real Sheet write (Phase 17B) requires all of: `GOOGLE_SHEETS_PROVIDER=http`,
-  `GOOGLE_SHEETS_SYNC_ENABLED=true`, `GOOGLE_SHEETS_SPREADSHEET_ID=<id>`, and the explicit `--confirm`
-  flag. Credentials required then: a Google service account (or OAuth client) with scope
-  `https://www.googleapis.com/auth/spreadsheets`, the spreadsheet shared with that principal, and a
-  git-ignored 0600 credentials file (never in `.env`, DB, logs, or git). In Phase 17A the http provider
-  fails closed by design.
+- Rows carry stable ids (`outreach:<id>`, `message:<id>`, `followup:<id>`, `reply:<id>`) written into column A,
+  so sync is idempotent and never duplicates. The Sheet is a ONE-WAY projection: manual Sheet edits are
+  **never** read back as database mutations (a re-sync overwrites drift with the Postgres value).
+- Phase 17A3 ships the **real** http provider (`HttpSheetsProvider`). See the Phase 17A3 section below for the
+  write gates, authentication, and CLI.
 
 ### Gmail read-only configuration
 
@@ -287,9 +285,12 @@ fail closed. The controlled first send is **Phase 17B — not yet approved.**
   entirely separate from the sending credential. The reader refuses to run unless the stored scope is EXACTLY
   `gmail.readonly`.
 - **Two gates for any live read (fail-closed):** `GMAIL_REPLY_SYNC_ENABLED=true` AND `--confirm-gmail-read`.
-  Missing either → the command uses the mock reader and prints why. All other detection semantics
-  (self-exclusion, after-last-outbound, deterministic classification, follow-up cancellation,
-  unsubscribe→DNC, bounce) are unchanged.
+  **Phase 17A3 correction:** a REQUESTED live read (either gate present) that fails ANY guard now **exits
+  nonzero** with a clear error — it NEVER silently falls back to the mock reader. The mock reader runs ONLY
+  when explicitly selected with `--mock`; passing neither a live intent nor `--mock` is refused (nonzero), and
+  combining `--mock` with a live intent is refused. All other detection semantics (self-exclusion,
+  after-last-outbound, deterministic classification, follow-up cancellation, unsubscribe→DNC, bounce) are
+  unchanged.
 
 #### One read-only connection test (manual)
 
@@ -313,10 +314,54 @@ pnpm cli outreach-cancel-followup --followup <id> --record <id> [--reason <text>
 pnpm cli outreach-postpone-followup --followup <id> --record <id> --at <iso> [--reason <text>]
 pnpm cli outreach-followups-due                 # list due follow-ups (never sends)
 pnpm cli gmail-read-auth                         # one-time gmail.readonly consent (separate 0600 file)
-pnpm cli outreach-sync-replies [--confirm-gmail-read] [--record <id>|--campaign <name>]  # read-only reply sync (mock default; live needs GMAIL_REPLY_SYNC_ENABLED=true + --confirm-gmail-read)
-pnpm cli outreach-sync-sheet [--confirm]        # project to the Sheet (mock by default)
+pnpm cli outreach-sync-replies (--mock | --confirm-gmail-read) [--record <id>|--campaign <name>]  # read-only reply sync; live needs GMAIL_REPLY_SYNC_ENABLED=true + --confirm-gmail-read; a failed live guard exits nonzero (no mock fallback)
+pnpm cli sheets-auth                             # one-time Google Sheets consent (spreadsheets scope; separate 0600 file)
+pnpm cli outreach-sync-sheet [--preview] [--campaign <name>] [--confirm-sheet-write]  # project to the Sheet (mock/off by default; http write is fully gated)
+pnpm cli outreach-sheet-verify [--campaign <name>]  # verify Sheet config + (http) credentials/spreadsheet access; never writes
 pnpm cli outreach-timeline --record <id>        # full event + message timeline
 pnpm cli outreach-readiness                     # pre-first-send readiness report (never sends)
+```
+
+### Phase 17A3 — live Google Sheets operator dashboard (one-way projection; NEVER sends/imports)
+
+The real Sheets writer (`HttpSheetsProvider`) mirrors Postgres into the four operator tabs. It only GETs
+spreadsheet metadata, GETs a tab's values (to diff), and POSTs a SINGLE atomic `:batchUpdate` per tab
+(`updateCells`, plus `addSheet` for a missing tab). Column A holds the stable row id; rows are ordered by id
+so re-runs never reshuffle. Sync is idempotent and reports inserted/updated/unchanged/removed-stale. A full
+sync (all outreach) mirrors Postgres exactly (removes stale rows); a `--campaign` sync is upsert-only and never
+touches another campaign's rows. Message bodies are never written (the Messages tab references the version by
+content hash). Manual Sheet edits are never imported back into Postgres.
+
+**Fail-closed write gates (ALL required):** `GOOGLE_SHEETS_PROVIDER=http`, `GOOGLE_SHEETS_SYNC_ENABLED=true`,
+`--confirm-sheet-write`, a configured `GOOGLE_SHEETS_SPREADSHEET_ID`, and valid credentials whose stored scope
+is EXACTLY `https://www.googleapis.com/auth/spreadsheets`. Missing any → nonzero exit, **no mock fallback, no
+partial write**. The default remains mock/off.
+
+**Authentication.** Reuse the existing installed-app loopback OAuth pattern (same Google Cloud OAuth client)
+via `sheets-auth`. It grants ONLY the `spreadsheets` scope and stores the refresh token in a SEPARATE
+git-ignored 0600 file (`GOOGLE_SHEETS_CREDENTIALS_FILE`, default `.google-sheets-credentials.json`) — no Gmail
+credential is read or written. Share the target spreadsheet with the authorized Google account (editor).
+
+#### Setup and one live connection test (PowerShell)
+
+```powershell
+# 1. One-time consent (opens a loopback OAuth flow; grants the Sheets 'spreadsheets' scope only):
+pnpm cli sheets-auth
+
+# 2. Point at the spreadsheet and select the real provider (leave the write flag/confirm off for now):
+$env:GOOGLE_SHEETS_PROVIDER = "http"
+$env:GOOGLE_SHEETS_SPREADSHEET_ID = "<your-spreadsheet-id>"
+
+# 3. Verify credentials + spreadsheet/tab access WITHOUT writing anything:
+pnpm cli outreach-sheet-verify
+
+# 4. Preview the exact projection (row counts) — still writes nothing:
+pnpm cli outreach-sync-sheet --preview
+
+# 5. Perform the real, fully-gated write (all four gates required):
+$env:GOOGLE_SHEETS_SYNC_ENABLED = "true"
+pnpm cli outreach-sync-sheet --confirm-sheet-write
+#    scoped to one campaign (upsert-only): pnpm cli outreach-sync-sheet --campaign "<name>" --confirm-sheet-write
 ```
 
 ### Recovery & reconciliation

@@ -14,8 +14,9 @@ uses Cold Email Copy Standard v2 with deterministic and independent-reviewer qua
 **Phase 17A — outreach tracking & follow-up operations — is implemented (tracking/synchronization
 infrastructure only; it sends nothing and modifies no Gmail draft). Phase 17A2 — guarded live read-only
 Gmail reply sync — is implemented (a real, doubly-gated, strictly read-only reply reader that modifies
-nothing). Phase 17A3 — live Google Sheets writes — and Phase 17B — Controlled First Send Smoke Test —
-remain NOT approved.**
+nothing). Phase 17A3 — live Google Sheets operator dashboard — is implemented (a guarded, one-way, idempotent
+real Sheets writer plus a fail-closed Gmail reader-selection correction). Phase 17B — Controlled First Send
+Smoke Test — remains NOT approved.**
 **Last updated:** 2026-07-28
 
 One phase at a time. Each phase ends with tests, a commit, an annotated tag, and an explicit approval gate.
@@ -158,11 +159,24 @@ advancement stops at `HUMAN_REVIEW_REQUIRED`. V1 remains selected and unchanged.
 > send/draft/label/archive/trash/modify method exists on the class. Reading uses a NEW `gmail.readonly` grant
 > stored in a SEPARATE 0600 credential file via a dedicated `gmail-read-auth` command; the sending
 > `gmail.compose` credential is never touched. Any live read is doubly gated by `GMAIL_REPLY_SYNC_ENABLED=true`
-> AND `--confirm-gmail-read`, plus an exact-scope check; otherwise the mock reader is used. Detection,
-> classification, follow-up cancellation, unsubscribe→DNC, and bounce handling are unchanged. See
-> `docs/OPERATIONS.md`.
+> AND `--confirm-gmail-read`, plus an exact-scope check. (Phase 17A3 hardens the fallback: a REQUESTED live
+> read that fails any guard now exits nonzero instead of silently using the mock reader; the mock reader runs
+> only when explicitly selected with `--mock`.) Detection, classification, follow-up cancellation,
+> unsubscribe→DNC, and bounce handling are unchanged. See `docs/OPERATIONS.md`.
 >
-> **Phase 17A3 — live Google Sheets writes (NOT APPROVED).** The real Sheet write path remains deferred.
+> **Phase 17A3 — live Google Sheets operator dashboard (IMPLEMENTED; one-way projection, NEVER sends/imports).**
+> Corrects the Gmail reader selection so a REQUESTED live read that fails any guard exits nonzero instead of
+> silently using the mock reader (pure `selectReplyReader`; mock runs only when explicitly selected with
+> `--mock`). Replaces the fail-closed Sheets placeholder with a real `HttpSheetsProvider`: a ONE-WAY,
+> idempotent projection over the existing Phase 17A projection and `SheetsProvider` interface that GETs
+> metadata/values and writes each tab in a SINGLE atomic `:batchUpdate`. Column A holds the stable row id;
+> counts are inserted/updated/unchanged/removed-stale; a full sync mirrors Postgres exactly while a scoped
+> per-campaign sync is upsert-only. Live writes require ALL of `GOOGLE_SHEETS_PROVIDER=http`,
+> `GOOGLE_SHEETS_SYNC_ENABLED=true`, `--confirm-sheet-write`, a spreadsheet id, and valid credentials with
+> exactly the `spreadsheets` scope — otherwise nonzero exit, no mock fallback, no partial write. A new
+> `sheets-auth` grants the minimum scope into a SEPARATE 0600 file (no Gmail credential touched); CLI adds
+> `--preview`, `--campaign`, `--confirm-sheet-write`, and an `outreach-sheet-verify` readiness command. Manual
+> Sheet edits are never imported into Postgres. Mock/off remains the default. See `docs/OPERATIONS.md`.
 >
 > **Phase 17B — Controlled First Send Smoke Test (NOT APPROVED).** The first controlled send remains blocked.
 

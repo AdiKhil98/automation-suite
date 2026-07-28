@@ -1,4 +1,5 @@
 import {
+  type ApplyTabOptions,
   type SheetRow,
   type SheetSyncCounts,
   type SheetsProvider,
@@ -186,11 +187,12 @@ export interface SheetSyncReport {
 export async function syncSheet(
   provider: SheetsProvider,
   snapshots: SheetTabSnapshot[],
+  options?: ApplyTabOptions,
 ): Promise<SheetSyncReport> {
   const perTab: { tab: string; counts: SheetSyncCounts }[] = [];
   const totals: SheetSyncCounts = { inserted: 0, updated: 0, unchanged: 0, deleted: 0 };
   for (const snap of snapshots) {
-    const counts = await provider.applyTab(snap);
+    const counts = await provider.applyTab(snap, options);
     perTab.push({ tab: snap.tab, counts });
     totals.inserted += counts.inserted;
     totals.updated += counts.updated;

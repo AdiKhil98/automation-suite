@@ -6,7 +6,9 @@ Phases 0-16 are committed and tagged. Phase 17A (outreach tracking & follow-up o
 tracking/synchronization infrastructure only; it sends nothing and modifies no Gmail draft (details below).
 Phase 17A2 (guarded live read-only Gmail reply sync) is implemented — it replaces only the mock reply reader
 with a real, strictly read-only Gmail reader that is doubly gated and modifies nothing (details below).
-Phase 17A3 (live Google Sheets writes) and Phase 17B (Controlled First Send Smoke Test) remain NOT approved. Demo Engine V2 fictional validation is complete: the fictional
+Phase 17A3 (live Google Sheets operator dashboard) is implemented — a guarded, one-way, idempotent real
+Sheets writer plus a Gmail reader-selection correction that fails closed instead of falling back to mock
+(details below). Phase 17B (Controlled First Send Smoke Test) remains NOT approved. Demo Engine V2 fictional validation is complete: the fictional
 acceptance package reached a live Sol score of 79 with zero blockers. Phase 3C-A — a guarded, read-only KU64
 evidence export — is approved and implemented (details below). Phase 3C-B — a private, local-only review
 package rendered from that exported evidence — is approved and implemented (details below); the KU64 render
@@ -87,8 +89,50 @@ still cannot reach a real AUTO_REVIEW_PASSED, HUMAN_APPROVED, or deployment-elig
 - Status: implemented; lint/typecheck/build green; new unit tests cover flag/confirm rejection, exact-scope
   guard, self-exclusion, inbound detection, old-message exclusion, untracked-thread inaccessibility,
   follow-up cancellation, unsubscribe→DNC, bounce, zero mutation methods, and GET-only transport — all with
-  mocks. No real Gmail read or modification occurred during implementation. **Phase 17A3 (live Sheets) and
-  Phase 17B (sending) remain NOT approved.**
+  mocks. No real Gmail read or modification occurred during implementation. **Phase 17A3 (live Sheets) is now
+  implemented (see below); Phase 17B (sending) remains NOT approved.**
+
+## Phase 17A3 — live Google Sheets operator dashboard (one-way projection; NEVER sends/imports)
+
+- **Gmail reader-selection correction.** `outreach-sync-replies` no longer silently downgrades to the mock
+  reader when a live read is requested but a guard fails. A pure `selectReplyReader` decision now governs it:
+  a LIVE read is selected the moment intent is present (`GMAIL_REPLY_SYNC_ENABLED=true` OR
+  `--confirm-gmail-read`); once live, EVERY guard (both gates, present readonly credential, exact
+  `gmail.readonly` scope) must pass or the command exits nonzero (`AppError`). The mock reader runs ONLY when
+  explicitly selected with the new `--mock` flag; selecting neither (or both) is refused with a nonzero exit.
+- **Real Google Sheets provider.** `HttpSheetsProvider` replaces the fail-closed placeholder. Postgres stays
+  authoritative; the Sheet is a ONE-WAY operator projection over the existing Phase 17A projection and
+  `SheetsProvider` interface. It only ever GETs spreadsheet metadata, GETs a tab's values (to diff), and POSTs
+  a SINGLE atomic `:batchUpdate` `updateCells` per tab (plus `addSheet` for a missing tab). Column A holds the
+  stable row id (`outreach:<id>`, `message:<id>`, `followup:<id>`, `reply:<id>`); rows are ordered by that id
+  so re-runs never reshuffle. Sync is idempotent and reports inserted/updated/unchanged/removed-stale counts.
+  It never reads a Sheet value back into Postgres, never dumps full message bodies (the Messages tab references
+  the version by content hash — the projection carries no body field), and exposes no secret or internal
+  database metadata. A single atomic write means a transport failure leaves the tab in its prior committed
+  state (no partial row write).
+- The four existing tabs are synced: **Outreach**, **Messages**, **Follow-ups Due**, **Replies and Outcomes**.
+  A FULL sync mirrors Postgres exactly (removes stale rows); a SCOPED per-campaign sync is upsert-only
+  (`deleteStale=false`) so another campaign's rows are never touched.
+- **Fail-closed write gates (all required):** `GOOGLE_SHEETS_PROVIDER=http`, `GOOGLE_SHEETS_SYNC_ENABLED=true`,
+  `--confirm-sheet-write`, a configured `GOOGLE_SHEETS_SPREADSHEET_ID`, and valid credentials whose stored scope
+  is EXACTLY `https://www.googleapis.com/auth/spreadsheets`. Missing any → nonzero exit, no mock fallback, no
+  partial write. The default remains mock/off (the mock provider is in-memory only, no external effect).
+- **Authentication.** Reuses the existing installed-app loopback OAuth pattern (same Google Cloud OAuth
+  client) via a new one-time `sheets-auth` command, granting ONLY the minimum `spreadsheets` scope and storing
+  the refresh token in a SEPARATE git-ignored 0600 file (`GOOGLE_SHEETS_CREDENTIALS_FILE`, default
+  `.google-sheets-credentials.json`). No Gmail credential is read or written.
+- **CLI:** `sheets-auth` (one-time consent); `outreach-sync-sheet` gains `--preview` (build + print projection
+  counts, write nothing), `--campaign <name>` (scoped upsert-only sync), and `--confirm-sheet-write` (default
+  is a full sync of all outreach records); `outreach-sheet-verify` confirms configuration and — for the http
+  provider — credentials + spreadsheet/tab access without modifying data.
+- Status: implemented; lint/typecheck/build green; new unit tests cover the reader-selection guarantee
+  (never mock for a live intent, `--mock`-only mock, conflict/none refusal) and the real Sheets provider
+  (verifyAccess exact-scope guard, insert/update/unchanged counts, idempotent second sync, stable column-A row
+  ids, full-sync stale removal, scoped upsert-only preservation, one-way overwrite of manual edits, no partial
+  write after a failure, no secret/full-body leakage). The full unit suite (796) and the PostgreSQL integration
+  suite (66, incl. the outreach suite exercising the campaign-filtered projection) pass. **No Gmail read, no
+  Sheet write, no email, no draft, and no follow-up occurred during implementation or tests.** **Phase 17B —
+  Controlled First Send Smoke Test — remains NOT approved.**
 
 ## Phase 3C-A — guarded read-only KU64 evidence export
 

@@ -304,6 +304,9 @@ const envSchema = z.object({
   GOOGLE_SHEETS_SYNC_ENABLED: boolString(false),
   GOOGLE_SHEETS_PROVIDER: z.enum(['mock', 'http']).default('mock'),
   GOOGLE_SHEETS_SPREADSHEET_ID: z.string().optional(),
+  // Phase 17A3: the Sheets writer's OWN OAuth credential file (spreadsheets scope), separate from
+  // every Gmail credential. Git-ignored, 0600. Populated by the one-time `sheets-auth` command.
+  GOOGLE_SHEETS_CREDENTIALS_FILE: z.string().default('./.google-sheets-credentials.json'),
   // Deterministic default follow-up sequence policy (operator policy; not universal).
   OUTREACH_FOLLOWUP_1_DELAY_DAYS: z.coerce.number().int().positive().default(3),
   OUTREACH_FOLLOWUP_2_DELAY_DAYS: z.coerce.number().int().positive().default(5),

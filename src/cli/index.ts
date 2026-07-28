@@ -14,6 +14,7 @@ import { reviewDashboardCommand } from './commands/review-dashboard.js';
 import { deployDemosCommand } from './commands/deploy-demos.js';
 import { gmailAuthCommand } from './commands/gmail-auth.js';
 import { gmailReadAuthCommand } from './commands/gmail-read-auth.js';
+import { sheetsAuthCommand } from './commands/sheets-auth.js';
 import { createGmailDraftsCommand } from './commands/create-gmail-drafts.js';
 import { scheduleDraftsCommand } from './commands/schedule-drafts.js';
 import { cancelScheduleCommand, rescheduleCommand, scheduleStatusCommand } from './commands/schedule-ops.js';
@@ -53,6 +54,7 @@ import {
   outreachReadinessCommand,
   outreachRecordMessageCommand,
   outreachScheduleFollowupCommand,
+  outreachSheetVerifyCommand,
   outreachSyncRepliesCommand,
   outreachSyncSheetCommand,
   outreachTimelineCommand,
@@ -585,17 +587,31 @@ program
 
 program
   .command('outreach-sync-replies')
-  .description('Phase 17A2: read-only Gmail reply sync over tracked threads (mock by default; live read-only reader requires GMAIL_REPLY_SYNC_ENABLED=true AND --confirm-gmail-read; NEVER sends/drafts/modifies Gmail)')
+  .description('Phase 17A2/17A3: read-only Gmail reply sync over tracked threads. Select exactly one reader: --mock (offline) OR a live read-only read (GMAIL_REPLY_SYNC_ENABLED=true AND --confirm-gmail-read). A requested live read that fails any guard exits nonzero and NEVER falls back to mock. NEVER sends/drafts/modifies Gmail.')
   .option('--confirm-gmail-read', 'confirm a LIVE read-only Gmail read (only honored with GMAIL_REPLY_SYNC_ENABLED=true)')
+  .option('--mock', 'explicitly use the OFFLINE mock reader (no external Gmail access)')
   .option('--record <id>', 'restrict to one tracked outreach record')
   .option('--campaign <name>', 'restrict to one campaign')
-  .action((opts: { confirmGmailRead?: boolean; record?: string; campaign?: string }) => withContext((ctx) => outreachSyncRepliesCommand(ctx, opts)));
+  .action((opts: { confirmGmailRead?: boolean; mock?: boolean; record?: string; campaign?: string }) => withContext((ctx) => outreachSyncRepliesCommand(ctx, opts)));
+
+program
+  .command('sheets-auth')
+  .description('Phase 17A3: one-time Google Sheets OAuth consent (spreadsheets scope ONLY; separate 0600 file; touches no Gmail credential)')
+  .action(() => withContext((ctx) => sheetsAuthCommand(ctx)));
 
 program
   .command('outreach-sync-sheet')
-  .description('Phase 17A: sync the Google Sheet projection (mock by default; real writes require --confirm + GOOGLE_SHEETS_SYNC_ENABLED)')
-  .option('--confirm', 'confirm an external Sheet write (only honored with GOOGLE_SHEETS_SYNC_ENABLED=true)')
-  .action((opts: { confirm?: boolean }) => withContext((ctx) => outreachSyncSheetCommand(ctx, opts)));
+  .description('Phase 17A3: sync the Google Sheet operator projection (one-way; Postgres authoritative). Mock/off by default. A real http write requires GOOGLE_SHEETS_PROVIDER=http + GOOGLE_SHEETS_SYNC_ENABLED=true + a spreadsheet id + --confirm-sheet-write; any missing requirement exits nonzero and NEVER falls back to mock.')
+  .option('--preview', 'build and print the projection row counts; write NOTHING')
+  .option('--confirm-sheet-write', 'confirm a real external Sheet write (only honored with the http provider + GOOGLE_SHEETS_SYNC_ENABLED=true)')
+  .option('--campaign <name>', 'scope to one campaign (upsert-only; other campaigns untouched)')
+  .action((opts: { preview?: boolean; confirmSheetWrite?: boolean; campaign?: string }) => withContext((ctx) => outreachSyncSheetCommand(ctx, opts)));
+
+program
+  .command('outreach-sheet-verify')
+  .description('Phase 17A3: verify Sheet configuration + (for http) credentials and spreadsheet/tab access without modifying data')
+  .option('--campaign <name>', 'preview the projection for one campaign')
+  .action((opts: { campaign?: string }) => withContext((ctx) => outreachSheetVerifyCommand(ctx, opts)));
 
 program
   .command('outreach-timeline')
