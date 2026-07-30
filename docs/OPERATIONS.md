@@ -375,3 +375,83 @@ pnpm cli outreach-sync-sheet --confirm-sheet-write
   record can be created later if appropriate. Message/reply/event history is never overwritten.
 - **Rollback:** `scripts/rollback/0026_outreach_tracking_down.sql` drops the tables but **refuses** while
   any outreach table holds data (history must be exported/cleared first).
+
+## Phase 17B — controlled first-send smoke test (exactly ONE tracked send; heavily gated)
+
+Phase 17B performs EXACTLY ONE fully-tracked, allowlisted send from `admin@scaleflow.it.com` to the
+operator-owned test inbox `kheadi10@gmail.com` (never a real prospect). It reuses the existing safeguarded
+primitives (create a Gmail DRAFT → verify that exact known draft → `sendExistingDraft`); it adds no raw
+`messages.send`, no bulk send, no automatic follow-up send, and no reply classification.
+
+**Preconditions (fail closed on any mismatch):** migration `0026` applied; `OUTREACH_TRACKING_ENABLED=true`;
+the sending credential (`GMAIL_CREDENTIALS_FILE`, `gmail.compose` scope) authorizes `admin@scaleflow.it.com`
+(one-time `pnpm cli gmail-auth` with `GMAIL_ACCOUNT_EMAIL=admin@scaleflow.it.com`); `GMAIL_ACCOUNT_EMAIL`
+equals the sender exactly; `OUTREACH_SMOKE_TEST_RECIPIENT` equals `kheadi10@gmail.com`. Nothing sends until the
+explicit smoke-send command below with every gate on.
+
+### Prepare the one controlled test record (never sends)
+
+```powershell
+# Identity + allowlist (needed before init so the record's contact is the allowlisted address).
+$env:GMAIL_ACCOUNT_EMAIL         = "admin@scaleflow.it.com"
+$env:GMAIL_SENDER_NAME           = "ScaleFlow"
+$env:OUTREACH_TRACKING_ENABLED   = "true"
+$env:OUTREACH_SMOKE_TEST_RECIPIENT = "kheadi10@gmail.com"
+
+# Preflight (reports only; never sends):
+pnpm cli outreach-readiness
+
+# 1. Create the ONE synthetic controlled test record (campaign + synthetic lead + INITIAL step-0 message)
+#    at AWAITING_APPROVAL. Prints the record id + message content SHA-256. NEVER sends.
+pnpm cli outreach-smoke-init
+
+# 2. Record the human approval → APPROVED_TO_SEND (valid for OUTREACH_APPROVAL_TTL_MINUTES, default 60). NEVER sends.
+pnpm cli outreach-smoke-approve --record <record-id> --by "<operator>"
+```
+
+### The ONE real send (all gates on)
+
+```powershell
+# Turn on every gate ONLY for this step. The approval must still be unexpired.
+$env:OUTREACH_SMOKE_TEST_ENABLED = "true"
+$env:SENDING_ENABLED             = "true"
+$env:OUTBOUND_ACTIONS_ENABLED    = "true"
+$env:DRY_RUN                     = "false"
+$env:SENDING_PROVIDER            = "http"
+
+pnpm cli outreach-smoke-send --record <record-id> --sender admin@scaleflow.it.com --recipient kheadi10@gmail.com --provider http --confirm-phase-17b
+```
+
+On success the record advances to `INITIAL_SENT` atomically: the Gmail message/thread id + sent timestamp are
+attached to the message (subject/body/hash never mutated), an immutable event trail is written, and a
+tracking-only follow-up (step 1, `DUE`) is created but NEVER auto-sent. Then synchronize and verify:
+
+```powershell
+$env:GOOGLE_SHEETS_PROVIDER      = "http"    # (if using the live Sheet; see Phase 17A3)
+$env:GOOGLE_SHEETS_SYNC_ENABLED  = "true"
+pnpm cli outreach-sync-sheet --confirm-sheet-write
+pnpm cli outreach-timeline --record <record-id>   # confirm Outreach + Messages rows exist
+```
+
+### Reply-detection test (run ONLY after you manually reply from kheadi10@gmail.com)
+
+```powershell
+# Reads ONLY the stored Gmail thread, excludes the sender's own messages, cancels the pending follow-up on a
+# genuine reply, updates the database, then re-syncs the Sheet. NEVER sends/drafts/modifies Gmail.
+$env:GMAIL_REPLY_SYNC_ENABLED = "true"
+pnpm cli gmail-read-auth                                   # one-time gmail.readonly consent (separate 0600 file)
+pnpm cli outreach-sync-replies --record <record-id> --confirm-gmail-read
+pnpm cli outreach-sync-sheet --confirm-sheet-write
+```
+
+### Recovery (never sends; idempotent)
+
+- **Unknown send outcome, or the provider sent but persistence failed:** do NOT re-run the send. Confirm the
+  Gmail message/thread id, then attach it without sending:
+
+  ```powershell
+  pnpm cli outreach-smoke-reconcile --record <record-id> --gmail-message-id <id> --gmail-thread-id <id>
+  ```
+
+  It refuses if a send is already recorded, so it is safe to run once the ids are known. `drafts.send` has no
+  provider idempotency key, so a human confirms the single message in Gmail before reconciling.

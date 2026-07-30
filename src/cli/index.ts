@@ -61,6 +61,12 @@ import {
   outreachTrackCommand,
   outreachTransitionCommand,
 } from './commands/outreach.js';
+import {
+  outreachSmokeApproveCommand,
+  outreachSmokeInitCommand,
+  outreachSmokeReconcileCommand,
+  outreachSmokeSendCommand,
+} from './commands/outreach-smoke.js';
 import { demoV2RenderEvidenceCommand } from './commands/demo-v2-render-evidence.js';
 import { type MockReviewFixture } from '../domain/demo-v2/render/visual-review.js';
 
@@ -623,6 +629,42 @@ program
   .command('outreach-readiness')
   .description('Phase 17A: report readiness for the first controlled send; NEVER sends')
   .action(() => withContext((ctx) => outreachReadinessCommand(ctx)));
+
+// --- Phase 17B: controlled first-send smoke test (exactly ONE tracked send; heavily gated) ---
+
+program
+  .command('outreach-smoke-init')
+  .description('Phase 17B: create the ONE synthetic controlled test record (campaign + synthetic lead + INITIAL step-0 message) at AWAITING_APPROVAL. NEVER sends.')
+  .option('--subject <text>', 'override the exact subject (default: the suggested test subject)')
+  .option('--body <text>', 'override the exact body (default: the suggested test body)')
+  .option('--timezone <iana>', 'record timezone for follow-up tracking (default UTC)')
+  .option('--owner <name>', 'owner label')
+  .action((opts: { subject?: string; body?: string; timezone?: string; owner?: string }) => withContext((ctx) => outreachSmokeInitCommand(ctx, opts)));
+
+program
+  .command('outreach-smoke-approve')
+  .description('Phase 17B: record the human approval and move the record to APPROVED_TO_SEND. NEVER sends.')
+  .requiredOption('--record <id>', 'outreach record id')
+  .requiredOption('--by <operator>', 'approving operator identity')
+  .action((opts: { record: string; by: string }) => withContext((ctx) => outreachSmokeApproveCommand(ctx, opts)));
+
+program
+  .command('outreach-smoke-send')
+  .description('Phase 17B: perform EXACTLY ONE controlled, allowlisted send. Fail-closed. Requires OUTREACH_SMOKE_TEST_ENABLED=true + SENDING_ENABLED=true + OUTBOUND_ACTIONS_ENABLED=true + DRY_RUN=false + SENDING_PROVIDER=http + --provider http + --confirm-phase-17b + exact --sender + allowlisted --recipient + a valid unexpired approval.')
+  .requiredOption('--record <id>', 'outreach record id')
+  .requiredOption('--sender <email>', 'exact sender (must equal GMAIL_ACCOUNT_EMAIL)')
+  .requiredOption('--recipient <email>', 'allowlisted recipient (must equal OUTREACH_SMOKE_TEST_RECIPIENT)')
+  .requiredOption('--provider <name>', 'must be "http"')
+  .option('--confirm-phase-17b', 'explicit Phase 17B confirmation for the single real send')
+  .action((opts: { record: string; sender: string; recipient: string; provider: string; confirmPhase17b?: boolean }) => withContext((ctx) => outreachSmokeSendCommand(ctx, opts)));
+
+program
+  .command('outreach-smoke-reconcile')
+  .description('Phase 17B recovery ONLY: attach a Gmail message/thread id to the record WITHOUT sending (idempotent). Never calls Gmail.')
+  .requiredOption('--record <id>', 'outreach record id')
+  .requiredOption('--gmail-message-id <id>', 'confirmed Gmail message id')
+  .requiredOption('--gmail-thread-id <id>', 'confirmed Gmail thread id')
+  .action((opts: { record: string; gmailMessageId: string; gmailThreadId: string }) => withContext((ctx) => outreachSmokeReconcileCommand(ctx, opts)));
 
 program
   .command('reset-test-data')

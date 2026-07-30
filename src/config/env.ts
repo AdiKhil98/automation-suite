@@ -311,6 +311,22 @@ const envSchema = z.object({
   OUTREACH_FOLLOWUP_1_DELAY_DAYS: z.coerce.number().int().positive().default(3),
   OUTREACH_FOLLOWUP_2_DELAY_DAYS: z.coerce.number().int().positive().default(5),
   OUTREACH_FOLLOWUP_DUE_HOUR_LOCAL: z.coerce.number().int().min(0).max(23).default(9),
+
+  // --- Phase 17B: controlled first-send smoke test (exactly ONE tracked send; heavily gated) ---
+  // Master switch for the Phase 17B smoke-test send path. Off by default. Even when true, an
+  // actual send ALSO requires the global sending gates (SENDING_ENABLED=true,
+  // OUTBOUND_ACTIONS_ENABLED=true, DRY_RUN=false), SENDING_PROVIDER=http, the CLI confirmation
+  // flag, an exact sender match, and an allowlisted recipient. It never enables bulk sending,
+  // automatic follow-up sending, or reply classification.
+  OUTREACH_SMOKE_TEST_ENABLED: boolString(false),
+  // The ONE address the smoke test may send to (an operator-owned test inbox — never a real
+  // prospect). No default: the send fails closed unless this is explicitly configured AND the
+  // CLI --recipient AND the tracked record's contact all equal it exactly.
+  OUTREACH_SMOKE_TEST_RECIPIENT: z.string().optional(),
+  // Human-approval validity window (minutes). An approval older than this is expired and the
+  // send is refused. The sender identity is GMAIL_ACCOUNT_EMAIL (the actual sending account);
+  // the CLI --sender must match it exactly and the provider must verify to that same account.
+  OUTREACH_APPROVAL_TTL_MINUTES: z.coerce.number().int().positive().max(1440).default(60),
 });
 
 const refinedEnvSchema = envSchema.superRefine((val, ctx) => {

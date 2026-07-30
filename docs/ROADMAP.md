@@ -16,8 +16,9 @@ infrastructure only; it sends nothing and modifies no Gmail draft). Phase 17A2 �
 Gmail reply sync — is implemented (a real, doubly-gated, strictly read-only reply reader that modifies
 nothing). Phase 17A3 — live Google Sheets operator dashboard — is implemented (a guarded, one-way, idempotent
 real Sheets writer plus a fail-closed Gmail reader-selection correction). Phase 17B — Controlled First Send
-Smoke Test — remains NOT approved.**
-**Last updated:** 2026-07-28
+Smoke Test — is IMPLEMENTED (a dedicated, heavily-gated single-send path plus its tracking; no real send
+occurred during implementation and every sending flag remains disabled by default).**
+**Last updated:** 2026-07-30
 
 One phase at a time. Each phase ends with tests, a commit, an annotated tag, and an explicit approval gate.
 No phase begins before the previous one is approved with `APPROVE PHASE X`.
@@ -178,7 +179,23 @@ advancement stops at `HUMAN_REVIEW_REQUIRED`. V1 remains selected and unchanged.
 > `--preview`, `--campaign`, `--confirm-sheet-write`, and an `outreach-sheet-verify` readiness command. Manual
 > Sheet edits are never imported into Postgres. Mock/off remains the default. See `docs/OPERATIONS.md`.
 >
-> **Phase 17B — Controlled First Send Smoke Test (NOT APPROVED).** The first controlled send remains blocked.
+> **Phase 17B — Controlled First Send Smoke Test (IMPLEMENTED; exactly ONE tracked send, heavily gated).**
+> A NEW dedicated outreach-native path (`OutreachSmokeSendService`) performs EXACTLY ONE fully-tracked,
+> allowlisted send. It does not use the Phase 14/15 schedule/readiness `SendService`; it reuses the existing
+> safeguarded primitives (create a Gmail DRAFT → verify that exact known draft → `sendExistingDraft`), adding
+> no raw `messages.send`. A pure, unit-tested guard function requires ALL of: `OUTREACH_SMOKE_TEST_ENABLED=true`,
+> `SENDING_ENABLED=true`, `OUTBOUND_ACTIONS_ENABLED=true`, `DRY_RUN=false`, `SENDING_PROVIDER=http`,
+> `--provider http`, `--confirm-phase-17b`, an exact `--sender` = `GMAIL_ACCOUNT_EMAIL` (provider-verified),
+> an allowlisted `--recipient` = `OUTREACH_SMOKE_TEST_RECIPIENT` (and the record's contact), exactly one
+> recipient, no Cc/Bcc, the record `APPROVED_TO_SEND`, a stored INITIAL step-0 message whose content hash
+> matches, a valid unexpired human approval, no do-not-contact, and no prior successful send. Uses migration
+> 0026 only (no new migration): campaign `Phase 17B Smoke Test`, ONE synthetic internal lead, the immutable
+> INITIAL message, and — on a confirmed send — an atomic advance to `INITIAL_SENT` with Gmail ids attached, an
+> immutable event trail, and a tracking-only follow-up that is NEVER auto-sent. An `unknown` outcome or a
+> post-send persistence failure is never auto-retried; the exact idempotent `outreach-smoke-reconcile` recovery
+> command is printed. New flags default safe (`OUTREACH_SMOKE_TEST_ENABLED=false`). No real send, Gmail draft,
+> external Sheet write, or follow-up send occurred during implementation or tests. The single authorized real
+> send is an operator step — see `docs/OPERATIONS.md`.
 
 ## Phase 0 — Discovery & system specification
 
