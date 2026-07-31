@@ -4,6 +4,7 @@ import {
   type OutreachUnitOfWork,
 } from '../../src/domain/outreach/outreach-service.js';
 import {
+  type OutreachDeliveryEvent,
   type OutreachFollowup,
   type OutreachMessage,
   type OutreachRecord,
@@ -21,6 +22,7 @@ export class InMemoryOutreachStore implements OutreachUnitOfWork, OutreachTxRepo
   followups = new Map<string, OutreachFollowup>();
   replies: OutreachReply[] = [];
   events: OutreachEvent[] = [];
+  deliveryEvents: OutreachDeliveryEvent[] = [];
   private eventCounter = 0;
 
   async getRecord(id: string): Promise<OutreachRecord | null> {
@@ -116,6 +118,14 @@ export class InMemoryOutreachStore implements OutreachUnitOfWork, OutreachTxRepo
     return seq;
   }
 
+  async deliveryEventExists(dsnGmailMessageId: string): Promise<boolean> {
+    return this.deliveryEvents.some((e) => e.dsnGmailMessageId === dsnGmailMessageId);
+  }
+
+  async insertDeliveryEvent(evt: OutreachDeliveryEvent): Promise<void> {
+    this.deliveryEvents.push({ ...evt });
+  }
+
   async transaction<T>(fn: (repos: OutreachTxRepos) => Promise<T>): Promise<T> {
     const snapshot = {
       records: new Map([...this.records].map(([k, v]) => [k, { ...v }])),
@@ -123,6 +133,7 @@ export class InMemoryOutreachStore implements OutreachUnitOfWork, OutreachTxRepo
       followups: new Map([...this.followups].map(([k, v]) => [k, { ...v }])),
       replies: [...this.replies],
       events: [...this.events],
+      deliveryEvents: [...this.deliveryEvents],
       counter: this.eventCounter,
     };
     try {
@@ -133,6 +144,7 @@ export class InMemoryOutreachStore implements OutreachUnitOfWork, OutreachTxRepo
       this.followups = snapshot.followups;
       this.replies = snapshot.replies;
       this.events = snapshot.events;
+      this.deliveryEvents = snapshot.deliveryEvents;
       this.eventCounter = snapshot.counter;
       throw err;
     }

@@ -4,6 +4,11 @@
  * postponed, reply detected, sheet synced — appends exactly one event. Events are
  * insert-only and ordered by a monotonically increasing sequence per record, so a
  * record's complete timeline can always be replayed in order.
+ *
+ * Phase 17C adds three delivery-reconciliation event types: `BOUNCE_DETECTED` and
+ * `FOLLOWUPS_CANCELLED` (a confirmed permanent bounce), and `DELIVERY_UNKNOWN` (a
+ * temporary/non-terminal delivery failure that requires operator review). These are
+ * appended, never overwriting the original `INITIAL_SENT` transition or sent timestamp.
  */
 
 export const OUTREACH_EVENT_TYPES = [
@@ -17,6 +22,9 @@ export const OUTREACH_EVENT_TYPES = [
   'REPLY_DETECTED',
   'DO_NOT_CONTACT_SET',
   'SHEET_SYNCED',
+  'BOUNCE_DETECTED',
+  'FOLLOWUPS_CANCELLED',
+  'DELIVERY_UNKNOWN',
   'NOTE',
 ] as const;
 

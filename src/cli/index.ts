@@ -67,6 +67,7 @@ import {
   outreachSmokeReconcileCommand,
   outreachSmokeSendCommand,
 } from './commands/outreach-smoke.js';
+import { outreachReconcileDeliveryCommand } from './commands/outreach-reconcile.js';
 import { demoV2RenderEvidenceCommand } from './commands/demo-v2-render-evidence.js';
 import { type MockReviewFixture } from '../domain/demo-v2/render/visual-review.js';
 
@@ -629,6 +630,19 @@ program
   .command('outreach-readiness')
   .description('Phase 17A: report readiness for the first controlled send; NEVER sends')
   .action(() => withContext((ctx) => outreachReadinessCommand(ctx)));
+
+// --- Phase 17C: delivery failure reconciliation (read-only DSN detection; NEVER sends) ---
+
+program
+  .command('outreach-reconcile-delivery')
+  .description('Phase 17C: reconcile Gmail delivery failures (DSN/bounce). STRICTLY READ-ONLY on Gmail: correlates delivery notifications to tracked outbounds, transitions permanent bounces to BOUNCED, and cancels pending follow-ups. Select exactly one reader: --mock (offline) OR a live read-only read (GMAIL_REPLY_SYNC_ENABLED=true AND --confirm-gmail-read); a requested live read that fails any guard exits nonzero and NEVER falls back to mock. Never sends/drafts/modifies Gmail; never auto-retries.')
+  .option('--record <id>', 'restrict to one tracked outreach record')
+  .option('--campaign <name>', 'restrict to one campaign (unresolved sent records only)')
+  .option('--confirm-gmail-read', 'confirm a LIVE read-only Gmail read (only honored with GMAIL_REPLY_SYNC_ENABLED=true)')
+  .option('--mock', 'explicitly use the OFFLINE mock bounce reader (no external Gmail access)')
+  .option('--dry-report', 'show the proposed correlation + state change; write NOTHING')
+  .action((opts: { record?: string; campaign?: string; confirmGmailRead?: boolean; mock?: boolean; dryReport?: boolean }) =>
+    withContext((ctx) => outreachReconcileDeliveryCommand(ctx, opts)));
 
 // --- Phase 17B: controlled first-send smoke test (exactly ONE tracked send; heavily gated) ---
 

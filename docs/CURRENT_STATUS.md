@@ -10,7 +10,11 @@ Phase 17A3 (live Google Sheets operator dashboard) is implemented — a guarded,
 Sheets writer plus a Gmail reader-selection correction that fails closed instead of falling back to mock
 (details below). Phase 17B (Controlled First Send Smoke Test) is IMPLEMENTED as a dedicated, heavily-gated
 single-send path plus its tracking (details below); no real send occurred during implementation and every
-sending flag remains disabled by default. Demo Engine V2 fictional validation is complete: the fictional
+sending flag remains disabled by default. Phase 17C (Delivery Failure Reconciliation) is IMPLEMENTED — a
+guarded, strictly read-only Gmail DSN/bounce reconciliation path that transitions confirmed permanent bounces
+to BOUNCED and cancels pending follow-ups without ever sending, modifying Gmail, or auto-retrying (details
+below); no Gmail read, email, Sheet write, or follow-up occurred during implementation. Demo Engine V2
+fictional validation is complete: the fictional
 acceptance package reached a live Sol score of 79 with zero blockers. Phase 3C-A — a guarded, read-only KU64
 evidence export — is approved and implemented (details below). Phase 3C-B — a private, local-only review
 package rendered from that exported evidence — is approved and implemented (details below); the KU64 render
@@ -174,6 +178,49 @@ still cannot reach a real AUTO_REVIEW_PASSED, HUMAN_APPROVED, or deployment-elig
   sent message projects into the Messages tab by content hash — never its body). **No real email, Gmail send,
   Gmail draft, external Sheet write, or follow-up send occurred during implementation or tests.** The single
   authorized real send is an operator-run step; the exact commands are in `docs/OPERATIONS.md`.
+
+## Phase 17C — delivery failure reconciliation (read-only DSN detection; NEVER sends)
+
+- **Root cause of the incident.** Phase 17B recorded the outbound as `INITIAL_SENT` on a confirmed Gmail
+  `drafts.send`, but Gmail later emitted a SEPARATE Delivery Status Notification (`550 5.7.1` — likely
+  unsolicited mail) in a different thread; the recipient never received the mail. The pipeline had no path to
+  detect that asynchronous bounce, so the outreach state stayed falsely "sent" and a follow-up remained armed.
+- **Delivery-event model.** Migration `0027` adds ONE additive `outreach_delivery_events` table (no existing
+  table altered) recording the correlation between a tracked outbound and a DSN plus the auditable diagnostics:
+  `delivery_status` (DELIVERED/BOUNCED/DELIVERY_UNKNOWN), `permanence` (PERMANENT/TEMPORARY/UNKNOWN), the
+  rejection code, diagnostic text, RFC 3463 status + RFC 3464 action, final/original recipient, bounce
+  timestamp, the ORIGINAL outbound Gmail message/thread ids, and the DSN's OWN Gmail message/thread ids. The
+  DSN Gmail message id is a unique idempotency key (recorded at most once). The immutable sent-message row is
+  never mutated — a message stays historically SENT while its outreach state becomes BOUNCED.
+- **DSN detection (read-only).** A new guarded bounce reader (`HttpGmailBounceReader`) issues only GETs — a
+  bounded `messages.list` scoped to delivery-notification markers AND the tracked recipients (so the search is
+  connected to tracked outbounds and finds DSNs even in a separate thread), then `messages.get?format=full` to
+  parse the standard `multipart/report` / `message/delivery-status` structure. It has, by construction, no
+  send/draft/label/archive/trash/modify method, refuses unless the stored scope is EXACTLY `gmail.readonly`,
+  and fails closed (empty) on any error. Correlation is deterministic and PURE (no AI): RFC Message-ID
+  reference, then shared Gmail thread, then failed-recipient address; it fails closed on ambiguity and never
+  classifies an unrelated or non-DSN message. Only necessary diagnostic fields and a short safe preview are
+  stored.
+- **State & follow-up behavior.** A confirmed permanent (5.x.x/550) bounce transitions the record to `BOUNCED`,
+  cancels every pending follow-up with an explicit blocked reason, and appends immutable `BOUNCE_DETECTED` +
+  `FOLLOWUPS_CANCELLED` events while preserving the original `INITIAL_SENT` event and sent timestamp. It does
+  NOT set do-not-contact (policy) and NEVER auto-retries. A temporary (4.x.x) failure is recorded as
+  `DELIVERY_UNKNOWN` for operator review with no state change and no retry. Reconciliation is idempotent per DSN.
+- **Command.** `outreach-reconcile-delivery` supports `--record`, `--campaign`, all eligible unresolved sent
+  records, a `--dry-report` mode (proposed correlation + state change, no writes), and `--mock`. A live Gmail
+  read requires `GMAIL_REPLY_SYNC_ENABLED=true` + `--confirm-gmail-read` + the exact read-only credential; a
+  requested live read that fails any guard exits nonzero and NEVER falls back to mock (reuses the Phase 17A3
+  `selectReplyReader` decision). The exact operator command to reconcile the Phase 17B incident record
+  (`acded064-b681-4c0d-9d16-45966a5edc43`) is in `docs/OPERATIONS.md`; it is an operator-run step and was not
+  run during implementation.
+- Status: implemented; lint/typecheck/build green; 876 unit tests pass (incl. 46 new Phase 17C cases across
+  correlation/classification, the service bounce/temporary/idempotent paths, the reconciliation orchestrator,
+  and the read-only bounce reader — permanent 550 bounce, temporary 4xx, separate-thread correlation, RFC
+  Message-ID correlation, wrong-recipient ignored, unrelated DSN ignored, ambiguous rejected, INITIAL_SENT
+  history preserved, BOUNCED transition, follow-ups cancelled, no auto-retry, zero Gmail-mutation methods,
+  GET-only transport, live-guard-never-mock, idempotent repeat). A PostgreSQL integration case exercises the
+  migration + bounce reconciliation end-to-end (runs where a local test DB is configured). **No Gmail read,
+  email, Gmail modification, external Sheet write, or follow-up occurred during implementation or tests.**
 
 ## Phase 3C-A — guarded read-only KU64 evidence export
 

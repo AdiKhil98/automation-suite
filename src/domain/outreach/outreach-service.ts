@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { AppError } from '../../utils/errors.js';
+import { type DeliveryPermanence, type DeliveryStatus } from './delivery.js';
 import { type NewOutreachEvent } from './events.js';
 import {
   computeFollowupDueUtc,
@@ -14,12 +15,13 @@ import {
 } from './reply-classification.js';
 import {
   messageContentHash,
+  type OutreachDeliveryEvent,
   type OutreachFollowup,
   type OutreachMessage,
   type OutreachMessageType,
   type OutreachRecord,
 } from './records.js';
-import { assertOutreachTransition, cancelsFollowups } from './state-machine.js';
+import { assertOutreachTransition, canOutreachTransition, cancelsFollowups } from './state-machine.js';
 import { type OutreachStatus } from './status.js';
 
 export type { OutreachRecord } from './records.js';
@@ -60,6 +62,9 @@ export interface OutreachTxRepos {
   ): Promise<void>;
   pendingFollowups(recordId: string): Promise<OutreachFollowup[]>;
   appendEvent(evt: NewOutreachEvent): Promise<number>;
+  /** True if a delivery event for this DSN Gmail message id already exists (idempotency). */
+  deliveryEventExists(dsnGmailMessageId: string): Promise<boolean>;
+  insertDeliveryEvent(evt: OutreachDeliveryEvent): Promise<void>;
 }
 
 export interface OutreachUnitOfWork {
@@ -103,6 +108,42 @@ export interface ApplyReplyInput {
   receivedAtMs: number;
   preview: string;
   classification: ReplyClassification;
+}
+
+/** Input for {@link OutreachService.applyDeliveryFailure} (Phase 17C). */
+export interface ApplyDeliveryFailureInput {
+  outreachRecordId: string;
+  outreachMessageId: string | null;
+  /** BOUNCED for a permanent failure; DELIVERY_UNKNOWN for a temporary one. */
+  deliveryStatus: DeliveryStatus;
+  permanence: DeliveryPermanence;
+  rejectionCode: string | null;
+  diagnosticText: string | null;
+  dsnStatus: string | null;
+  dsnAction: string | null;
+  finalRecipient: string | null;
+  originalRecipient: string | null;
+  bounceAtMs: number | null;
+  originalGmailMessageId: string | null;
+  originalGmailThreadId: string | null;
+  dsnGmailMessageId: string;
+  dsnGmailThreadId: string | null;
+  preview: string;
+}
+
+export type DeliveryFailureOutcome =
+  /** A permanent bounce was applied: record → BOUNCED, pending follow-ups cancelled. */
+  | 'BOUNCED_APPLIED'
+  /** The record was already BOUNCED; the new DSN was recorded but no transition occurred. */
+  | 'BOUNCE_ALREADY_TERMINAL'
+  /** A temporary failure was recorded for operator review; the record state is unchanged. */
+  | 'DELIVERY_UNKNOWN_RECORDED'
+  /** This exact DSN was already reconciled; nothing changed (idempotent). */
+  | 'ALREADY_RECONCILED';
+
+export interface DeliveryFailureResult {
+  outcome: DeliveryFailureOutcome;
+  record: OutreachRecord;
 }
 
 /**
@@ -413,6 +454,112 @@ export class OutreachService {
       });
       await this.cancelPending(repos, input.outreachRecordId, 'REPLY_DETECTED', nowD);
       return { ...rec, ...patch, updatedAt: nowD };
+    });
+  }
+
+  /**
+   * Apply a correlated delivery failure (Phase 17C). Deterministic and idempotent:
+   *
+   *  - Idempotent by the DSN's Gmail message id: a DSN already reconciled makes no change.
+   *  - A PERMANENT failure (deliveryStatus BOUNCED) transitions the record to BOUNCED
+   *    (when legal), cancels EVERY pending follow-up, and appends immutable
+   *    BOUNCE_DETECTED + FOLLOWUPS_CANCELLED events. The original INITIAL_SENT event and
+   *    sent timestamp are preserved (the message row is never touched). It does NOT set
+   *    do-not-contact and NEVER schedules a retry.
+   *  - A TEMPORARY failure (deliveryStatus DELIVERY_UNKNOWN) records the diagnostic and a
+   *    DELIVERY_UNKNOWN event for operator review, but changes no state and never retries.
+   *
+   * A delivery-event row is always inserted (the auditable diagnostic), whatever the outcome.
+   */
+  async applyDeliveryFailure(input: ApplyDeliveryFailureInput): Promise<DeliveryFailureResult> {
+    return this.uow.transaction(async (repos) => {
+      const rec = await this.require(repos, input.outreachRecordId);
+      const nowD = new Date(this.now());
+
+      // Idempotency: this exact DSN was already reconciled — change nothing.
+      if (await repos.deliveryEventExists(input.dsnGmailMessageId)) {
+        return { outcome: 'ALREADY_RECONCILED', record: rec };
+      }
+
+      await repos.insertDeliveryEvent({
+        id: randomUUID(),
+        outreachRecordId: input.outreachRecordId,
+        outreachMessageId: input.outreachMessageId,
+        deliveryStatus: input.deliveryStatus,
+        permanence: input.permanence,
+        rejectionCode: input.rejectionCode,
+        diagnosticText: input.diagnosticText ? safePreview(input.diagnosticText, 500) : null,
+        dsnStatus: input.dsnStatus,
+        dsnAction: input.dsnAction,
+        finalRecipient: input.finalRecipient,
+        originalRecipient: input.originalRecipient,
+        bounceAt: input.bounceAtMs !== null ? new Date(input.bounceAtMs) : null,
+        originalGmailMessageId: input.originalGmailMessageId,
+        originalGmailThreadId: input.originalGmailThreadId,
+        dsnGmailMessageId: input.dsnGmailMessageId,
+        dsnGmailThreadId: input.dsnGmailThreadId,
+        preview: safePreview(input.preview),
+        createdAt: nowD,
+      });
+
+      // Temporary / undetermined failure: record for operator review, change no state.
+      if (input.deliveryStatus !== 'BOUNCED') {
+        await repos.appendEvent({
+          outreachRecordId: input.outreachRecordId,
+          type: 'DELIVERY_UNKNOWN',
+          fromStatus: null,
+          toStatus: null,
+          message: `Temporary delivery failure (${input.rejectionCode ?? 'no code'}) — operator review required; no retry`,
+          data: { dsnGmailMessageId: input.dsnGmailMessageId, status: input.dsnStatus, action: input.dsnAction },
+        });
+        return { outcome: 'DELIVERY_UNKNOWN_RECORDED', record: rec };
+      }
+
+      // Permanent bounce. If the record is already BOUNCED, record the DSN + event but do
+      // NOT force an illegal BOUNCED -> BOUNCED transition.
+      const blockedReason = 'BOUNCED';
+      if (rec.status === 'BOUNCED') {
+        await repos.appendEvent({
+          outreachRecordId: input.outreachRecordId,
+          type: 'BOUNCE_DETECTED',
+          fromStatus: null,
+          toStatus: null,
+          message: `Additional bounce DSN recorded (${input.rejectionCode ?? 'no code'}); record already BOUNCED`,
+          data: { dsnGmailMessageId: input.dsnGmailMessageId, rejectionCode: input.rejectionCode },
+        });
+        await this.cancelPending(repos, input.outreachRecordId, blockedReason, nowD);
+        return { outcome: 'BOUNCE_ALREADY_TERMINAL', record: rec };
+      }
+
+      const legal = canOutreachTransition(rec.status, 'BOUNCED');
+      const patch: Partial<OutreachRecord> = { nextFollowupAt: null };
+      if (legal) patch.status = 'BOUNCED';
+
+      await repos.updateRecord(input.outreachRecordId, patch, nowD);
+      await repos.appendEvent({
+        outreachRecordId: input.outreachRecordId,
+        type: 'BOUNCE_DETECTED',
+        fromStatus: rec.status,
+        toStatus: legal ? 'BOUNCED' : rec.status,
+        message: `Permanent delivery failure (${input.rejectionCode ?? 'no code'})${legal ? ` — ${rec.status} -> BOUNCED` : ' — record left in place (transition not legal)'}; no retry`,
+        data: { dsnGmailMessageId: input.dsnGmailMessageId, rejectionCode: input.rejectionCode, diagnostic: input.dsnStatus },
+      });
+
+      // Cancel EVERY pending follow-up with an explicit blocked reason, then summarize.
+      const pending = await repos.pendingFollowups(input.outreachRecordId);
+      for (const f of pending) {
+        await repos.updateFollowupStatus(f.id, 'CANCELLED', blockedReason, nowD);
+      }
+      await repos.appendEvent({
+        outreachRecordId: input.outreachRecordId,
+        type: 'FOLLOWUPS_CANCELLED',
+        fromStatus: null,
+        toStatus: null,
+        message: `${String(pending.length)} pending follow-up(s) cancelled (${blockedReason})`,
+        data: { cancelled: pending.map((f) => f.id), reason: blockedReason },
+      });
+
+      return { outcome: 'BOUNCED_APPLIED', record: { ...rec, ...patch, updatedAt: nowD } };
     });
   }
 

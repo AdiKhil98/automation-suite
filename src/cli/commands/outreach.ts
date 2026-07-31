@@ -481,6 +481,14 @@ export async function outreachTimelineCommand(ctx: CliContext, opts: { record: s
   for (const m of messages) {
     console.log(`   ${m.messageType} step ${String(m.sequenceStep)} "${m.subject}" sha256=${m.contentHash.slice(0, 12)}… sent=${m.sentAt?.toISOString() ?? '-'} gmailMsg=${m.gmailMessageId ?? '-'}`);
   }
+  const deliveries = await read.deliveryEventsForRecord(opts.record);
+  if (deliveries.length > 0) {
+    console.log(`\n  Delivery events (${String(deliveries.length)}):`);
+    for (const d of deliveries) {
+      console.log(`   ${d.deliveryStatus} (${d.permanence}) code=${d.rejectionCode ?? '-'} dsnMsg=${d.dsnGmailMessageId} at=${d.bounceAt?.toISOString() ?? '-'}`);
+      if (d.diagnosticText) console.log(`     diagnostic: ${d.diagnosticText}`);
+    }
+  }
 }
 
 /** readiness check before the first controlled send — NEVER sends. */

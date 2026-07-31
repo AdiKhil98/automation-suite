@@ -113,7 +113,7 @@ class FakeStore implements SmokeSendStore {
   }
 }
 
-function buildService(store: SmokeSendStore, over: Partial<SmokeGuardConfig> = {}, sendScript = { account: { ok: true, email: SENDER }, draft: goodDraft(), send: { outcome: 'ok' as const, ref: { providerMessageId: 'pm-1', providerThreadId: 'pt-1' } } }): { service: OutreachSmokeSendService; send: MockSendProvider; draft: MockGmailDraftProvider } {
+function buildService(store: SmokeSendStore, over: Partial<SmokeGuardConfig> = {}, sendScript: ConstructorParameters<typeof MockSendProvider>[0] = { account: { ok: true, email: SENDER }, draft: goodDraft(), send: { outcome: 'ok', ref: { providerMessageId: 'pm-1', providerThreadId: 'pt-1' } } }): { service: OutreachSmokeSendService; send: MockSendProvider; draft: MockGmailDraftProvider } {
   const draft = new MockGmailDraftProvider(SENDER);
   const send = new MockSendProvider(sendScript);
   const service = new OutreachSmokeSendService({

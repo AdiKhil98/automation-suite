@@ -6,10 +6,12 @@ import {
 } from '../../domain/outreach/outreach-service.js';
 import {
   type OutreachCampaign,
+  type OutreachDeliveryEvent,
   type OutreachFollowup,
   type OutreachMessage,
   type OutreachRecord,
 } from '../../domain/outreach/records.js';
+import { type TrackedOutbound } from '../../domain/outreach/delivery.js';
 import {
   type FollowupRowView,
   type MessageRowView,
@@ -24,6 +26,7 @@ import {
   demoDeploymentRuns,
   leads,
   outreachCampaigns,
+  outreachDeliveryEvents,
   outreachEvents,
   outreachFollowups,
   outreachMessages,
@@ -244,6 +247,38 @@ export class OutreachTxRepository implements OutreachTxRepos {
     });
     return seq;
   }
+
+  async deliveryEventExists(dsnGmailMessageId: string): Promise<boolean> {
+    const rows = await this.db
+      .select({ id: outreachDeliveryEvents.id })
+      .from(outreachDeliveryEvents)
+      .where(eq(outreachDeliveryEvents.dsnGmailMessageId, dsnGmailMessageId))
+      .limit(1);
+    return rows.length > 0;
+  }
+
+  async insertDeliveryEvent(evt: OutreachDeliveryEvent): Promise<void> {
+    await this.db.insert(outreachDeliveryEvents).values({
+      id: evt.id,
+      outreachRecordId: evt.outreachRecordId,
+      outreachMessageId: evt.outreachMessageId,
+      deliveryStatus: evt.deliveryStatus,
+      permanence: evt.permanence,
+      rejectionCode: evt.rejectionCode,
+      diagnosticText: evt.diagnosticText,
+      dsnStatus: evt.dsnStatus,
+      dsnAction: evt.dsnAction,
+      finalRecipient: evt.finalRecipient,
+      originalRecipient: evt.originalRecipient,
+      bounceAt: evt.bounceAt,
+      originalGmailMessageId: evt.originalGmailMessageId,
+      originalGmailThreadId: evt.originalGmailThreadId,
+      dsnGmailMessageId: evt.dsnGmailMessageId,
+      dsnGmailThreadId: evt.dsnGmailThreadId,
+      preview: evt.preview,
+      createdAt: evt.createdAt,
+    });
+  }
 }
 
 /** Read side: campaigns, records, timelines, projections, readiness — no writes. */
@@ -370,6 +405,81 @@ export class OutreachReadRepository {
       threadId: v.threadId,
       lastOutboundAtMs: v.lastOutboundAtMs,
       handledMessageIds: handled.get(recordId) ?? [],
+    }));
+  }
+
+  /**
+   * Tracked outbound messages that a delivery reconciliation should correlate DSNs against
+   * (Phase 17C). Each row is one SENT message that carries a Gmail message id. A `recordId`
+   * filter includes that record regardless of status (explicit operator re-check); the
+   * unscoped/`campaignId` forms return only UNRESOLVED records (not already BOUNCED or in a
+   * terminal state), so re-running "all" after a bounce naturally finds nothing new.
+   */
+  async trackedOutbounds(filter?: { recordId?: string; campaignId?: string }): Promise<TrackedOutbound[]> {
+    const conditions = [
+      sql`${outreachMessages.gmailMessageId} IS NOT NULL AND ${outreachMessages.sentAt} IS NOT NULL`,
+    ];
+    if (filter?.recordId) {
+      conditions.push(eq(outreachMessages.outreachRecordId, filter.recordId));
+    } else {
+      // "All eligible unresolved sent records": exclude already-resolved terminal states.
+      conditions.push(sql`${outreachRecords.status} NOT IN ('BOUNCED','UNSUBSCRIBED','DO_NOT_CONTACT','CLOSED_WON','CLOSED_LOST')`);
+      if (filter?.campaignId) conditions.push(eq(outreachRecords.campaignId, filter.campaignId));
+    }
+
+    const rows = await this.db
+      .select({
+        recordId: outreachMessages.outreachRecordId,
+        messageId: outreachMessages.id,
+        gmailMessageId: outreachMessages.gmailMessageId,
+        gmailThreadId: outreachMessages.gmailThreadId,
+        contactEmail: outreachRecords.contactEmail,
+      })
+      .from(outreachMessages)
+      .innerJoin(outreachRecords, eq(outreachRecords.id, outreachMessages.outreachRecordId))
+      .where(and(...conditions));
+
+    const out: TrackedOutbound[] = [];
+    for (const r of rows) {
+      if (!r.gmailMessageId) continue;
+      out.push({
+        outreachRecordId: r.recordId,
+        outreachMessageId: r.messageId,
+        gmailMessageId: r.gmailMessageId,
+        gmailThreadId: r.gmailThreadId ?? '',
+        contactEmail: r.contactEmail,
+        rfcMessageId: null,
+      });
+    }
+    return out;
+  }
+
+  /** Delivery/bounce events for a record, oldest-first (Phase 17C; shown in the timeline). */
+  async deliveryEventsForRecord(recordId: string): Promise<OutreachDeliveryEvent[]> {
+    const rows = await this.db
+      .select()
+      .from(outreachDeliveryEvents)
+      .where(eq(outreachDeliveryEvents.outreachRecordId, recordId))
+      .orderBy(asc(outreachDeliveryEvents.createdAt));
+    return rows.map((r) => ({
+      id: r.id,
+      outreachRecordId: r.outreachRecordId,
+      outreachMessageId: r.outreachMessageId,
+      deliveryStatus: r.deliveryStatus as OutreachDeliveryEvent['deliveryStatus'],
+      permanence: r.permanence as OutreachDeliveryEvent['permanence'],
+      rejectionCode: r.rejectionCode,
+      diagnosticText: r.diagnosticText,
+      dsnStatus: r.dsnStatus,
+      dsnAction: r.dsnAction,
+      finalRecipient: r.finalRecipient,
+      originalRecipient: r.originalRecipient,
+      bounceAt: r.bounceAt,
+      originalGmailMessageId: r.originalGmailMessageId,
+      originalGmailThreadId: r.originalGmailThreadId,
+      dsnGmailMessageId: r.dsnGmailMessageId,
+      dsnGmailThreadId: r.dsnGmailThreadId,
+      preview: r.preview,
+      createdAt: r.createdAt,
     }));
   }
 

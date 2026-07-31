@@ -2245,3 +2245,38 @@ export const outreachEvents = pgTable(
     recordSeqUk: uniqueIndex('outreach_events_record_seq_uk').on(t.outreachRecordId, t.seq),
   }),
 );
+
+// Phase 17C: delivery failure reconciliation. Correlates a tracked outbound message with a
+// Gmail Delivery Status Notification (DSN) and records the diagnostic fields that make the
+// outreach state auditable. Immutable (insert-only): the outbound message row is never
+// mutated — a message stays historically "sent" while its outreach state may become BOUNCED.
+export const outreachDeliveryEvents = pgTable(
+  'outreach_delivery_events',
+  {
+    id: text('id').primaryKey(),
+    outreachRecordId: text('outreach_record_id').notNull().references(() => outreachRecords.id, { onDelete: 'cascade' }),
+    outreachMessageId: text('outreach_message_id').references(() => outreachMessages.id, { onDelete: 'set null' }),
+    deliveryStatus: text('delivery_status').notNull(),
+    permanence: text('permanence').notNull(),
+    rejectionCode: text('rejection_code'),
+    diagnosticText: text('diagnostic_text'),
+    dsnStatus: text('dsn_status'),
+    dsnAction: text('dsn_action'),
+    finalRecipient: text('final_recipient'),
+    originalRecipient: text('original_recipient'),
+    bounceAt: timestamp('bounce_at', { withTimezone: true }),
+    originalGmailMessageId: text('original_gmail_message_id'),
+    originalGmailThreadId: text('original_gmail_thread_id'),
+    dsnGmailMessageId: text('dsn_gmail_message_id').notNull(),
+    dsnGmailThreadId: text('dsn_gmail_thread_id'),
+    preview: text('preview').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    recordIdx: index('outreach_delivery_events_record_idx').on(t.outreachRecordId),
+    // A given DSN Gmail message is recorded at most once (idempotent reconciliation).
+    dsnUk: uniqueIndex('outreach_delivery_events_dsn_uk').on(t.dsnGmailMessageId),
+    statusCk: check('outreach_delivery_status_ck', sql`${t.deliveryStatus} IN ('DELIVERED','BOUNCED','DELIVERY_UNKNOWN')`),
+    permanenceCk: check('outreach_delivery_permanence_ck', sql`${t.permanence} IN ('PERMANENT','TEMPORARY','UNKNOWN')`),
+  }),
+);

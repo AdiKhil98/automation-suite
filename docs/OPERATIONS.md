@@ -455,3 +455,56 @@ pnpm cli outreach-sync-sheet --confirm-sheet-write
 
   It refuses if a send is already recorded, so it is safe to run once the ids are known. `drafts.send` has no
   provider idempotency key, so a human confirms the single message in Gmail before reconciling.
+
+## Phase 17C — delivery failure reconciliation (read-only DSN detection; NEVER sends)
+
+Phase 17C closes the gap the Phase 17B smoke test exposed: an email can be recorded `INITIAL_SENT` while
+Gmail later emits a separate Delivery Status Notification (DSN) — e.g. `550 5.7.1 likely unsolicited mail` —
+so the recipient never received it, and the bounce may land in a **different Gmail thread** than the outbound.
+The outbound message stays historically *sent* (its immutable row is never mutated), but the outreach RECORD
+state must become `BOUNCED` so no follow-up is ever sent to an address that rejected the mail.
+
+- **What it does.** `outreach-reconcile-delivery` reads Gmail **strictly read-only**, finds DSNs connected to
+  tracked outbound messages, correlates each to EXACTLY ONE outbound (by RFC Message-ID reference, shared Gmail
+  thread, or failed-recipient address — **fail-closed on ambiguity**, and unrelated/non-DSN messages are never
+  classified), and — unless `--dry-report` — transitions permanent (5.x.x) bounces to `BOUNCED`, cancels every
+  pending follow-up, and appends immutable `BOUNCE_DETECTED` + `FOLLOWUPS_CANCELLED` events. Temporary (4.x.x)
+  failures are recorded as `DELIVERY_UNKNOWN` for operator review with **no state change and no retry**. It does
+  NOT set do-not-contact and **never auto-retries**. Nothing here sends, drafts, labels, archives, or modifies
+  Gmail. Migration `0027` adds one additive `outreach_delivery_events` table (idempotency key: the DSN's own
+  Gmail message id).
+- **Live read gates (fail-closed; same as Phase 17A2/17A3).** A live Gmail read needs
+  `GMAIL_REPLY_SYNC_ENABLED=true` AND `--confirm-gmail-read`, the SEPARATE read-only credential
+  (`gmail-read-auth`, exactly the `gmail.readonly` scope). A requested live read that fails any guard exits
+  nonzero and **never** falls back to mock; the offline mock reader runs only with `--mock`.
+
+```powershell
+pnpm cli outreach-reconcile-delivery --record <record-id>   # one record
+pnpm cli outreach-reconcile-delivery --campaign "<name>"    # one campaign (unresolved sent records)
+pnpm cli outreach-reconcile-delivery                        # all eligible unresolved sent records
+#   --dry-report : show the proposed correlation + state change; write NOTHING
+#   --mock       : offline mock reader (no external Gmail access)
+```
+
+### Reconcile the Phase 17B incident (record acded064-b681-4c0d-9d16-45966a5edc43)
+
+The Phase 17B controlled send was recorded `INITIAL_SENT`, but Gmail returned a `550 5.7.1` DSN (likely
+unsolicited mail) and the recipient did not receive it. Reconcile it as an operator step (read-only consent
+`gmail-read-auth` must already be granted; this reads Gmail but sends nothing and modifies no message):
+
+```powershell
+$env:OUTREACH_TRACKING_ENABLED = "true"
+$env:GMAIL_REPLY_SYNC_ENABLED  = "true"
+
+# 1. DRY REPORT first — shows the proposed DSN correlation + state change; writes NOTHING:
+pnpm cli outreach-reconcile-delivery --record acded064-b681-4c0d-9d16-45966a5edc43 --confirm-gmail-read --dry-report
+
+# 2. Apply it — transitions the record to BOUNCED and cancels the pending follow-up (still sends nothing):
+pnpm cli outreach-reconcile-delivery --record acded064-b681-4c0d-9d16-45966a5edc43 --confirm-gmail-read
+
+# 3. Verify, then synchronize the operator Sheet (Postgres stays authoritative):
+pnpm cli outreach-timeline --record acded064-b681-4c0d-9d16-45966a5edc43   # shows the BOUNCE_DETECTED delivery event
+pnpm cli outreach-sync-sheet --confirm-sheet-write
+```
+
+Reconciliation is idempotent: a given DSN is recorded at most once, and replaying it changes nothing.

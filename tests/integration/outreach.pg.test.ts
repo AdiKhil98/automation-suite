@@ -11,7 +11,7 @@ import { type DbHandle } from '../../src/persistence/db.js';
 import { DrizzleOutreachUnitOfWork } from '../../src/persistence/outreach-unit-of-work.js';
 import { OutreachReadRepository } from '../../src/persistence/repositories/outreach.repo.js';
 import { LeadsRepository } from '../../src/persistence/repositories/leads.repo.js';
-import { outreachMessages, outreachRecords } from '../../src/persistence/schema.js';
+import { outreachDeliveryEvents, outreachMessages, outreachRecords } from '../../src/persistence/schema.js';
 
 const testDatabase = requireIntegrationTestDatabase();
 const TZ = 'Europe/Berlin';
@@ -85,6 +85,50 @@ describe('outreach tracking (PostgreSQL)', () => {
     // A follow-up scheduled before the reply is no longer pending.
     const projection = await read.projection();
     expect(projection.followupsDue.filter((f) => f.contactEmail === 'reply@clinic.example')).toHaveLength(0);
+  });
+
+  it('reconciles a permanent bounce: record -> BOUNCED, follow-ups cancelled, delivery event persisted, idempotent (through the DB)', async () => {
+    const { leadId, campaignId } = await seed();
+    const rec = (await svc().track({ campaignId, leadId, contactEmail: 'bounce@clinic.example', timezone: TZ })).record!;
+    await svc().recordMessage({ outreachRecordId: rec.id, messageType: 'INITIAL', sequenceStep: 0, subject: 's', body: 'b', gmailMessageId: 'gm-out-9', gmailThreadId: 'thr-9', sentAt: new Date(NOW) });
+    await svc().transition(rec.id, 'AWAITING_APPROVAL');
+    await svc().transition(rec.id, 'APPROVED_TO_SEND');
+    await svc().transition(rec.id, 'INITIAL_SENT');
+    await svc().scheduleFollowup(rec.id, 1, policy);
+
+    const read = new OutreachReadRepository(handle.db);
+    const msgId = (await read.messagesForRecord(rec.id))[0]!.id;
+
+    const bounce = {
+      outreachRecordId: rec.id, outreachMessageId: msgId,
+      deliveryStatus: 'BOUNCED' as const, permanence: 'PERMANENT' as const,
+      rejectionCode: '550 5.7.1', diagnosticText: 'smtp; 550 5.7.1 likely unsolicited mail',
+      dsnStatus: '5.7.1', dsnAction: 'failed', finalRecipient: 'bounce@clinic.example', originalRecipient: null,
+      bounceAtMs: Date.parse('2026-07-20T12:01:00Z'), originalGmailMessageId: 'gm-out-9', originalGmailThreadId: 'thr-9',
+      dsnGmailMessageId: 'dsn-99', dsnGmailThreadId: 'thr-dsn-sep', preview: 'Address rejected',
+    };
+    const first = await svc().applyDeliveryFailure(bounce);
+    expect(first.outcome).toBe('BOUNCED_APPLIED');
+
+    const after = await read.getRecordById(rec.id);
+    expect(after?.status).toBe('BOUNCED');
+    expect(after?.doNotContact).toBe(false); // policy: bounce does not mark do-not-contact
+    expect(after?.nextFollowupAt).toBeNull();
+
+    const deliveryRows = await handle.db.select().from(outreachDeliveryEvents).where(eq(outreachDeliveryEvents.outreachRecordId, rec.id));
+    expect(deliveryRows).toHaveLength(1);
+    expect(deliveryRows[0]?.rejectionCode).toBe('550 5.7.1');
+
+    // The immutable message row keeps its sent timestamp + gmail id (history not overwritten).
+    const msgRow = (await read.messagesForRecord(rec.id))[0]!;
+    expect(msgRow.sentAt).not.toBeNull();
+    expect(msgRow.gmailMessageId).toBe('gm-out-9');
+
+    // Idempotent: replaying the same DSN changes nothing and never duplicates the event.
+    const second = await svc().applyDeliveryFailure(bounce);
+    expect(second.outcome).toBe('ALREADY_RECONCILED');
+    const stillOne = await handle.db.select().from(outreachDeliveryEvents).where(eq(outreachDeliveryEvents.dsnGmailMessageId, 'dsn-99'));
+    expect(stillOne).toHaveLength(1);
   });
 
   it('records a strictly increasing, gap-checked event timeline', async () => {
