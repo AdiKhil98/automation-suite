@@ -6,6 +6,7 @@ import {
   parseDsn,
   permanenceToDeliveryStatus,
   rejectionCode,
+  type CorrelationSignal,
   type DeliveryPermanence,
   type DeliveryStatus,
   type ParsedDsn,
@@ -27,7 +28,7 @@ export interface DeliveryProposal {
   dsnGmailThreadId: string;
   outreachRecordId: string;
   outreachMessageId: string;
-  correlationSignal: 'THREAD_ID' | 'RFC_MESSAGE_ID' | 'RECIPIENT';
+  correlationSignal: CorrelationSignal;
   permanence: DeliveryPermanence;
   deliveryStatus: DeliveryStatus;
   rejectionCode: string | null;
@@ -38,7 +39,7 @@ export interface DeliveryProposal {
 /** A DSN that was seen but deliberately NOT applied, with the reason. */
 export interface DeliverySkip {
   dsnGmailMessageId: string;
-  reason: 'NOT_A_DSN' | 'NO_CORRELATION' | 'AMBIGUOUS_CORRELATION';
+  reason: 'NOT_A_DSN' | 'NO_CORRELATION' | 'AMBIGUOUS_CORRELATION' | 'BEFORE_SENT' | 'OUTSIDE_WINDOW';
   detail?: string;
 }
 
@@ -103,14 +104,15 @@ export async function runDeliveryReconciliation(args: {
     const dsn = parseDsn(n);
     const correlation = correlateDsn(dsn, args.outbounds);
     if (correlation.kind === 'none') {
-      skipped.push({ dsnGmailMessageId: dsn.dsnGmailMessageId, reason: 'NO_CORRELATION' });
+      const reason = correlation.reason === 'BEFORE_SENT' ? 'BEFORE_SENT' : correlation.reason === 'OUTSIDE_WINDOW' ? 'OUTSIDE_WINDOW' : 'NO_CORRELATION';
+      skipped.push({ dsnGmailMessageId: dsn.dsnGmailMessageId, reason });
       continue;
     }
     if (correlation.kind === 'ambiguous') {
       skipped.push({
         dsnGmailMessageId: dsn.dsnGmailMessageId,
         reason: 'AMBIGUOUS_CORRELATION',
-        detail: `matches records ${correlation.matchedRecordIds.join(', ')}`,
+        detail: `${correlation.signal} matches records ${correlation.matchedRecordIds.join(', ')}`,
       });
       continue;
     }

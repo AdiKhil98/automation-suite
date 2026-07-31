@@ -1,5 +1,6 @@
 import { type NewOutreachEvent, type OutreachEvent } from '../../src/domain/outreach/events.js';
 import {
+  type DeliveryEventRef,
   type OutreachTxRepos,
   type OutreachUnitOfWork,
 } from '../../src/domain/outreach/outreach-service.js';
@@ -124,6 +125,28 @@ export class InMemoryOutreachStore implements OutreachUnitOfWork, OutreachTxRepo
 
   async insertDeliveryEvent(evt: OutreachDeliveryEvent): Promise<void> {
     this.deliveryEvents.push({ ...evt });
+  }
+
+  async deliveryEventsByDsnIds(dsnGmailMessageIds: string[]): Promise<DeliveryEventRef[]> {
+    const set = new Set(dsnGmailMessageIds);
+    return this.deliveryEvents
+      .filter((e) => set.has(e.dsnGmailMessageId))
+      .map((e) => ({
+        id: e.id,
+        dsnGmailMessageId: e.dsnGmailMessageId,
+        outreachRecordId: e.outreachRecordId,
+        deliveryStatus: e.deliveryStatus,
+        supersededAt: e.supersededAt,
+      }));
+  }
+
+  async supersedeDeliveryEvent(id: string, supersededAt: Date, reason: string, by: string): Promise<void> {
+    const e = this.deliveryEvents.find((x) => x.id === id);
+    if (e && e.supersededAt === null) {
+      e.supersededAt = supersededAt;
+      e.supersededReason = reason;
+      e.supersededBy = by;
+    }
   }
 
   async transaction<T>(fn: (repos: OutreachTxRepos) => Promise<T>): Promise<T> {

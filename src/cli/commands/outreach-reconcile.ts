@@ -126,3 +126,51 @@ export async function outreachReconcileDeliveryCommand(
   }
   console.log('\nNo email was sent and no Gmail message was modified. Permanent bounces are BOUNCED with pending follow-ups cancelled; nothing is ever auto-retried.');
 }
+
+/**
+ * Phase 17C1: operator correction of mis-correlated delivery events. It INVALIDATES
+ * (supersedes) the named delivery events — never deletes immutable history — recording the
+ * correction timestamp, reason, and operator, and appending an immutable
+ * DELIVERY_RECONCILIATION_CORRECTED event per affected record. It changes NO outreach state
+ * and touches NO follow-up: a correctly-BOUNCED record stays BOUNCED. Touches no Gmail and
+ * sends nothing. Dry-run is the default; `--apply` (with `--by` and `--reason`) writes.
+ */
+export async function outreachCorrectDeliveryEventsCommand(
+  ctx: CliContext,
+  opts: { dsn?: string[]; reason?: string; by?: string; apply?: boolean } = {},
+): Promise<void> {
+  if (!ctx.config.OUTREACH_TRACKING_ENABLED) {
+    console.log('Outreach tracking is disabled (OUTREACH_TRACKING_ENABLED=false). No action taken.');
+    return;
+  }
+  const dsnIds = (opts.dsn ?? []).map((s) => s.trim()).filter(Boolean);
+  if (dsnIds.length === 0) {
+    console.log('No --dsn <id> values provided. Nothing to correct.');
+    return;
+  }
+  const dryRun = opts.apply !== true;
+  if (!dryRun) {
+    if (!opts.by?.trim()) { console.log('--by <operator> is required to apply a correction. No action taken.'); return; }
+    if (!opts.reason?.trim()) { console.log('--reason <text> is required to apply a correction. No action taken.'); return; }
+  }
+
+  const svc = new OutreachService(new DrizzleOutreachUnitOfWork(ctx.db));
+  const result = await svc.correctDeliveryEvents({
+    dsnGmailMessageIds: dsnIds,
+    reason: opts.reason?.trim() ?? 'mis-correlated delivery event (Phase 17C1)',
+    by: opts.by?.trim() ?? 'operator',
+    dryRun,
+  });
+
+  console.log(`\nDelivery-event correction${dryRun ? ' (DRY RUN — no writes)' : ''}:`);
+  for (const e of result.events) {
+    if (!e.found) { console.log(`   • ${e.dsnGmailMessageId}: NOT FOUND`); continue; }
+    const state = e.alreadySuperseded ? 'already invalidated' : dryRun ? 'would be invalidated' : 'invalidated';
+    console.log(`   • ${e.dsnGmailMessageId}: ${state} (record ${e.outreachRecordId ?? '-'}, ${e.deliveryStatus ?? '-'})`);
+  }
+  console.log(`  ${dryRun ? 'would invalidate' : 'invalidated'}: ${String(result.toSupersedeCount)}; already invalidated: ${String(result.alreadySupersededCount)}; not found: ${String(result.notFound.length)}`);
+  if (!dryRun && result.recordsAnnotated.length > 0) {
+    console.log(`  records annotated with DELIVERY_RECONCILIATION_CORRECTED: ${result.recordsAnnotated.join(', ')}`);
+  }
+  console.log(`\nImmutable history is preserved (events are invalidated, never deleted). No outreach state or follow-up was changed; no Gmail access or send occurred.${dryRun ? ' Re-run with --apply --by <operator> --reason "<text>" to write.' : ''}`);
+}

@@ -21,7 +21,8 @@ const b64 = (s: string): string => Buffer.from(s, 'utf8').toString('base64url');
 
 const OUTBOUND: TrackedOutbound = {
   outreachRecordId: 'rec-1', outreachMessageId: 'msg-1', gmailMessageId: 'gm-out-1',
-  gmailThreadId: 'thr-out-1', contactEmail: 'prospect@clinic.example', rfcMessageId: '<out-1@mail>',
+  gmailThreadId: 'thr-out-1', contactEmail: 'prospect@clinic.example',
+  sentAtMs: Date.parse('2026-07-20T09:00:00Z'), rfcMessageId: '<out-1@mail>',
 };
 
 const FULL_DSN = {
@@ -62,6 +63,29 @@ describe('HttpGmailBounceReader', () => {
     expect(n?.deliveryStatusText).toContain('Status: 5.7.1');
     expect(n?.referencedMessageIds).toContain('<out-1@mail>'); // from References + embedded Message-ID
     expect(reader.readsExternally).toBe(true);
+  });
+
+  it('falls back to the text/plain body when no structured delivery-status part exists', async () => {
+    const plainDsn = {
+      id: 'dsn-1', threadId: 'thr-dsn-plain', internalDate: '1600000600000', snippet: 'Delivery failed',
+      payload: {
+        headers: [
+          { name: 'From', value: 'Mail Delivery Subsystem <mailer-daemon@googlemail.com>' },
+          { name: 'Subject', value: 'Delivery incomplete' },
+          { name: 'Content-Type', value: 'text/plain' },
+        ],
+        parts: [
+          { mimeType: 'text/plain', body: { data: b64('Your message to prospect@clinic.example was not delivered.\n550 5.7.1 rejected as likely unsolicited mail') } },
+        ],
+      },
+    };
+    const httpGet: GmailHttpGet = async (path) => {
+      if (path.startsWith('/gmail/v1/users/me/messages?')) return { status: 200, json: { messages: [{ id: 'dsn-1' }] } };
+      return { status: 200, json: plainDsn as unknown as Record<string, unknown> };
+    };
+    const reader = new HttpGmailBounceReader({ tokens, store: store(readonlyCred()), logger, timeoutMs: 1000, httpGet });
+    const [n] = await reader.findDeliveryNotifications({ outbounds: [OUTBOUND] });
+    expect(n?.deliveryStatusText).toContain('550 5.7.1'); // text/plain used as fallback
   });
 
   it('issues only GETs to messages list + messages get — no mutation endpoints', async () => {

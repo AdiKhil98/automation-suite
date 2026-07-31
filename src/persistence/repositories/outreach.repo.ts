@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import { type NewOutreachEvent, type OutreachEvent } from '../../domain/outreach/events.js';
 import {
+  type DeliveryEventRef,
   type OutreachTxRepos,
 } from '../../domain/outreach/outreach-service.js';
 import {
@@ -276,8 +277,40 @@ export class OutreachTxRepository implements OutreachTxRepos {
       dsnGmailMessageId: evt.dsnGmailMessageId,
       dsnGmailThreadId: evt.dsnGmailThreadId,
       preview: evt.preview,
+      supersededAt: evt.supersededAt,
+      supersededReason: evt.supersededReason,
+      supersededBy: evt.supersededBy,
       createdAt: evt.createdAt,
     });
+  }
+
+  async deliveryEventsByDsnIds(dsnGmailMessageIds: string[]): Promise<DeliveryEventRef[]> {
+    if (dsnGmailMessageIds.length === 0) return [];
+    const rows = await this.db
+      .select({
+        id: outreachDeliveryEvents.id,
+        dsnGmailMessageId: outreachDeliveryEvents.dsnGmailMessageId,
+        outreachRecordId: outreachDeliveryEvents.outreachRecordId,
+        deliveryStatus: outreachDeliveryEvents.deliveryStatus,
+        supersededAt: outreachDeliveryEvents.supersededAt,
+      })
+      .from(outreachDeliveryEvents)
+      .where(inArray(outreachDeliveryEvents.dsnGmailMessageId, dsnGmailMessageIds));
+    return rows.map((r) => ({
+      id: r.id,
+      dsnGmailMessageId: r.dsnGmailMessageId,
+      outreachRecordId: r.outreachRecordId,
+      deliveryStatus: r.deliveryStatus,
+      supersededAt: r.supersededAt,
+    }));
+  }
+
+  async supersedeDeliveryEvent(id: string, supersededAt: Date, reason: string, by: string): Promise<void> {
+    // Only ever set the correction annotation; the original diagnostic fields are immutable.
+    await this.db
+      .update(outreachDeliveryEvents)
+      .set({ supersededAt, supersededReason: reason, supersededBy: by })
+      .where(and(eq(outreachDeliveryEvents.id, id), sql`${outreachDeliveryEvents.supersededAt} IS NULL`));
   }
 }
 
@@ -416,16 +449,15 @@ export class OutreachReadRepository {
    * terminal state), so re-running "all" after a bounce naturally finds nothing new.
    */
   async trackedOutbounds(filter?: { recordId?: string; campaignId?: string }): Promise<TrackedOutbound[]> {
+    // Eligibility (Phase 17C1): a sent timestamp, a Gmail message id (or RFC Message-id), and an
+    // UNRESOLVED record. The terminal exclusion applies to EVERY form — including --record — so an
+    // already-BOUNCED/unsubscribed/DNC/closed record is never a reconciliation target.
     const conditions = [
       sql`${outreachMessages.gmailMessageId} IS NOT NULL AND ${outreachMessages.sentAt} IS NOT NULL`,
+      sql`${outreachRecords.status} NOT IN ('BOUNCED','UNSUBSCRIBED','DO_NOT_CONTACT','CLOSED_WON','CLOSED_LOST')`,
     ];
-    if (filter?.recordId) {
-      conditions.push(eq(outreachMessages.outreachRecordId, filter.recordId));
-    } else {
-      // "All eligible unresolved sent records": exclude already-resolved terminal states.
-      conditions.push(sql`${outreachRecords.status} NOT IN ('BOUNCED','UNSUBSCRIBED','DO_NOT_CONTACT','CLOSED_WON','CLOSED_LOST')`);
-      if (filter?.campaignId) conditions.push(eq(outreachRecords.campaignId, filter.campaignId));
-    }
+    if (filter?.recordId) conditions.push(eq(outreachMessages.outreachRecordId, filter.recordId));
+    if (filter?.campaignId) conditions.push(eq(outreachRecords.campaignId, filter.campaignId));
 
     const rows = await this.db
       .select({
@@ -434,6 +466,7 @@ export class OutreachReadRepository {
         gmailMessageId: outreachMessages.gmailMessageId,
         gmailThreadId: outreachMessages.gmailThreadId,
         contactEmail: outreachRecords.contactEmail,
+        sentAt: outreachMessages.sentAt,
       })
       .from(outreachMessages)
       .innerJoin(outreachRecords, eq(outreachRecords.id, outreachMessages.outreachRecordId))
@@ -441,13 +474,14 @@ export class OutreachReadRepository {
 
     const out: TrackedOutbound[] = [];
     for (const r of rows) {
-      if (!r.gmailMessageId) continue;
+      if (!r.gmailMessageId || !r.sentAt) continue;
       out.push({
         outreachRecordId: r.recordId,
         outreachMessageId: r.messageId,
         gmailMessageId: r.gmailMessageId,
         gmailThreadId: r.gmailThreadId ?? '',
         contactEmail: r.contactEmail,
+        sentAtMs: r.sentAt.getTime(),
         rfcMessageId: null,
       });
     }
@@ -479,6 +513,9 @@ export class OutreachReadRepository {
       dsnGmailMessageId: r.dsnGmailMessageId,
       dsnGmailThreadId: r.dsnGmailThreadId,
       preview: r.preview,
+      supersededAt: r.supersededAt,
+      supersededReason: r.supersededReason,
+      supersededBy: r.supersededBy,
       createdAt: r.createdAt,
     }));
   }

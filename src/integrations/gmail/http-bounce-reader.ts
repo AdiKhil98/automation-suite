@@ -183,23 +183,34 @@ export class HttpGmailBounceReader implements GmailBounceReader {
     const referenced = new Set<string>();
     for (const t of messageIdTokens(headerValue(topHeaders, 'References'))) referenced.add(t);
     for (const t of messageIdTokens(headerValue(topHeaders, 'In-Reply-To'))) referenced.add(t);
+    // Some providers surface the failed message's id directly on the DSN.
+    for (const name of ['Original-Message-ID', 'X-Original-Message-ID']) {
+      for (const t of messageIdTokens(headerValue(topHeaders, name))) referenced.add(t);
+    }
 
     let deliveryStatusText: string | null = null;
+    let textPlainBody: string | null = null;
     for (const p of parts) {
       const mime = typeof p.mimeType === 'string' ? p.mimeType.toLowerCase() : '';
       if (mime === 'message/delivery-status') {
         deliveryStatusText = decodePartData(p.body?.data) || deliveryStatusText;
       }
+      if (mime === 'text/plain' && textPlainBody === null) {
+        textPlainBody = decodePartData(p.body?.data) || null;
+      }
       // The embedded original (message/rfc822) carries the outbound's own Message-ID.
       if (mime === 'message/rfc822' || mime === 'text/rfc822-headers') {
         const embedded = decodePartData(p.body?.data);
         for (const line of embedded.split(/\r?\n/)) {
-          const m = /^message-id\s*:\s*(.+)$/i.exec(line.trim());
+          const m = /^(?:x-)?(?:original-)?message-id\s*:\s*(.+)$/i.exec(line.trim());
           if (m?.[1]) for (const t of messageIdTokens(m[1])) referenced.add(t);
         }
         for (const t of messageIdTokens(headerValue(p.headers, 'Message-ID'))) referenced.add(t);
       }
     }
+    // Fallback: when no structured delivery-status part is present, use the text/plain body
+    // so the domain's free-text parse can still recover the status/diagnostic code.
+    if (!deliveryStatusText && textPlainBody) deliveryStatusText = textPlainBody;
 
     const internalDate = typeof msg.internalDate === 'string' ? Number(msg.internalDate) : NaN;
     return {

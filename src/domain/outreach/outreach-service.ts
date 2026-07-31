@@ -22,7 +22,7 @@ import {
   type OutreachRecord,
 } from './records.js';
 import { assertOutreachTransition, canOutreachTransition, cancelsFollowups } from './state-machine.js';
-import { type OutreachStatus } from './status.js';
+import { OUTREACH_SEND_BLOCKED, type OutreachStatus } from './status.js';
 
 export type { OutreachRecord } from './records.js';
 
@@ -65,6 +65,19 @@ export interface OutreachTxRepos {
   /** True if a delivery event for this DSN Gmail message id already exists (idempotency). */
   deliveryEventExists(dsnGmailMessageId: string): Promise<boolean>;
   insertDeliveryEvent(evt: OutreachDeliveryEvent): Promise<void>;
+  /** Look up delivery events by their DSN Gmail message ids (Phase 17C1 correction). */
+  deliveryEventsByDsnIds(dsnGmailMessageIds: string[]): Promise<DeliveryEventRef[]>;
+  /** Invalidate (supersede) a delivery event without deleting it (Phase 17C1 correction). */
+  supersedeDeliveryEvent(id: string, supersededAt: Date, reason: string, by: string): Promise<void>;
+}
+
+/** Minimal delivery-event shape used by the operator correction path. */
+export interface DeliveryEventRef {
+  id: string;
+  dsnGmailMessageId: string;
+  outreachRecordId: string;
+  deliveryStatus: string;
+  supersededAt: Date | null;
 }
 
 export interface OutreachUnitOfWork {
@@ -134,8 +147,8 @@ export interface ApplyDeliveryFailureInput {
 export type DeliveryFailureOutcome =
   /** A permanent bounce was applied: record → BOUNCED, pending follow-ups cancelled. */
   | 'BOUNCED_APPLIED'
-  /** The record was already BOUNCED; the new DSN was recorded but no transition occurred. */
-  | 'BOUNCE_ALREADY_TERMINAL'
+  /** The record is already in a terminal/resolved state; NO delivery event was written. */
+  | 'SKIPPED_TERMINAL'
   /** A temporary failure was recorded for operator review; the record state is unchanged. */
   | 'DELIVERY_UNKNOWN_RECORDED'
   /** This exact DSN was already reconciled; nothing changed (idempotent). */
@@ -144,6 +157,34 @@ export type DeliveryFailureOutcome =
 export interface DeliveryFailureResult {
   outcome: DeliveryFailureOutcome;
   record: OutreachRecord;
+}
+
+/** Input for the Phase 17C1 operator correction of mis-correlated delivery events. */
+export interface CorrectDeliveryEventsInput {
+  dsnGmailMessageIds: string[];
+  reason: string;
+  by: string;
+  dryRun: boolean;
+}
+
+export interface DeliveryEventCorrectionView {
+  dsnGmailMessageId: string;
+  found: boolean;
+  outreachRecordId: string | null;
+  deliveryStatus: string | null;
+  alreadySuperseded: boolean;
+}
+
+export interface CorrectDeliveryEventsResult {
+  dryRun: boolean;
+  applied: boolean;
+  events: DeliveryEventCorrectionView[];
+  /** Delivery events that would be / were invalidated (excludes already-superseded). */
+  toSupersedeCount: number;
+  alreadySupersededCount: number;
+  notFound: string[];
+  /** Records whose timeline got a DELIVERY_RECONCILIATION_CORRECTED event (apply only). */
+  recordsAnnotated: string[];
 }
 
 /**
@@ -481,6 +522,13 @@ export class OutreachService {
         return { outcome: 'ALREADY_RECONCILED', record: rec };
       }
 
+      // Terminal/resolved records (already BOUNCED, unsubscribed, DNC, or closed) are left
+      // exactly as they are — NO new delivery event is written. A record correctly resolved
+      // by another path (e.g. reply-sync) must not accrue late, duplicate delivery events.
+      if (OUTREACH_SEND_BLOCKED.includes(rec.status)) {
+        return { outcome: 'SKIPPED_TERMINAL', record: rec };
+      }
+
       await repos.insertDeliveryEvent({
         id: randomUUID(),
         outreachRecordId: input.outreachRecordId,
@@ -499,6 +547,9 @@ export class OutreachService {
         dsnGmailMessageId: input.dsnGmailMessageId,
         dsnGmailThreadId: input.dsnGmailThreadId,
         preview: safePreview(input.preview),
+        supersededAt: null,
+        supersededReason: null,
+        supersededBy: null,
         createdAt: nowD,
       });
 
@@ -515,22 +566,8 @@ export class OutreachService {
         return { outcome: 'DELIVERY_UNKNOWN_RECORDED', record: rec };
       }
 
-      // Permanent bounce. If the record is already BOUNCED, record the DSN + event but do
-      // NOT force an illegal BOUNCED -> BOUNCED transition.
+      // Permanent bounce on a non-terminal record (terminal records were skipped above).
       const blockedReason = 'BOUNCED';
-      if (rec.status === 'BOUNCED') {
-        await repos.appendEvent({
-          outreachRecordId: input.outreachRecordId,
-          type: 'BOUNCE_DETECTED',
-          fromStatus: null,
-          toStatus: null,
-          message: `Additional bounce DSN recorded (${input.rejectionCode ?? 'no code'}); record already BOUNCED`,
-          data: { dsnGmailMessageId: input.dsnGmailMessageId, rejectionCode: input.rejectionCode },
-        });
-        await this.cancelPending(repos, input.outreachRecordId, blockedReason, nowD);
-        return { outcome: 'BOUNCE_ALREADY_TERMINAL', record: rec };
-      }
-
       const legal = canOutreachTransition(rec.status, 'BOUNCED');
       const patch: Partial<OutreachRecord> = { nextFollowupAt: null };
       if (legal) patch.status = 'BOUNCED';
@@ -560,6 +597,71 @@ export class OutreachService {
       });
 
       return { outcome: 'BOUNCED_APPLIED', record: { ...rec, ...patch, updatedAt: nowD } };
+    });
+  }
+
+  /**
+   * Operator correction of mis-correlated delivery events (Phase 17C1). It INVALIDATES
+   * (supersedes) the named delivery events — it never deletes immutable history — recording
+   * the correction timestamp, reason, and operator identity, and appending one immutable
+   * DELIVERY_RECONCILIATION_CORRECTED event per affected record. It changes NO outreach state
+   * and touches NO follow-up: a correctly-BOUNCED record stays BOUNCED with its follow-up
+   * cancelled. Idempotent — an already-superseded event is left untouched and adds no event.
+   * With `dryRun`, it reports the plan and writes nothing.
+   */
+  async correctDeliveryEvents(input: CorrectDeliveryEventsInput): Promise<CorrectDeliveryEventsResult> {
+    const ids = [...new Set(input.dsnGmailMessageIds.map((s) => s.trim()).filter(Boolean))];
+    return this.uow.transaction(async (repos) => {
+      const rows = await repos.deliveryEventsByDsnIds(ids);
+      const byDsn = new Map(rows.map((r) => [r.dsnGmailMessageId, r]));
+      const events: DeliveryEventCorrectionView[] = ids.map((id) => {
+        const r = byDsn.get(id);
+        return {
+          dsnGmailMessageId: id,
+          found: !!r,
+          outreachRecordId: r?.outreachRecordId ?? null,
+          deliveryStatus: r?.deliveryStatus ?? null,
+          alreadySuperseded: r?.supersededAt != null,
+        };
+      });
+      const notFound = ids.filter((id) => !byDsn.has(id));
+      const toSupersede = rows.filter((r) => r.supersededAt === null);
+      const alreadySupersededCount = rows.length - toSupersede.length;
+
+      const recordsAnnotated: string[] = [];
+      if (!input.dryRun && toSupersede.length > 0) {
+        const nowD = new Date(this.now());
+        for (const r of toSupersede) {
+          await repos.supersedeDeliveryEvent(r.id, nowD, input.reason, input.by);
+        }
+        const byRecord = new Map<string, string[]>();
+        for (const r of toSupersede) {
+          const arr = byRecord.get(r.outreachRecordId) ?? [];
+          arr.push(r.dsnGmailMessageId);
+          byRecord.set(r.outreachRecordId, arr);
+        }
+        for (const [recordId, dsnIds] of byRecord) {
+          await repos.appendEvent({
+            outreachRecordId: recordId,
+            type: 'DELIVERY_RECONCILIATION_CORRECTED',
+            fromStatus: null,
+            toStatus: null,
+            message: `${String(dsnIds.length)} delivery event(s) invalidated by ${input.by}: ${input.reason}`,
+            data: { dsnGmailMessageIds: dsnIds, reason: input.reason, by: input.by },
+          });
+          recordsAnnotated.push(recordId);
+        }
+      }
+
+      return {
+        dryRun: input.dryRun,
+        applied: !input.dryRun && toSupersede.length > 0,
+        events,
+        toSupersedeCount: toSupersede.length,
+        alreadySupersededCount,
+        notFound,
+        recordsAnnotated,
+      };
     });
   }
 

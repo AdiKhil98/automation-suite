@@ -72,9 +72,25 @@ export interface TrackedOutbound {
   gmailThreadId: string;
   /** The exact contact the outbound was addressed to (lowercased). */
   contactEmail: string;
+  /** Epoch ms the outbound was sent. A DSN must be received after this (± clock skew). */
+  sentAtMs: number;
   /** The outbound's RFC 5322 Message-ID, if it was captured (optional). */
   rfcMessageId?: string | null;
 }
+
+/**
+ * Clock-skew tolerance (Phase 17C1). A DSN whose received time is up to this far BEFORE
+ * the outbound sent time is still allowed, to absorb sender/Gmail clock differences. A DSN
+ * earlier than this is rejected — it cannot describe a message that did not yet exist.
+ */
+export const DSN_CLOCK_SKEW_MS = 5 * 60_000; // 5 minutes
+
+/**
+ * Recipient-only correlation window (Phase 17C1). Recipient-address matching — the weakest
+ * signal — is allowed ONLY for a DSN received within this window AFTER the outbound was sent,
+ * so a recipient-only match can never scan and attach historical DSNs across arbitrary dates.
+ */
+export const DSN_RECIPIENT_WINDOW_MS = 14 * 86_400_000; // 14 days
 
 /**
  * The raw fields a Gmail reader extracts from a delivery-notification message before
@@ -99,9 +115,27 @@ export interface RawDeliveryNotification {
   snippet: string;
 }
 
-/** Assemble a {@link ParsedDsn} from the raw reader fields (pure; runs the RFC parse). */
+/** Extract an RFC 3463 enhanced status (`5.7.1`) mentioned anywhere in free text. */
+export function extractEnhancedStatus(text: string | null | undefined): string | null {
+  if (!text) return null;
+  const m = /\b([245])\.\d{1,3}\.\d{1,3}\b/.exec(text);
+  return m?.[0] ?? null;
+}
+
+/**
+ * Assemble a {@link ParsedDsn} from the raw reader fields (pure). It runs the strict RFC
+ * `message/delivery-status` parse first, then falls back to scanning the free text (a
+ * `text/plain` bounce body, when structured parts are unavailable) for the enhanced status
+ * and SMTP diagnostic — so a `550 5.7.1 ...` line in a plain-text bounce is still classified.
+ */
 export function parseDsn(raw: RawDeliveryNotification): ParsedDsn {
   const ds = parseDeliveryStatus(raw.deliveryStatusText);
+  const freeText = `${raw.deliveryStatusText ?? ''}\n${raw.snippet}`;
+  const status = ds.status ?? extractEnhancedStatus(freeText);
+  const smtp = extractSmtpCode(ds.diagnosticCode) ?? extractSmtpCode(freeText);
+  // Synthesize a diagnostic from the free text only when the structured field is absent.
+  const diagnosticCode =
+    ds.diagnosticCode ?? (smtp || status ? [smtp, status].filter(Boolean).join(' ').trim() : null);
   return {
     dsnGmailMessageId: raw.gmailMessageId,
     dsnGmailThreadId: raw.gmailThreadId,
@@ -112,21 +146,30 @@ export function parseDsn(raw: RawDeliveryNotification): ParsedDsn {
     finalRecipient: ds.finalRecipient ?? normalizeDsnAddress(raw.xFailedRecipients),
     originalRecipient: ds.originalRecipient,
     action: ds.action,
-    status: ds.status,
-    diagnosticCode: ds.diagnosticCode,
+    status,
+    diagnosticCode,
     xFailedRecipients: raw.xFailedRecipients,
     referencedMessageIds: [...new Set(raw.referencedMessageIds.map((s) => s.trim()).filter(Boolean))],
     preview: safePreview(raw.snippet),
   };
 }
 
-/** How a DSN was matched to its outbound — recorded for auditability. */
-export type CorrelationSignal = 'THREAD_ID' | 'RFC_MESSAGE_ID' | 'RECIPIENT';
+/**
+ * How a DSN was matched to its outbound — recorded for auditability, in descending
+ * strength. `RECIPIENT` is the weakest and is only ever used inside a narrow time window.
+ */
+export type CorrelationSignal = 'RFC_MESSAGE_ID' | 'GMAIL_MESSAGE_ID' | 'THREAD_ID' | 'RECIPIENT';
+
+/** Why a DSN did not correlate — surfaced by the dry report. */
+export type NoCorrelationReason =
+  | 'NO_SIGNAL' // no identifier or recipient matched any tracked outbound
+  | 'BEFORE_SENT' // an identifier/recipient matched, but the DSN predates the outbound (± skew)
+  | 'OUTSIDE_WINDOW'; // recipient matched, but the DSN is outside the narrow delivery window
 
 export type CorrelationResult =
   | { kind: 'matched'; outbound: TrackedOutbound; signal: CorrelationSignal }
-  | { kind: 'none' }
-  | { kind: 'ambiguous'; matchedRecordIds: string[] };
+  | { kind: 'none'; reason: NoCorrelationReason }
+  | { kind: 'ambiguous'; matchedRecordIds: string[]; signal: CorrelationSignal };
 
 /**
  * Subject / sender patterns that mark a Gmail message as a delivery notification. Used
@@ -285,46 +328,75 @@ export function permanenceToDeliveryStatus(p: DeliveryPermanence): DeliveryStatu
   return p === 'PERMANENT' ? 'BOUNCED' : 'DELIVERY_UNKNOWN';
 }
 
+/** True when a DSN's received time is after the outbound sent time (± clock skew). */
+export function dsnIsAfterSend(dsn: { receivedAtMs: number }, outbound: TrackedOutbound): boolean {
+  return dsn.receivedAtMs >= outbound.sentAtMs - DSN_CLOCK_SKEW_MS;
+}
+
 /**
- * Correlate a DSN to EXACTLY ONE tracked outbound. Fail-closed by construction:
+ * Correlate a DSN to EXACTLY ONE tracked outbound (Phase 17C1 hardened). Fail-closed and
+ * time-bounded by construction:
  *
- *  1. Strong signals first — the DSN's own thread id equals an outbound thread id, OR a
- *     referenced RFC Message-ID equals an outbound's captured Message-ID. If the strong
- *     signals point at exactly one outbound message → matched. If they point at more
- *     than one distinct outbound message → AMBIGUOUS (never guessed).
- *  2. Only when there is no strong signal do we fall back to the failed-recipient
- *     address (Final-/Original-Recipient / X-Failed-Recipients) matching a tracked
- *     contact. Exactly one tracked outbound with that recipient → matched; more than
- *     one → AMBIGUOUS; none → NONE (unrelated DSN, ignored).
+ *  - TIME GATE (all signals): a DSN is only ever a candidate for an outbound it was received
+ *    AFTER (allowing {@link DSN_CLOCK_SKEW_MS}). A DSN that predates the outbound can never
+ *    correlate to it — this is what stops historical DSNs from attaching to a later send.
+ *  - STRENGTH PRIORITY: (1) exact RFC Message-ID reference, (2) exact original Gmail message
+ *    id reference, (3) exact outbound Gmail thread id. The strongest tier that yields any
+ *    time-eligible candidate wins; exactly one distinct outbound in that tier → matched,
+ *    more than one → AMBIGUOUS (never guessed).
+ *  - RECIPIENT-ONLY (weakest): used ONLY when no stronger identifier matched, and ONLY for a
+ *    DSN received within {@link DSN_RECIPIENT_WINDOW_MS} after the outbound. Exactly one
+ *    unresolved outbound for that recipient in-window → matched; more than one → AMBIGUOUS.
  *
- * A DSN that matches nothing tracked is NONE — it is never applied to an unrelated record.
+ * A DSN matching nothing tracked is NONE — never applied to an unrelated record. When an
+ * identifier or recipient DID match but the time gate rejected it, NONE carries the reason.
  */
 export function correlateDsn(dsn: ParsedDsn, outbounds: readonly TrackedOutbound[]): CorrelationResult {
   const referenced = new Set(dsn.referencedMessageIds.map((id) => id.trim()).filter(Boolean));
   const dsnThread = dsn.dsnGmailThreadId.trim();
-
-  // Strong signals: an exact RFC Message-ID reference (preferred, most specific) or the
-  // DSN sharing the outbound's Gmail thread. Each candidate carries the signal that hit.
-  const strong: { outbound: TrackedOutbound; signal: CorrelationSignal }[] = [];
-  for (const o of outbounds) {
-    const rfcHit = !!o.rfcMessageId && referenced.has(o.rfcMessageId.trim());
-    const threadHit = dsnThread.length > 0 && o.gmailThreadId.trim() === dsnThread;
-    if (rfcHit) strong.push({ outbound: o, signal: 'RFC_MESSAGE_ID' });
-    else if (threadHit) strong.push({ outbound: o, signal: 'THREAD_ID' });
-  }
-  const strongMatch = uniqueByMessage(strong);
-  if (strongMatch.kind !== 'none') return strongMatch;
-
-  // Weak fallback: the failed-recipient address must match a tracked contact exactly.
   const failed = new Set<string>();
   for (const addr of [dsn.finalRecipient, dsn.originalRecipient, normalizeDsnAddress(dsn.xFailedRecipients)]) {
     if (addr) failed.add(addr);
   }
-  if (failed.size === 0) return { kind: 'none' };
-  const recipientMatches = outbounds
-    .filter((o) => failed.has(normalizeEmail(o.contactEmail)))
+
+  const rfcHit = (o: TrackedOutbound): boolean => !!o.rfcMessageId && referenced.has(o.rfcMessageId.trim());
+  const gmailIdHit = (o: TrackedOutbound): boolean => o.gmailMessageId.length > 0 && referenced.has(o.gmailMessageId.trim());
+  const threadHit = (o: TrackedOutbound): boolean => dsnThread.length > 0 && o.gmailThreadId.trim() === dsnThread;
+  const recipientHit = (o: TrackedOutbound): boolean => failed.has(normalizeEmail(o.contactEmail));
+
+  // Track whether any candidate matched by identifier/recipient IGNORING time, so a pure
+  // time rejection can be reported distinctly (BEFORE_SENT / OUTSIDE_WINDOW) vs. NO_SIGNAL.
+  let anyIdentifierMatchIgnoringTime = false;
+  let anyRecipientMatchIgnoringTime = false;
+
+  // Strongest identifier tier that yields a time-eligible candidate wins.
+  const identifierTiers: { signal: CorrelationSignal; hit: (o: TrackedOutbound) => boolean }[] = [
+    { signal: 'RFC_MESSAGE_ID', hit: rfcHit },
+    { signal: 'GMAIL_MESSAGE_ID', hit: gmailIdHit },
+    { signal: 'THREAD_ID', hit: threadHit },
+  ];
+  for (const tier of identifierTiers) {
+    const anyHit = outbounds.filter((o) => tier.hit(o));
+    if (anyHit.length > 0) anyIdentifierMatchIgnoringTime = true;
+    const eligible = anyHit.filter((o) => dsnIsAfterSend(dsn, o)).map((o) => ({ outbound: o, signal: tier.signal }));
+    if (eligible.length > 0) return uniqueByMessage(eligible);
+  }
+
+  // Recipient-only (weakest): in-window, and only when no stronger identifier matched at all.
+  const recipientCandidates = outbounds.filter((o) => recipientHit(o));
+  if (recipientCandidates.length > 0) anyRecipientMatchIgnoringTime = true;
+  const inWindow = recipientCandidates
+    .filter((o) => dsnIsAfterSend(dsn, o) && dsn.receivedAtMs <= o.sentAtMs + DSN_RECIPIENT_WINDOW_MS)
     .map((o) => ({ outbound: o, signal: 'RECIPIENT' as CorrelationSignal }));
-  return uniqueByMessage(recipientMatches);
+  if (inWindow.length > 0) return uniqueByMessage(inWindow);
+
+  if (anyIdentifierMatchIgnoringTime) return { kind: 'none', reason: 'BEFORE_SENT' };
+  if (anyRecipientMatchIgnoringTime) {
+    // A recipient matched but was outside the window: distinguish "predates send" from "too late".
+    const predates = recipientCandidates.some((o) => !dsnIsAfterSend(dsn, o));
+    return { kind: 'none', reason: predates ? 'BEFORE_SENT' : 'OUTSIDE_WINDOW' };
+  }
+  return { kind: 'none', reason: 'NO_SIGNAL' };
 }
 
 /**
@@ -335,13 +407,16 @@ export function correlateDsn(dsn: ParsedDsn, outbounds: readonly TrackedOutbound
 function uniqueByMessage(
   candidates: readonly { outbound: TrackedOutbound; signal: CorrelationSignal }[],
 ): CorrelationResult {
-  if (candidates.length === 0) return { kind: 'none' };
   const byMessage = new Map<string, { outbound: TrackedOutbound; signal: CorrelationSignal }>();
   for (const c of candidates) if (!byMessage.has(c.outbound.outreachMessageId)) byMessage.set(c.outbound.outreachMessageId, c);
   if (byMessage.size > 1) {
-    return { kind: 'ambiguous', matchedRecordIds: [...new Set(candidates.map((c) => c.outbound.outreachRecordId))] };
+    return {
+      kind: 'ambiguous',
+      matchedRecordIds: [...new Set(candidates.map((c) => c.outbound.outreachRecordId))],
+      signal: candidates[0]!.signal,
+    };
   }
   const only = [...byMessage.values()][0];
-  if (!only) return { kind: 'none' };
+  if (!only) return { kind: 'none', reason: 'NO_SIGNAL' };
   return { kind: 'matched', outbound: only.outbound, signal: only.signal };
 }

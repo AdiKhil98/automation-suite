@@ -137,16 +137,32 @@ describe('OutreachService.applyDeliveryFailure — temporary failure', () => {
 });
 
 describe('OutreachService.applyDeliveryFailure — already terminal', () => {
-  it('records an additional DSN but does not force an illegal BOUNCED -> BOUNCED transition', async () => {
+  it('SKIPS a terminal (already BOUNCED) record and writes NO new delivery event', async () => {
     const store = new InMemoryOutreachStore();
     const svc = new OutreachService(store, { now: () => NOW });
     const { rec, messageId } = await sentRecord(store, svc);
     await svc.applyDeliveryFailure(bounceInput(rec.id, messageId));
     expect(store.records.get(rec.id)?.status).toBe('BOUNCED');
+    const eventsAfterFirst = store.eventsFor(rec.id).length;
 
+    // A second, different DSN for the now-terminal record must not accrue a late event.
     const second = await svc.applyDeliveryFailure(bounceInput(rec.id, messageId, { dsnGmailMessageId: 'dsn-2' }));
-    expect(second.outcome).toBe('BOUNCE_ALREADY_TERMINAL');
+    expect(second.outcome).toBe('SKIPPED_TERMINAL');
     expect(store.records.get(rec.id)?.status).toBe('BOUNCED');
-    expect(store.deliveryEvents).toHaveLength(2);
+    expect(store.deliveryEvents).toHaveLength(1); // no new delivery event written
+    expect(store.eventsFor(rec.id).length).toBe(eventsAfterFirst); // no new timeline event
+  });
+
+  it('SKIPS a record that was already resolved by another path (BOUNCED via reply-sync)', async () => {
+    const store = new InMemoryOutreachStore();
+    const svc = new OutreachService(store, { now: () => NOW });
+    const { rec, messageId } = await sentRecord(store, svc);
+    // Resolve it terminally by a different path first (a genuine bounce reply).
+    await svc.applyReply({ outreachRecordId: rec.id, gmailThreadId: 'thr-out-1', gmailMessageId: 'reply-b', fromEmail: 'mailer-daemon@googlemail.com', receivedAtMs: NOW, preview: 'Address not found', classification: 'bounce' });
+    expect(store.records.get(rec.id)?.status).toBe('BOUNCED');
+
+    const res = await svc.applyDeliveryFailure(bounceInput(rec.id, messageId, { dsnGmailMessageId: 'dsn-late' }));
+    expect(res.outcome).toBe('SKIPPED_TERMINAL');
+    expect(store.deliveryEvents).toHaveLength(0); // reconciliation added nothing
   });
 });

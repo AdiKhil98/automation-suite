@@ -21,7 +21,11 @@ occurred during implementation and every sending flag remains disabled by defaul
 Failure Reconciliation — is IMPLEMENTED (a guarded, strictly read-only Gmail DSN/bounce reconciliation that
 transitions confirmed permanent bounces to BOUNCED and cancels pending follow-ups without sending, modifying
 Gmail, or auto-retrying; migration 0027 adds one additive delivery-events table; no Gmail read, email, Sheet
-write, or follow-up occurred during implementation).**
+write, or follow-up occurred during implementation). Phase 17C1 — Harden DSN Correlation — is IMPLEMENTED
+(eligibility excludes already-resolved records including `--record`; correlation is time-bounded and
+priority-ranked, fail-closed on ambiguity; DSN parsing handles multipart/report + nested message/rfc822 +
+text/plain; a narrowly-scoped correction command invalidates — never deletes — mis-correlated delivery events;
+migration 0028 adds additive supersede columns; no Gmail read, email, Sheet write, or follow-up occurred).**
 **Last updated:** 2026-07-31
 
 One phase at a time. Each phase ends with tests, a commit, an annotated tag, and an explicit approval gate.
@@ -219,6 +223,23 @@ advancement stops at `HUMAN_REVIEW_REQUIRED`. V1 remains selected and unchanged.
 > read, email, Gmail modification, Sheet write, or follow-up occurred during implementation or tests. The
 > incident record reconciliation is an operator step — see `docs/OPERATIONS.md`. **Phase 7 competitor research
 > remains DEFERRED and unapproved.**
+>
+> **Phase 17C1 — Harden DSN Correlation (IMPLEMENTED; read-only, NEVER sends).** Fixes a correlation defect the
+> first live run exposed: reconciling record `acded064-…` attached five false `DELIVERY_UNKNOWN` events (three
+> from May 2026, before the tracked email existed) to a record already correctly `BOUNCED` by reply-sync.
+> Eligibility now excludes already-resolved records for EVERY form (including `--record`), and
+> `applyDeliveryFailure` fails closed on a terminal record (`SKIPPED_TERMINAL`, no delivery event written). A DSN
+> must be received AFTER the outbound (± 5-minute clock skew), so a DSN predating the send can never correlate.
+> Correlation priority is (1) exact RFC Message-ID, (2) exact original Gmail message id, (3) exact outbound
+> thread id, then (4) recipient-only — used ONLY for a single unresolved outbound within a narrow 14-day window,
+> fail-closed on ambiguity; the dry report shows correlation strength. Parsing handles multipart/report,
+> message/delivery-status, nested message/rfc822, and a text/plain fallback (`550 5.7.1`/`5.x.x` → PERMANENT,
+> `4.x.x` → TEMPORARY). Migration `0028` adds additive supersede columns; a new `outreach-correct-delivery-events`
+> command (dry-run by default; `--apply` needs `--by`+`--reason`) INVALIDATES — never deletes — mis-correlated
+> delivery events and appends an immutable `DELIVERY_RECONCILIATION_CORRECTED` event, changing no outreach state
+> or follow-up and touching no Gmail. The five-id incident correction is an operator step — see
+> `docs/OPERATIONS.md`. No Gmail read, email, Gmail modification, Sheet write, or follow-up occurred during
+> implementation or tests.
 
 ## Phase 0 — Discovery & system specification
 

@@ -131,6 +131,58 @@ describe('outreach tracking (PostgreSQL)', () => {
     expect(stillOne).toHaveLength(1);
   });
 
+  it('does NOT reconcile an already-resolved (terminal) record: trackedOutbounds excludes it (17C1)', async () => {
+    const { leadId, campaignId } = await seed();
+    const rec = (await svc().track({ campaignId, leadId, contactEmail: 'terminal@clinic.example', timezone: TZ })).record!;
+    await svc().recordMessage({ outreachRecordId: rec.id, messageType: 'INITIAL', sequenceStep: 0, subject: 's', body: 'b', gmailMessageId: 'gm-t', gmailThreadId: 'thr-t', sentAt: new Date(NOW) });
+    // Resolve it terminally (a genuine bounce reply), as the reply-sync path would.
+    await svc().applyReply({ outreachRecordId: rec.id, gmailThreadId: 'thr-t', gmailMessageId: 'rb', fromEmail: 'mailer-daemon@googlemail.com', receivedAtMs: NOW, preview: 'Address not found', classification: 'bounce' });
+
+    const read = new OutreachReadRepository(handle.db);
+    expect((await read.getRecordById(rec.id))?.status).toBe('BOUNCED');
+    // Eligibility excludes the BOUNCED record even when explicitly targeted by --record.
+    expect(await read.trackedOutbounds({ recordId: rec.id })).toHaveLength(0);
+    expect(await read.trackedOutbounds()).toHaveLength(0);
+  });
+
+  it('invalidates (supersedes) a mis-correlated delivery event without deleting it, and annotates the timeline (17C1)', async () => {
+    const { leadId, campaignId } = await seed();
+    const rec = (await svc().track({ campaignId, leadId, contactEmail: 'correct@clinic.example', timezone: TZ })).record!;
+    await svc().recordMessage({ outreachRecordId: rec.id, messageType: 'INITIAL', sequenceStep: 0, subject: 's', body: 'b', gmailMessageId: 'gm-c', gmailThreadId: 'thr-c', sentAt: new Date(NOW) });
+    await svc().transition(rec.id, 'AWAITING_APPROVAL');
+    await svc().transition(rec.id, 'APPROVED_TO_SEND');
+    await svc().transition(rec.id, 'INITIAL_SENT');
+    // A temporary DSN records a (say, later-found-incorrect) delivery event; state stays non-terminal.
+    await svc().applyDeliveryFailure({
+      outreachRecordId: rec.id, outreachMessageId: null, deliveryStatus: 'DELIVERY_UNKNOWN', permanence: 'TEMPORARY',
+      rejectionCode: '452 4.2.2', diagnosticText: 'smtp; 452 4.2.2 mailbox full', dsnStatus: '4.2.2', dsnAction: 'delayed',
+      finalRecipient: 'correct@clinic.example', originalRecipient: null, bounceAtMs: NOW,
+      originalGmailMessageId: 'gm-c', originalGmailThreadId: 'thr-c', dsnGmailMessageId: 'dsn-wrong', dsnGmailThreadId: 'thr-x', preview: 'x',
+    });
+
+    const before = await handle.db.select().from(outreachDeliveryEvents).where(eq(outreachDeliveryEvents.dsnGmailMessageId, 'dsn-wrong'));
+    expect(before).toHaveLength(1);
+
+    const res = await svc().correctDeliveryEvents({ dsnGmailMessageIds: ['dsn-wrong'], reason: 'mis-correlated (predates outbound)', by: 'adi', dryRun: false });
+    expect(res.applied).toBe(true);
+    expect(res.toSupersedeCount).toBe(1);
+
+    // Row still present (never deleted), now marked superseded with reason + operator.
+    const after = await handle.db.select().from(outreachDeliveryEvents).where(eq(outreachDeliveryEvents.dsnGmailMessageId, 'dsn-wrong'));
+    expect(after).toHaveLength(1);
+    expect(after[0]?.supersededAt).not.toBeNull();
+    expect(after[0]?.supersededBy).toBe('adi');
+
+    const read = new OutreachReadRepository(handle.db);
+    const corrected = (await read.timeline(rec.id)).filter((e) => e.type === 'DELIVERY_RECONCILIATION_CORRECTED');
+    expect(corrected).toHaveLength(1);
+
+    // Idempotent: a repeat supersedes nothing more.
+    const second = await svc().correctDeliveryEvents({ dsnGmailMessageIds: ['dsn-wrong'], reason: 'r', by: 'adi', dryRun: false });
+    expect(second.toSupersedeCount).toBe(0);
+    expect(second.alreadySupersededCount).toBe(1);
+  });
+
   it('records a strictly increasing, gap-checked event timeline', async () => {
     const { leadId, campaignId } = await seed();
     const rec = (await svc().track({ campaignId, leadId, contactEmail: 'tl@clinic.example', timezone: TZ })).record!;

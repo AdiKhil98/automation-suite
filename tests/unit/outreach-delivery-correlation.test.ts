@@ -19,6 +19,7 @@ const OUTBOUND: TrackedOutbound = {
   gmailMessageId: 'gm-out-1',
   gmailThreadId: 'thr-out-1',
   contactEmail: 'prospect@clinic.example',
+  sentAtMs: Date.parse('2026-07-20T09:00:00Z'),
   rfcMessageId: '<out-1@mail.scaleflow>',
 };
 
@@ -134,12 +135,12 @@ describe('correlateDsn (fail-closed, exactly-one)', () => {
 
   it('ignores a DSN whose failed recipient matches no tracked outbound (wrong recipient)', () => {
     const res = correlateDsn(dsn({ dsnGmailThreadId: 'thr-dsn-sep', finalRecipient: 'someone@else.example', referencedMessageIds: [] }), [OUTBOUND]);
-    expect(res).toEqual({ kind: 'none' });
+    expect(res).toEqual({ kind: 'none', reason: 'NO_SIGNAL' });
   });
 
   it('ignores an unrelated DSN (no thread, rfc, or recipient signal)', () => {
     const res = correlateDsn(dsn({ dsnGmailThreadId: 'thr-x', finalRecipient: null, originalRecipient: null, xFailedRecipients: null, referencedMessageIds: [] }), [OUTBOUND]);
-    expect(res).toEqual({ kind: 'none' });
+    expect(res).toEqual({ kind: 'none', reason: 'NO_SIGNAL' });
   });
 
   it('rejects an AMBIGUOUS correlation (two tracked outbounds share the failed recipient)', () => {
@@ -147,6 +148,39 @@ describe('correlateDsn (fail-closed, exactly-one)', () => {
     const res = correlateDsn(dsn({ dsnGmailThreadId: 'thr-dsn-sep', referencedMessageIds: [] }), [OUTBOUND, second]);
     expect(res.kind).toBe('ambiguous');
     if (res.kind === 'ambiguous') expect(res.matchedRecordIds.sort()).toEqual(['rec-1', 'rec-2']);
+  });
+});
+
+describe('correlateDsn — Phase 17C1 time + priority hardening', () => {
+  it('rejects a DSN received BEFORE the outbound was sent (predates the send)', () => {
+    // A DSN from May cannot describe a July outbound, even though the recipient matches.
+    const may = dsn({ dsnGmailMessageId: 'dsn-may', receivedAtMs: Date.parse('2026-05-10T10:00:00Z') });
+    const res = correlateDsn(may, [OUTBOUND]);
+    expect(res).toEqual({ kind: 'none', reason: 'BEFORE_SENT' });
+  });
+
+  it('allows a small clock-skew tolerance just before the sent time', () => {
+    const skewed = dsn({ receivedAtMs: OUTBOUND.sentAtMs - 60_000, finalRecipient: 'prospect@clinic.example', dsnGmailThreadId: 'thr-x', referencedMessageIds: [] });
+    expect(correlateDsn(skewed, [OUTBOUND]).kind).toBe('matched');
+  });
+
+  it('prefers an exact RFC Message-ID over a thread match', () => {
+    const other: TrackedOutbound = { ...OUTBOUND, outreachRecordId: 'rec-2', outreachMessageId: 'msg-2', gmailThreadId: 'thr-dsn-sep', rfcMessageId: null };
+    // DSN is in rec-2's thread but references rec-1's RFC id → RFC wins.
+    const res = correlateDsn(dsn({ referencedMessageIds: ['<out-1@mail.scaleflow>'], finalRecipient: null }), [OUTBOUND, other]);
+    expect(res.kind).toBe('matched');
+    if (res.kind === 'matched') { expect(res.signal).toBe('RFC_MESSAGE_ID'); expect(res.outbound.outreachRecordId).toBe('rec-1'); }
+  });
+
+  it('matches by exact original Gmail message id reference', () => {
+    const res = correlateDsn(dsn({ referencedMessageIds: ['gm-out-1'], finalRecipient: null, dsnGmailThreadId: 'thr-x' }), [{ ...OUTBOUND, rfcMessageId: null }]);
+    expect(res.kind).toBe('matched');
+    if (res.kind === 'matched') expect(res.signal).toBe('GMAIL_MESSAGE_ID');
+  });
+
+  it('recipient-only rejects a DSN outside the delivery window (too late)', () => {
+    const late = dsn({ receivedAtMs: OUTBOUND.sentAtMs + 40 * 86_400_000, dsnGmailThreadId: 'thr-x', referencedMessageIds: [] });
+    expect(correlateDsn(late, [OUTBOUND])).toEqual({ kind: 'none', reason: 'OUTSIDE_WINDOW' });
   });
 });
 
@@ -170,5 +204,18 @@ describe('parseDsn (raw → ParsedDsn)', () => {
     expect(p.finalRecipient).toBe('prospect@clinic.example');
     expect(p.referencedMessageIds).toEqual(['<out-1@mail.scaleflow>']); // de-duplicated
     expect(p.preview).toBe('Address rejected as likely unsolicited mail');
+  });
+
+  it('recovers status + code from a text/plain fallback body (no structured delivery-status)', () => {
+    const raw: RawDeliveryNotification = {
+      gmailMessageId: 'dsn-plain', gmailThreadId: 'thr-p', receivedAtMs: 222,
+      fromEmail: 'mailer-daemon@googlemail.com', subject: 'Delivery incomplete',
+      contentType: 'text/plain', xFailedRecipients: null, referencedMessageIds: [],
+      deliveryStatusText: null,
+      snippet: 'Your message could not be delivered. 550 5.7.1 The message was rejected as likely unsolicited mail.',
+    };
+    const p = parseDsn(raw);
+    expect(p.status).toBe('5.7.1');
+    expect(classifyDeliveryPermanence(p)).toBe('PERMANENT'); // 550 5.7.1 -> permanent bounce
   });
 });

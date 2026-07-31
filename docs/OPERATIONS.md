@@ -508,3 +508,56 @@ pnpm cli outreach-sync-sheet --confirm-sheet-write
 ```
 
 Reconciliation is idempotent: a given DSN is recorded at most once, and replaying it changes nothing.
+
+## Phase 17C1 — hardened DSN correlation + delivery-event correction
+
+Phase 17C1 fixes a correlation defect the first live run exposed: reconciling record
+`acded064-b681-4c0d-9d16-45966a5edc43` attached **five** false `DELIVERY_UNKNOWN` events — two from
+2026-07-30 and **three from May 2026, before the tracked email existed** — even though the record was already
+correctly `BOUNCED` by the reply-sync path. Root causes: the `--record` path ignored the record's terminal
+state, and recipient-only correlation had no time window, so historical DSNs for the same address attached to a
+later send.
+
+Hardened rules (all read-only; no send, Gmail mutation, or auto-retry):
+
+- **Eligibility.** Only outbound messages with a sent timestamp, a Gmail/RFC message id, and an UNRESOLVED
+  record (not `BOUNCED`/`UNSUBSCRIBED`/`DO_NOT_CONTACT`/`CLOSED_WON`/`CLOSED_LOST`) are reconciled — including
+  the `--record` form. No new delivery event is ever written for an already-terminal record.
+- **Time window.** A DSN must be received AFTER the outbound was sent (± a 5-minute clock-skew tolerance). A DSN
+  that predates the outbound can never correlate to it — the three May DSNs are rejected outright.
+- **Correlation priority.** (1) exact RFC Message-ID reference, (2) exact original Gmail message id, (3) exact
+  outbound Gmail thread id, then (4) recipient-only — and recipient-only ONLY when a single unresolved outbound
+  matches within a narrow 14-day delivery window and no stronger identifier conflicts. Ambiguity is rejected;
+  the dry report shows the correlation strength.
+- **Parsing.** Handles `multipart/report`, `message/delivery-status`, nested `message/rfc822`, and a
+  `text/plain` fallback; extracts Action/Status/Diagnostic-Code/Final-/Original-Recipient/Original-Message-ID/
+  X-Failed-Recipients. `550 5.7.1` / `5.x.x` → PERMANENT (BOUNCED); `4.x.x` → TEMPORARY; unknown only when no
+  reliable status exists.
+
+Migration `0028` adds additive `superseded_at` / `superseded_reason` / `superseded_by` columns to
+`outreach_delivery_events`.
+
+### Correct the five false delivery events (record acded064-…)
+
+`outreach-correct-delivery-events` INVALIDATES (supersedes) the named delivery events — it **never deletes**
+immutable history — and appends an immutable `DELIVERY_RECONCILIATION_CORRECTED` event. It changes NO outreach
+state and touches NO follow-up: the record stays `BOUNCED` with its follow-up cancelled. It touches no Gmail
+and sends nothing. Dry-run is the default; `--apply` (with `--by` and `--reason`) writes.
+
+```powershell
+$env:OUTREACH_TRACKING_ENABLED = "true"
+
+# 1. DRY RUN — shows which delivery events would be invalidated; writes NOTHING:
+pnpm cli outreach-correct-delivery-events --dsn 19fb2ad74dcbc858 19fb283aaf8d1bb4 19e377fe744e940f 19e377e7d1ef4eab 19e262197cc7fd35
+
+# 2. APPLY — invalidates the five events (history preserved) and annotates the record's timeline:
+pnpm cli outreach-correct-delivery-events --dsn 19fb2ad74dcbc858 19fb283aaf8d1bb4 19e377fe744e940f 19e377e7d1ef4eab 19e262197cc7fd35 --apply --by "adi" --reason "Phase 17C1: DSNs mis-correlated (3 predate the outbound; record already BOUNCED by reply-sync)"
+
+# 3. Verify, then synchronize the operator Sheet (Postgres stays authoritative):
+pnpm cli outreach-timeline --record acded064-b681-4c0d-9d16-45966a5edc43
+pnpm cli outreach-sync-sheet --confirm-sheet-write
+```
+
+The correction is idempotent — re-running it supersedes nothing more and appends no further event. After this
+fix, `outreach-reconcile-delivery --record acded064-…` returns zero eligible outbounds (the record is terminal),
+so no new false events can be created.

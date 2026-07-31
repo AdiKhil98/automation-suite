@@ -28,6 +28,7 @@ async function sentOutbound(store: InMemoryOutreachStore, svc: OutreachService, 
     gmailMessageId: over.gmailMsgId ?? 'gm-out-1',
     gmailThreadId: over.threadId ?? 'thr-out-1',
     contactEmail: contact,
+    sentAtMs: SENT_AT,
     rfcMessageId: null,
   };
   return { rec, outbound };

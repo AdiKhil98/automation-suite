@@ -2270,6 +2270,11 @@ export const outreachDeliveryEvents = pgTable(
     dsnGmailMessageId: text('dsn_gmail_message_id').notNull(),
     dsnGmailThreadId: text('dsn_gmail_thread_id'),
     preview: text('preview').notNull(),
+    // Phase 17C1 operator correction: invalidate (supersede) a mis-correlated event without
+    // deleting it. Null while valid.
+    supersededAt: timestamp('superseded_at', { withTimezone: true }),
+    supersededReason: text('superseded_reason'),
+    supersededBy: text('superseded_by'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({

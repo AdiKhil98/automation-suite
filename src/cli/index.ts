@@ -67,7 +67,7 @@ import {
   outreachSmokeReconcileCommand,
   outreachSmokeSendCommand,
 } from './commands/outreach-smoke.js';
-import { outreachReconcileDeliveryCommand } from './commands/outreach-reconcile.js';
+import { outreachCorrectDeliveryEventsCommand, outreachReconcileDeliveryCommand } from './commands/outreach-reconcile.js';
 import { demoV2RenderEvidenceCommand } from './commands/demo-v2-render-evidence.js';
 import { type MockReviewFixture } from '../domain/demo-v2/render/visual-review.js';
 
@@ -643,6 +643,16 @@ program
   .option('--dry-report', 'show the proposed correlation + state change; write NOTHING')
   .action((opts: { record?: string; campaign?: string; confirmGmailRead?: boolean; mock?: boolean; dryReport?: boolean }) =>
     withContext((ctx) => outreachReconcileDeliveryCommand(ctx, opts)));
+
+program
+  .command('outreach-correct-delivery-events')
+  .description('Phase 17C1: invalidate (supersede) mis-correlated delivery events WITHOUT deleting history. Appends an immutable DELIVERY_RECONCILIATION_CORRECTED event; changes no outreach state or follow-up. Touches no Gmail and sends nothing. Dry-run by default; --apply (with --by and --reason) writes.')
+  .option('--dsn <id...>', 'one or more DSN Gmail message ids to invalidate (repeatable)')
+  .option('--reason <text>', 'correction reason (required with --apply)')
+  .option('--by <operator>', 'operator identity (required with --apply)')
+  .option('--apply', 'perform the correction (default is a dry run that writes nothing)')
+  .action((opts: { dsn?: string[]; reason?: string; by?: string; apply?: boolean }) =>
+    withContext((ctx) => outreachCorrectDeliveryEventsCommand(ctx, opts)));
 
 // --- Phase 17B: controlled first-send smoke test (exactly ONE tracked send; heavily gated) ---
 
