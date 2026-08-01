@@ -211,6 +211,13 @@
       "when": 1785702000000,
       "tag": "0029_competitor_research",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1785788400000,
+      "tag": "0030_competitor_evidence_capture",
+      "breakpoints": true
     }
   ]
 }

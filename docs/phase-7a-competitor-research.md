@@ -12,6 +12,33 @@
 > sending. CLI: `competitor-research-plan|run|review`. Flag `COMPETITOR_RESEARCH_ENABLED=false` by
 > default. See `docs/OPERATIONS.md` for usage.
 
+> **✅ 7A2 IMPLEMENTED (2026-08-02).** Migration `0030_competitor_evidence_capture.sql` (additive:
+> tables `competitor_capture_runs`, `competitor_captured_pages`, `competitor_evidence_items`; and an
+> additive widening of `capture_purpose_ck` to add `COMPETITOR_CAPTURE`). Narrow, reproducible
+> presence/absence evidence captured from selected competitors' public pages via a **dedicated,
+> non-lead-bound** `CompetitorCaptureService` (the lead-bound `CaptureService`/`website_capture_runs`
+> are NOT reused — see the deviation note below). **15 deterministic evidence categories**, four-band
+> observation kinds (`DIRECT_OBSERVATION` / `DETERMINISTIC_INTERPRETATION` / `UNSUPPORTED_INFERENCE`
+> — the last is blocked by construction), HIGH/MEDIUM/LOW confidence, 30-day freshness (re-computed,
+> never trusted), `safeForOutreach`, deterministic withholding, immutable/versioned runs, idempotent
+> apply, no-raw-HTML retention, internal-only screenshots. Fixture mode (offline) is the default;
+> live capture requires `COMPETITOR_CAPTURE_ENABLED=true` + `--provider playwright` +
+> `--confirm-live-capture` and **never** falls back to fixtures. **No** comparative pattern,
+> prospect-vs-competitor statement, email-composer change (`competitor_evidence_used` stays `NONE`),
+> AI, Gmail/Sheets, or sending. CLI: `competitor-capture-plan|run|review|invalidate`. Flags
+> `COMPETITOR_CAPTURE_ENABLED=false`, `COMPETITOR_CAPTURE_PROVIDER=fixture` by default.
+>
+> **Deviation from this plan (§2.1/§11).** The plan assumed reuse of `CaptureService` +
+> `website_capture_runs` via a new purpose. Inspection showed `CaptureService` is prospect-lead-bound
+> (requires `READY_FOR_CAPTURE`, writes lead facts, transitions lead state) and
+> `website_capture_runs.leadId` is a NOT-NULL FK to `leads`. Reusing either would file competitor
+> evidence under the prospect lead. 7A2 therefore reuses only the low-level primitives
+> (`BrowserCaptureProvider` mock/playwright, `VerifiedOriginPolicy`, `extractPage`, emulation
+> profiles, DOM hashing) and adds dedicated tables. `capture_purpose_ck` is still additively widened
+> with `COMPETITOR_CAPTURE` (per the approval), even though the dedicated tables carry their own
+> purpose column. Max pages honors the plan-approved bound of **2** (not the larger figure floated in
+> the 7A2 task prompt).
+
 ---
 
 ## 1. Executive summary

@@ -36,6 +36,10 @@ import { resumeAuditCommand } from './commands/resume-audit.js';
 import { competitorResearchPlanCommand } from './commands/competitor-research-plan.js';
 import { competitorResearchRunCommand } from './commands/competitor-research-run.js';
 import { competitorResearchReviewCommand } from './commands/competitor-research-review.js';
+import { competitorCapturePlanCommand } from './commands/competitor-capture-plan.js';
+import { competitorCaptureRunCommand } from './commands/competitor-capture-run.js';
+import { competitorCaptureReviewCommand } from './commands/competitor-capture-review.js';
+import { competitorCaptureInvalidateCommand } from './commands/competitor-capture-invalidate.js';
 import { withConfigOnly, withContext } from './context.js';
 import { websiteVerificationStatusCommand } from './commands/website-verification-status.js';
 import { demoV2OrchestrationFixtureCommand } from './commands/demo-v2-orchestrate-fixture.js';
@@ -724,6 +728,40 @@ program
   .description('Phase 7A1: read-only review of persisted competitor-research runs for a lead (scores + rejection reasons). Does not approve email use.')
   .requiredOption('--lead <id>', 'lead id')
   .action((opts: { lead: string }) => withContext((ctx) => competitorResearchReviewCommand(ctx, opts)));
+
+program
+  .command('competitor-capture-plan')
+  .description('Phase 7A2: read-only capture plan for a lead\'s selected competitors — validates research run, origins, limits, provider mode, and proposed pages. No network, no DB writes.')
+  .requiredOption('--lead <id>', 'lead id')
+  .option('--research-run <id>', 'specific research run id (default: latest DRAFT run for the lead)')
+  .action((opts: { lead: string; researchRun?: string }) => withContext((ctx) => competitorCapturePlanCommand(ctx, opts)));
+
+program
+  .command('competitor-capture-run')
+  .description('Phase 7A2: capture presence/absence evidence from selected competitors\' public pages. Fixture (offline) + dry report by default; --apply persists a DRAFT run. A LIVE capture requires COMPETITOR_CAPTURE_ENABLED=true + --provider playwright + --confirm-live-capture and NEVER falls back to fixtures. No email, no AI, no Gmail/Sheets, no sending.')
+  .requiredOption('--lead <id>', 'lead id (one prospect at a time)')
+  .option('--research-run <id>', 'specific research run id (default: latest DRAFT run for the lead)')
+  .option('--provider <name>', 'fixture | playwright (default from COMPETITOR_CAPTURE_PROVIDER)')
+  .option('--fixture <path>', 'local HTML fixture JSON (required for fixture mode)')
+  .option('--apply', 'persist a DRAFT capture run + pages + evidence (idempotent)')
+  .option('--confirm-live-capture', 'REQUIRED for a live browser capture (only valid with --provider playwright)')
+  .action((opts: { lead: string; researchRun?: string; provider?: string; fixture?: string; apply?: boolean; confirmLiveCapture?: boolean }) =>
+    withContext((ctx) => competitorCaptureRunCommand(ctx, opts)));
+
+program
+  .command('competitor-capture-review')
+  .description('Phase 7A2: read-only review of persisted competitor capture runs — source pages, evidence items, confidence, freshness (re-evaluated), and withholding reasons. No comparative pattern or email wording.')
+  .requiredOption('--lead <id>', 'lead id')
+  .action((opts: { lead: string }) => withContext((ctx) => competitorCaptureReviewCommand(ctx, opts)));
+
+program
+  .command('competitor-capture-invalidate')
+  .description('Phase 7A2: operator-controlled invalidation/supersession of ONE active evidence item. Dry-run by default; --apply marks it inactive/unsafe/UNREPRODUCIBLE. Immutable history preserved (row never deleted). Idempotent.')
+  .requiredOption('--lead <id>', 'lead id')
+  .requiredOption('--evidence <id>', 'evidence item id to invalidate')
+  .option('--apply', 'perform the invalidation (default is a dry run)')
+  .action((opts: { lead: string; evidence: string; apply?: boolean }) =>
+    withContext((ctx) => competitorCaptureInvalidateCommand(ctx, opts)));
 
 program.parseAsync(process.argv).catch((err: unknown) => {
   const message = err instanceof Error ? err.message : String(err);

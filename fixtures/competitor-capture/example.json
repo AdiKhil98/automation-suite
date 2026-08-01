@@ -1,0 +1,11 @@
+{
+  "_comment": "Phase 7A2 competitor-capture fixture (SYNTHETIC example — not real competitor content). Keys are exact requested URLs; the homepage key MUST equal the competitor origin derived from the selected candidate's normalized domain (https://<domain>). Used by `competitor-capture-run --provider fixture --fixture <this file>`. Offline only: no network is ever performed.",
+  "pages": {
+    "https://competitor-a.example": {
+      "html": "<!doctype html><html lang=\"de\"><head><link rel=\"alternate\" hreflang=\"de\" href=\"https://competitor-a.example/de\"><link rel=\"alternate\" hreflang=\"en\" href=\"https://competitor-a.example/en\"></head><body><nav><a href=\"https://competitor-a.example/kontakt\">Kontakt</a><a href=\"https://competitor-a.example/contact\">Contact</a><a href=\"https://competitor-a.example/leistungen\">Leistungen</a></nav><h1>Beispiel Praxis</h1><a class=\"btn\" href=\"https://competitor-a.example/termin\">Termin buchen</a><a href=\"tel:+49301234567\">Anrufen</a><a href=\"https://wa.me/49301234567\">WhatsApp</a><h2>Unsere Leistungen</h2><address>Beispielstrasse 1, 10115 Berlin</address><div>Öffnungszeiten: Mo-Fr 9-17 Uhr</div><h2>Häufige Fragen (FAQ)</h2><div class=\"sticky-contact\" style=\"position:fixed;bottom:0\"><a href=\"tel:+49301234567\">Jetzt anrufen</a></div></body></html>"
+    },
+    "https://competitor-a.example/contact": {
+      "html": "<!doctype html><html lang=\"de\"><body><h1>Kontakt</h1><address>Beispielstrasse 1, 10115 Berlin</address><a href=\"tel:+49301234567\">Anrufen</a></body></html>"
+    }
+  }
+}

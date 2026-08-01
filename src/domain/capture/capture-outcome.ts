@@ -1,7 +1,15 @@
 import { type LeadStatus } from '../leads/status.js';
 
-/** Why a capture ran. Governs targeting rules and routing (see capture-service). */
-export const CAPTURE_PURPOSES = ['AUDIT_CAPTURE', 'VERIFICATION_CAPTURE'] as const;
+/**
+ * Why a capture ran. Governs targeting rules and routing (see capture-service).
+ *
+ * `COMPETITOR_CAPTURE` (Phase 7A2) is additive: the lead-bound `CaptureService` and
+ * `website_capture_runs` table NEVER produce it. Competitor evidence capture uses its own
+ * dedicated, non-lead-bound service + tables (`competitor_capture_runs`). The value is added to
+ * the shared `capture_purpose_ck` constraint (additive migration 0030) so the purpose vocabulary
+ * is centralized, even though the dedicated competitor tables carry their own purpose column.
+ */
+export const CAPTURE_PURPOSES = ['AUDIT_CAPTURE', 'VERIFICATION_CAPTURE', 'COMPETITOR_CAPTURE'] as const;
 export type CapturePurpose = (typeof CAPTURE_PURPOSES)[number];
 
 /** Capture outcome taxonomy. Lead-level FAILED is NOT part of this set. */

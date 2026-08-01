@@ -116,7 +116,64 @@ pnpm cli competitor-research-review --lead <lead-id>
 Scoring is the exact operator-approved 100-point model (category 45/25, service overlap 20, proximity
 15/8, business-type 10/5/0, market 6 + language 4; threshold 70; 5 km primary / 10 km fallback). A
 requested live provider (e.g. `google_places`) fails closed — it never silently falls back to fixtures.
-No website evidence or email enrichment exists yet (Phase 7A2/7A3).
+
+## Phase 7A2 — competitor website evidence capture (fixture-only by default)
+
+Captures narrow, reproducible presence/absence evidence from the public pages of the competitors a
+persisted 7A1 run **selected**. Fixture mode is offline (zero network) and is the default. There is no
+comparative pattern, prospect-vs-competitor statement, or email wording yet (Phase 7A3).
+
+**Prerequisite:** a persisted 7A1 DRAFT run for the lead (run `competitor-research-run … --apply` first).
+
+**Evidence categories (15, deterministic):** `BOOKING_CTA_VISIBLE`, `PHONE_VISIBLE`,
+`WHATSAPP_OR_DIRECT_MESSAGE_VISIBLE`, `MOBILE_STICKY_CONTACT_CONTROL`, `SERVICE_INFORMATION_VISIBLE`,
+`LOCATION_VISIBLE`, `OPENING_HOURS_VISIBLE`, `TEAM_OR_PRACTITIONER_INFORMATION`,
+`ON_SITE_TESTIMONIAL_OR_REVIEW_SECTION`, `PRICING_OR_FINANCING_INFORMATION`,
+`EMERGENCY_OR_URGENT_SERVICE_MESSAGE`, `LANGUAGE_SUPPORT_VISIBLE`, `FAQ_CONTENT_VISIBLE`,
+`MOBILE_NAVIGATION_DEPTH`, `CONTACT_PATH_DEPTH`.
+
+**Confidence & freshness:** HIGH = stable structured element; MEDIUM = layout/text-dependent with a
+reproducible locator; LOW = ambiguous → withheld. Only HIGH/MEDIUM + FRESH + non-withheld is
+`safeForOutreach`. Evidence is FRESH for **30 days** after capture, then STALE (re-computed from
+timestamps at review time). `UNSUPPORTED_INFERENCE` (any performance/volume/ranking) is blocked.
+
+**Bounds / flags (defaults):** `COMPETITOR_CAPTURE_ENABLED=false`, `COMPETITOR_CAPTURE_PROVIDER=fixture`,
+`COMPETITOR_CAPTURE_MAX_PAGES=2` (hard ceiling 5), `COMPETITOR_CAPTURE_MAX_DEPTH=1`,
+`COMPETITOR_CAPTURE_TIMEOUT_MS=15000`, `COMPETITOR_EVIDENCE_MAX_AGE_DAYS=30`. Same-origin only;
+desktop+mobile; no forms, no login/payment flows, no sitemap crawl, no raw HTML retained; screenshots
+are internal evidence only.
+
+**Fixture workflow (offline; the exact PowerShell dry-run):**
+
+```text
+# Read-only plan (validates research run, origins, limits, provider mode — no network, no writes)
+pnpm cli competitor-capture-plan --lead <lead-id>
+
+# Offline fixture DRY REPORT (no database writes)
+pnpm cli competitor-capture-run --lead <lead-id> --provider fixture --fixture fixtures/competitor-capture/example.json
+
+# Persist an immutable DRAFT capture run (idempotent)
+pnpm cli competitor-capture-run --lead <lead-id> --provider fixture --fixture fixtures/competitor-capture/example.json --apply
+
+# Read-only review (freshness re-evaluated) and operator invalidation
+pnpm cli competitor-capture-review --lead <lead-id>
+pnpm cli competitor-capture-invalidate --lead <lead-id> --evidence <evidence-id>            # dry run
+pnpm cli competitor-capture-invalidate --lead <lead-id> --evidence <evidence-id> --apply
+```
+
+The fixture JSON maps each exact requested URL to rendered HTML; the homepage key must equal the
+competitor origin (`https://<selected-candidate-normalized-domain>`). See
+`fixtures/competitor-capture/example.json` (synthetic).
+
+**Guarded live workflow (disabled by default; fails closed, never falls back to fixtures):**
+
+```text
+$env:COMPETITOR_CAPTURE_ENABLED = 'true'
+pnpm cli competitor-capture-run --lead <lead-id> --provider playwright --confirm-live-capture --apply
+```
+
+A live request missing `COMPETITOR_CAPTURE_ENABLED=true`, `--provider playwright`, or
+`--confirm-live-capture` exits nonzero and captures nothing.
 
 ## Collection & qualification commands (Phase 2 / Phase 3)
 

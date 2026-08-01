@@ -82,6 +82,20 @@ const envSchema = z.object({
   COMPETITOR_MAX_SELECTED: z.coerce.number().int().min(1).max(3).default(3),
   COMPETITOR_MAX_INPUT_CANDIDATES: z.coerce.number().int().min(1).max(200).default(50),
 
+  // --- Phase 7A2: competitor website evidence capture (fixture-only by default) ---
+  // Disabled by default. Fixture mode is the default and performs ZERO network I/O. A LIVE capture
+  // (COMPETITOR_CAPTURE_PROVIDER=playwright) additionally requires COMPETITOR_CAPTURE_ENABLED=true AND
+  // an explicit CLI confirmation flag; a requested live capture that fails any guard exits nonzero and
+  // NEVER silently falls back to fixtures. No email, no AI, no Gmail, no Sheets, no sending, no
+  // comparative patterns are produced here (those belong to Phase 7A3).
+  COMPETITOR_CAPTURE_ENABLED: boolString(false),
+  COMPETITOR_CAPTURE_PROVIDER: z.enum(['fixture', 'playwright']).default('fixture'),
+  // Plan-approved bound: <= 2 public pages per competitor. Hard ceiling 5; depth ceiling 1.
+  COMPETITOR_CAPTURE_MAX_PAGES: z.coerce.number().int().min(1).max(5).default(2),
+  COMPETITOR_CAPTURE_MAX_DEPTH: z.coerce.number().int().min(0).max(1).default(1),
+  COMPETITOR_CAPTURE_TIMEOUT_MS: z.coerce.number().int().positive().default(15_000),
+  COMPETITOR_EVIDENCE_MAX_AGE_DAYS: z.coerce.number().int().positive().default(30),
+
   // --- Phase 4: enrichment ---
   ENRICHMENT_CONTEXT_PROVIDER: z.enum(['facts', 'manual', 'google', 'mock']).default('facts'),
   ENRICHMENT_CANDIDATE_PROVIDER: z.enum(['mock', 'manual', 'search']).default('mock'),

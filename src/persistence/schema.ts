@@ -533,7 +533,9 @@ export const enrichmentSignals = pgTable(
 
 // --- Phase 5: website capture & evidence extraction ---
 
-const CAPTURE_PURPOSES = "'AUDIT_CAPTURE','VERIFICATION_CAPTURE'";
+// COMPETITOR_CAPTURE (Phase 7A2) is additive to the shared purpose vocabulary (migration 0030). The
+// lead-bound website_capture_runs never uses it; competitor evidence has its own dedicated tables.
+const CAPTURE_PURPOSES = "'AUDIT_CAPTURE','VERIFICATION_CAPTURE','COMPETITOR_CAPTURE'";
 const CAPTURE_OUTCOMES =
   "'CAPTURED','PARTIAL_CAPTURE','BROWSER_BLOCKED','BOT_CHALLENGE','AUTH_REQUIRED','NO_RENDERABLE_CONTENT','TRANSIENT_ERROR','POLICY_BLOCKED','INVALID_TARGET'";
 const CAPTURE_EVIDENCE_TYPES =
@@ -2372,5 +2374,132 @@ export const competitorCandidates = pgTable(
     dispositionCk: check('competitor_candidates_disposition_ck', sql`${t.disposition} IN ('ACCEPTED','REJECTED')`),
     categoryMatchCk: check('competitor_candidates_category_match_ck', sql`${t.categoryMatch} IS NULL OR ${t.categoryMatch} IN ('EXACT','RELATED','WEAK','NONE')`),
     confidenceCk: check('competitor_candidates_confidence_ck', sql`${t.confidence} IS NULL OR ${t.confidence} IN ('HIGH','MEDIUM','LOW')`),
+  }),
+);
+
+// --- Phase 7A2: competitor website evidence capture (additive; dedicated, non-lead-bound tables) ---
+
+const COMPETITOR_EVIDENCE_CATEGORIES =
+  "'BOOKING_CTA_VISIBLE','PHONE_VISIBLE','WHATSAPP_OR_DIRECT_MESSAGE_VISIBLE','MOBILE_STICKY_CONTACT_CONTROL','SERVICE_INFORMATION_VISIBLE','LOCATION_VISIBLE','OPENING_HOURS_VISIBLE','TEAM_OR_PRACTITIONER_INFORMATION','ON_SITE_TESTIMONIAL_OR_REVIEW_SECTION','PRICING_OR_FINANCING_INFORMATION','EMERGENCY_OR_URGENT_SERVICE_MESSAGE','LANGUAGE_SUPPORT_VISIBLE','FAQ_CONTENT_VISIBLE','MOBILE_NAVIGATION_DEPTH','CONTACT_PATH_DEPTH'";
+const COMPETITOR_OBSERVATION_KINDS = "'DIRECT_OBSERVATION','DETERMINISTIC_INTERPRETATION','UNSUPPORTED_INFERENCE'";
+const COMPETITOR_FRESHNESS_STATUSES = "'FRESH','STALE','UNREPRODUCIBLE'";
+const COMPETITOR_CAPTURE_OUTCOMES = "'CAPTURED','PARTIAL','NO_ELIGIBLE_COMPETITORS','ALL_INACCESSIBLE','GUARD_FAILED'";
+
+export const competitorCaptureRuns = pgTable(
+  'competitor_capture_runs',
+  {
+    id: text('id').primaryKey(),
+    leadId: text('lead_id')
+      .notNull()
+      .references(() => leads.id, { onDelete: 'cascade' }),
+    researchRunId: text('research_run_id')
+      .notNull()
+      .references(() => competitorResearchRuns.id, { onDelete: 'cascade' }),
+    provider: text('provider').notNull(),
+    method: text('method').notNull(),
+    purpose: text('purpose').notNull().default('COMPETITOR_CAPTURE'),
+    status: text('status').notNull().default('DRAFT'),
+    outcome: text('outcome').notNull(),
+    rulesVersion: text('rules_version').notNull(),
+    version: integer('version').notNull(),
+    inputHash: text('input_hash').notNull(),
+    configHash: text('config_hash').notNull(),
+    contentHash: text('content_hash').notNull(),
+    competitorCount: integer('competitor_count').notNull(),
+    pageCount: integer('page_count').notNull(),
+    evidenceCount: integer('evidence_count').notNull(),
+    activeEvidenceCount: integer('active_evidence_count').notNull(),
+    withheldEvidenceCount: integer('withheld_evidence_count').notNull(),
+    maxPages: integer('max_pages').notNull(),
+    maxDepth: integer('max_depth').notNull(),
+    // Additive supersession: a materially-changed recapture supersedes prior DRAFT runs (never deletes).
+    supersededBy: text('superseded_by'),
+    startedAt: timestamp('started_at', { withTimezone: true }).notNull(),
+    completedAt: timestamp('completed_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    leadIdx: index('competitor_capture_runs_lead_idx').on(t.leadId),
+    researchIdx: index('competitor_capture_runs_research_idx').on(t.researchRunId),
+    // Idempotency: identical eligible set + config + resulting content is one run, never duplicated.
+    idempotencyUk: uniqueIndex('competitor_capture_runs_idempotency_uk').on(t.researchRunId, t.inputHash, t.configHash, t.contentHash),
+    versionUk: uniqueIndex('competitor_capture_runs_version_uk').on(t.researchRunId, t.version),
+    providerCk: check('competitor_capture_runs_provider_ck', sql`${t.provider} IN ('fixture','playwright')`),
+    methodCk: check('competitor_capture_runs_method_ck', sql`${t.method} IN ('FIXTURE','LIVE_BROWSER')`),
+    purposeCk: check('competitor_capture_runs_purpose_ck', sql`${t.purpose} = 'COMPETITOR_CAPTURE'`),
+    statusCk: check('competitor_capture_runs_status_ck', sql`${t.status} IN ('DRAFT','SUPERSEDED')`),
+    outcomeCk: check('competitor_capture_runs_outcome_ck', sql.raw(`outcome IN (${COMPETITOR_CAPTURE_OUTCOMES})`)),
+  }),
+);
+
+export const competitorCapturedPages = pgTable(
+  'competitor_captured_pages',
+  {
+    id: text('id').primaryKey(),
+    captureRunId: text('capture_run_id')
+      .notNull()
+      .references(() => competitorCaptureRuns.id, { onDelete: 'cascade' }),
+    competitorCandidateId: text('competitor_candidate_id')
+      .notNull()
+      .references(() => competitorCandidates.id, { onDelete: 'cascade' }),
+    requestedUrl: text('requested_url').notNull(),
+    finalUrl: text('final_url').notNull(),
+    normalizedOrigin: text('normalized_origin').notNull(),
+    role: text('role').notNull(),
+    profile: text('profile').notNull(),
+    ok: boolean('ok').notNull(),
+    httpStatus: integer('http_status'),
+    errorKinds: jsonb('error_kinds').notNull(),
+    // No raw HTML is retained; only a content hash for reproducibility/idempotency.
+    rawDomHash: text('raw_dom_hash'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    runIdx: index('competitor_captured_pages_run_idx').on(t.captureRunId),
+    competitorIdx: index('competitor_captured_pages_competitor_idx').on(t.competitorCandidateId),
+    profileCk: check('competitor_captured_pages_profile_ck', sql`${t.profile} IN ('desktop','mobile')`),
+  }),
+);
+
+export const competitorEvidenceItems = pgTable(
+  'competitor_evidence_items',
+  {
+    id: text('id').primaryKey(),
+    captureRunId: text('capture_run_id')
+      .notNull()
+      .references(() => competitorCaptureRuns.id, { onDelete: 'cascade' }),
+    competitorCandidateId: text('competitor_candidate_id')
+      .notNull()
+      .references(() => competitorCandidates.id, { onDelete: 'cascade' }),
+    evidenceCategory: text('evidence_category').notNull(),
+    observationKind: text('observation_kind').notNull(),
+    observation: text('observation').notNull(),
+    sourcePageUrl: text('source_page_url').notNull(),
+    normalizedOrigin: text('normalized_origin').notNull(),
+    selector: text('selector'),
+    sourceExcerpt: text('source_excerpt'),
+    profile: text('profile').notNull(),
+    numericValue: integer('numeric_value'),
+    confidence: text('confidence').notNull(),
+    freshnessStatus: text('freshness_status').notNull(),
+    withholdingReason: text('withholding_reason'),
+    safeForOutreach: boolean('safe_for_outreach').notNull(),
+    active: boolean('active').notNull(),
+    captureMethod: text('capture_method').notNull(),
+    provider: text('provider').notNull(),
+    rulesVersion: text('rules_version').notNull(),
+    capturedAt: timestamp('captured_at', { withTimezone: true }).notNull(),
+    evidenceHash: text('evidence_hash').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    runIdx: index('competitor_evidence_items_run_idx').on(t.captureRunId),
+    competitorIdx: index('competitor_evidence_items_competitor_idx').on(t.captureRunId, t.competitorCandidateId),
+    activeIdx: index('competitor_evidence_items_active_idx').on(t.captureRunId, t.active),
+    categoryCk: check('competitor_evidence_items_category_ck', sql.raw(`evidence_category IN (${COMPETITOR_EVIDENCE_CATEGORIES})`)),
+    kindCk: check('competitor_evidence_items_kind_ck', sql.raw(`observation_kind IN (${COMPETITOR_OBSERVATION_KINDS})`)),
+    confidenceCk: check('competitor_evidence_items_confidence_ck', sql`${t.confidence} IN ('HIGH','MEDIUM','LOW')`),
+    freshnessCk: check('competitor_evidence_items_freshness_ck', sql.raw(`freshness_status IN (${COMPETITOR_FRESHNESS_STATUSES})`)),
+    profileCk: check('competitor_evidence_items_profile_ck', sql`${t.profile} IN ('desktop','mobile')`),
   }),
 );

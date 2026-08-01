@@ -55,7 +55,35 @@ still cannot reach a real AUTO_REVIEW_PASSED, HUMAN_APPROVED, or deployment-elig
   `competitor-research-review` (read-only). One prospect at a time; no bulk/campaign mode.
 - Flags default safe: `COMPETITOR_RESEARCH_ENABLED=false`. No website capture, no email-composer change
   (`competitor_evidence_used` stays `NONE`), no Gmail, no Sheets, no sending. 52 focused unit tests + a
-  DB-gated integration test. Milestones 7A2–7A4 remain unapproved. See `docs/phase-7a-competitor-research.md`.
+  DB-gated integration test. See `docs/phase-7a-competitor-research.md`.
+
+## Phase 7A2 — competitor website evidence capture (IMPLEMENTED; no pattern/email/AI/Gmail/Sheets/sending)
+
+- Migration `0030_competitor_evidence_capture.sql`: additive tables `competitor_capture_runs`,
+  `competitor_captured_pages`, `competitor_evidence_items`, plus an additive widening of
+  `capture_purpose_ck` to add `COMPETITOR_CAPTURE`. No existing table is altered destructively.
+- Dedicated, **non-lead-bound** `CompetitorCaptureService` (the lead-bound `CaptureService` /
+  `website_capture_runs` are NOT reused — they require `READY_FOR_CAPTURE` and mutate lead state).
+  Reuses only primitives: `BrowserCaptureProvider` (mock/playwright), `VerifiedOriginPolicy`,
+  `extractPage`, desktop+mobile emulation profiles, DOM hashing.
+- Only competitors **selected** by a persisted 7A1 run are captured. Eligibility rejects: not-selected,
+  invalid website, prospect's own domain (PSL-aware), directory/marketplace/social-only, origin-policy
+  failure, and any arbitrary-origin substitution (origin is derived solely from the stored candidate).
+- 15 deterministic evidence categories (booking CTA, phone, WhatsApp/DM, mobile sticky control, services,
+  location, opening hours, team, testimonial section, pricing/financing, emergency message, language
+  support, FAQ, mobile-nav depth, contact-path depth). Observation kinds `DIRECT_OBSERVATION` /
+  `DETERMINISTIC_INTERPRETATION` / `UNSUPPORTED_INFERENCE` (the last blocked by construction — no
+  performance/volume/ranking). Confidence HIGH/MEDIUM/LOW; only HIGH/MEDIUM + FRESH + non-withheld is
+  `safeForOutreach`. `COMPETITOR_EVIDENCE_RULES_VERSION=comp-ev-1`.
+- Bounds: **≤2 pages/competitor** (plan-approved), depth 1, desktop+mobile, same-origin only, 15 s
+  navigation timeout, 30-day freshness (re-evaluated from timestamps, never trusted). No raw HTML
+  retained (content hash only); screenshots internal-only. Immutable/versioned runs; idempotent apply;
+  materially-changed content creates a new version and supersedes prior DRAFT (never deletes).
+- Fixture mode (offline) is the default. Live capture requires `COMPETITOR_CAPTURE_ENABLED=true` +
+  `--provider playwright` + `--confirm-live-capture` and **fails closed with no fixture fallback**.
+  CLI: `competitor-capture-plan|run|review|invalidate`. Flags default off. No comparative pattern,
+  prospect-vs-competitor statement, `competitor_evidence_used` change (stays `NONE`), AI, Gmail, Sheets,
+  or sending. Focused unit tests + a DB-gated integration test. Milestones 7A3–7A4 remain unapproved.
 
 ## Phase 17A — outreach tracking & follow-up operations (tracking only; NEVER sends)
 
