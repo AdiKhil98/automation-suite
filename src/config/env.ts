@@ -71,6 +71,17 @@ const envSchema = z.object({
   // Deduplication near-address threshold in metres (conservative).
   DEDUP_NEAR_ADDRESS_METERS: z.coerce.number().positive().default(40),
 
+  // --- Phase 7A1: deterministic competitor candidate research (fixtures/CSV only) ---
+  // Disabled by default. Persisted (apply) runs require this flag = true. There is NO live
+  // provider in 7A1 — any live-provider request fails closed and NEVER silently falls back to
+  // fixtures/mocks. No website capture, no email enrichment, no AI, no network.
+  COMPETITOR_RESEARCH_ENABLED: boolString(false),
+  COMPETITOR_RESEARCH_PROVIDER: z.enum(['fixture', 'operator_csv']).default('fixture'),
+  COMPETITOR_PRIMARY_RADIUS_KM: z.coerce.number().positive().default(5),
+  COMPETITOR_FALLBACK_RADIUS_KM: z.coerce.number().positive().default(10),
+  COMPETITOR_MAX_SELECTED: z.coerce.number().int().min(1).max(3).default(3),
+  COMPETITOR_MAX_INPUT_CANDIDATES: z.coerce.number().int().min(1).max(200).default(50),
+
   // --- Phase 4: enrichment ---
   ENRICHMENT_CONTEXT_PROVIDER: z.enum(['facts', 'manual', 'google', 'mock']).default('facts'),
   ENRICHMENT_CANDIDATE_PROVIDER: z.enum(['mock', 'manual', 'search']).default('mock'),
@@ -376,6 +387,13 @@ const refinedEnvSchema = envSchema.superRefine((val, ctx) => {
       code: 'custom',
       path: ['DEMO_ENGINE_VERSION'],
       message: 'DEMO_ENGINE_VERSION must be v2 when DEMO_V2_ENABLED=true',
+    });
+  }
+  if (val.COMPETITOR_FALLBACK_RADIUS_KM < val.COMPETITOR_PRIMARY_RADIUS_KM) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['COMPETITOR_FALLBACK_RADIUS_KM'],
+      message: 'COMPETITOR_FALLBACK_RADIUS_KM must be >= COMPETITOR_PRIMARY_RADIUS_KM',
     });
   }
 });

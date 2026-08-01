@@ -18,11 +18,11 @@ describe('migration 0023 Demo Engine V2 foundation', () => {
     // Milestone 3B1 adds 0024 after it; 0023 must remain monotonic against its own predecessor (22).
     const predecessor = journal.entries.find((entry) => entry.idx === 22);
     expect((matching[0]?.when ?? 0) > (predecessor?.when ?? Number.MAX_SAFE_INTEGER)).toBe(true);
-    // 0025 is the last Demo V2 migration; Phase 17A/17C/17C1 append 0026 (outreach tracking),
-    // 0027 (delivery events), and 0028 (delivery corrections) as the new tail.
+    // 0025 is the last Demo V2 migration; later phases append 0026 (outreach tracking),
+    // 0027 (delivery events), 0028 (delivery corrections), and 0029 (competitor research) as the tail.
     const demoV2Entries = journal.entries.filter((entry) => entry.tag.startsWith('00') && entry.tag.includes('demo_v2'));
     expect(demoV2Entries.at(-1)?.tag).toBe('0025_demo_v2_visual_reviews');
-    expect(journal.entries.at(-1)?.tag).toBe('0028_outreach_delivery_corrections');
+    expect(journal.entries.at(-1)?.tag).toBe('0029_competitor_research');
   });
 
   it('creates exactly the 21 isolated approved V2 tables and changes no V1 table', () => {

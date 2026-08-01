@@ -45,6 +45,8 @@ export async function truncateAll(db: Database, permit: DestructiveTestDatabaseP
     DELETE FROM controlled_test_evaluations;
     DELETE FROM controlled_test_artifact_approvals;
     DELETE FROM controlled_test_runs;
+    DELETE FROM competitor_candidates;
+    DELETE FROM competitor_research_runs;
     DELETE FROM prospect_candidates;
     DELETE FROM prospect_runs;
     DELETE FROM prospect_location_cache;

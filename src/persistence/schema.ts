@@ -2285,3 +2285,92 @@ export const outreachDeliveryEvents = pgTable(
     permanenceCk: check('outreach_delivery_permanence_ck', sql`${t.permanence} IN ('PERMANENT','TEMPORARY','UNKNOWN')`),
   }),
 );
+
+// --- Phase 7A1: deterministic competitor candidate research (fixtures/CSV only) ---
+// Additive, immutable/versioned. No website evidence, no email-package, no live-provider data.
+
+export const competitorResearchRuns = pgTable(
+  'competitor_research_runs',
+  {
+    id: text('id').primaryKey(),
+    leadId: text('lead_id')
+      .notNull()
+      .references(() => leads.id, { onDelete: 'cascade' }),
+    runId: text('run_id'),
+    provider: text('provider').notNull(),
+    status: text('status').notNull().default('DRAFT'),
+    outcome: text('outcome').notNull(),
+    activeRadius: text('active_radius').notNull(),
+    inputHash: text('input_hash').notNull(),
+    configHash: text('config_hash').notNull(),
+    rulesVersion: text('rules_version').notNull(),
+    version: integer('version').notNull(),
+    candidateCount: integer('candidate_count').notNull(),
+    acceptedCount: integer('accepted_count').notNull(),
+    rejectedCount: integer('rejected_count').notNull(),
+    primaryRadiusKm: doublePrecision('primary_radius_km').notNull(),
+    fallbackRadiusKm: doublePrecision('fallback_radius_km').notNull(),
+    maxSelected: integer('max_selected').notNull(),
+    // Additive supersession: a materially-different rerun supersedes prior DRAFT runs (never deletes).
+    supersededBy: text('superseded_by'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    leadIdx: index('competitor_research_runs_lead_idx').on(t.leadId),
+    // Idempotency anchor: identical input+config for a lead is one run, never duplicated.
+    idempotencyUk: uniqueIndex('competitor_research_runs_idempotency_uk').on(t.leadId, t.inputHash, t.configHash),
+    // Immutable per-lead version identity.
+    versionUk: uniqueIndex('competitor_research_runs_version_uk').on(t.leadId, t.version),
+    providerCk: check('competitor_research_runs_provider_ck', sql`${t.provider} IN ('fixture','operator_csv')`),
+    statusCk: check('competitor_research_runs_status_ck', sql`${t.status} IN ('DRAFT','SUPERSEDED')`),
+    outcomeCk: check('competitor_research_runs_outcome_ck', sql`${t.outcome} IN ('RESEARCHED','INSUFFICIENT_COMPARABLE','NO_CANDIDATES_FOUND')`),
+    radiusCk: check('competitor_research_runs_radius_ck', sql`${t.activeRadius} IN ('PRIMARY_5KM','FALLBACK_10KM')`),
+  }),
+);
+
+export const competitorCandidates = pgTable(
+  'competitor_candidates',
+  {
+    id: text('id').primaryKey(),
+    researchRunId: text('research_run_id')
+      .notNull()
+      .references(() => competitorResearchRuns.id, { onDelete: 'cascade' }),
+    rowIndex: integer('row_index').notNull(),
+    providerCandidateId: text('provider_candidate_id'),
+    businessName: text('business_name'),
+    normalizedName: text('normalized_name'),
+    rawDomain: text('raw_domain'),
+    normalizedDomain: text('normalized_domain'),
+    primaryCategory: text('primary_category'),
+    normalizedPrimaryCategory: text('normalized_primary_category'),
+    secondaryCategories: jsonb('secondary_categories').notNull(),
+    normalizedServices: jsonb('normalized_services').notNull(),
+    latitude: doublePrecision('latitude'),
+    longitude: doublePrecision('longitude'),
+    city: text('city'),
+    market: text('market'),
+    language: text('language'),
+    businessType: text('business_type'),
+    parentBrand: text('parent_brand'),
+    normalizedParentBrand: text('normalized_parent_brand'),
+    branchId: text('branch_id'),
+    brandKey: text('brand_key').notNull(),
+    distanceMeters: doublePrecision('distance_meters'),
+    categoryMatch: text('category_match'),
+    comparabilityScore: integer('comparability_score'),
+    confidence: text('confidence'),
+    disposition: text('disposition').notNull(),
+    rejectionReason: text('rejection_reason'),
+    reasonDetail: text('reason_detail').notNull(),
+    acceptanceRank: integer('acceptance_rank'),
+    scoreBreakdown: jsonb('score_breakdown').notNull(),
+    gateResults: jsonb('gate_results').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    runIdx: index('competitor_candidates_run_idx').on(t.researchRunId),
+    dispositionCk: check('competitor_candidates_disposition_ck', sql`${t.disposition} IN ('ACCEPTED','REJECTED')`),
+    categoryMatchCk: check('competitor_candidates_category_match_ck', sql`${t.categoryMatch} IS NULL OR ${t.categoryMatch} IN ('EXACT','RELATED','WEAK','NONE')`),
+    confidenceCk: check('competitor_candidates_confidence_ck', sql`${t.confidence} IS NULL OR ${t.confidence} IN ('HIGH','MEDIUM','LOW')`),
+  }),
+);

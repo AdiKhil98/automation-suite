@@ -33,6 +33,9 @@ import { leadState } from './commands/lead-state.js';
 import { listLeads } from './commands/list-leads.js';
 import { resetTestData } from './commands/reset-test-data.js';
 import { resumeAuditCommand } from './commands/resume-audit.js';
+import { competitorResearchPlanCommand } from './commands/competitor-research-plan.js';
+import { competitorResearchRunCommand } from './commands/competitor-research-run.js';
+import { competitorResearchReviewCommand } from './commands/competitor-research-review.js';
 import { withConfigOnly, withContext } from './context.js';
 import { websiteVerificationStatusCommand } from './commands/website-verification-status.js';
 import { demoV2OrchestrationFixtureCommand } from './commands/demo-v2-orchestrate-fixture.js';
@@ -694,6 +697,33 @@ program
   .command('reset-test-data')
   .description('Clear only the validated local integration-test database')
   .action(() => resetTestData());
+
+program
+  .command('competitor-research-plan')
+  .description('Phase 7A1: read-only preview of a lead + candidate source (fixtures/CSV only). No DB writes, no network.')
+  .requiredOption('--lead <id>', 'lead id')
+  .option('--provider <name>', 'fixture | operator_csv (default from COMPETITOR_RESEARCH_PROVIDER)')
+  .option('--csv <path>', 'operator CSV path (operator_csv provider)')
+  .option('--fixture <path>', 'fixture JSON path (fixture provider)')
+  .action((opts: { lead: string; provider?: string; csv?: string; fixture?: string }) =>
+    withContext((ctx) => competitorResearchPlanCommand(ctx, opts)));
+
+program
+  .command('competitor-research-run')
+  .description('Phase 7A1: deterministically evaluate one prospect\'s competitor candidates (fixtures/CSV only). Dry report by default; --apply persists a DRAFT run (requires COMPETITOR_RESEARCH_ENABLED=true). No capture, no AI, no live provider, no Gmail/Sheets, no sending.')
+  .requiredOption('--lead <id>', 'lead id (one prospect at a time)')
+  .option('--provider <name>', 'fixture | operator_csv (default from COMPETITOR_RESEARCH_PROVIDER)')
+  .option('--csv <path>', 'operator CSV path (operator_csv provider)')
+  .option('--fixture <path>', 'fixture JSON path (fixture provider)')
+  .option('--apply', 'persist a DRAFT run + candidates (idempotent); requires COMPETITOR_RESEARCH_ENABLED=true')
+  .action((opts: { lead: string; provider?: string; csv?: string; fixture?: string; apply?: boolean }) =>
+    withContext((ctx) => competitorResearchRunCommand(ctx, opts)));
+
+program
+  .command('competitor-research-review')
+  .description('Phase 7A1: read-only review of persisted competitor-research runs for a lead (scores + rejection reasons). Does not approve email use.')
+  .requiredOption('--lead <id>', 'lead id')
+  .action((opts: { lead: string }) => withContext((ctx) => competitorResearchReviewCommand(ctx, opts)));
 
 program.parseAsync(process.argv).catch((err: unknown) => {
   const message = err instanceof Error ? err.message : String(err);

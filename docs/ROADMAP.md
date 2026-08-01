@@ -40,7 +40,7 @@ No phase begins before the previous one is approved with `APPROVE PHASE X`.
 | 4 | Independent enrichment & website discovery | `phase-4-enrichment` | ✅ approved |
 | 5 | Website capture & evidence extraction | `phase-5-website-capture` | ✅ approved |
 | 6 | AI website audit & opportunity analysis | `phase-6-ai-audit` | approved; Gate B deferred |
-| 7 | Competitor research (optional module) | `phase-7-competitor-research` | DEFERRED (optional, post-MVP) |
+| 7 | Competitor research (optional module) | `phase-7-competitor-research` | 7A1 DONE (`phase-7a1-competitor-candidates`); 7A2–7A4 planned |
 | 8 | Demo template & demo decision engine | `phase-8-demo-generation` | approved |
 | 9 | Email writer & reviewer | `phase-9-email-generation` | approved |
 | 10 | Review dashboard | `phase-10-review-dashboard` | approved |
@@ -288,10 +288,17 @@ phase's start-of-phase report. Highlights of the hard gates:
 - **P14** only on explicit request; separate sending plan (jurisdiction, SPF/DKIM/DMARC, unsubscribe,
   suppression, bounce handling, volume ramp, caps, provider, reply detection, follow-ups); removable module.
 
-## Phase 7 — Competitor research (DEFERRED — optional, post-MVP)
+## Phase 7 — Competitor research (optional module)
 
-Deferred by operator on 2026-07-16 to prioritize finishing the usable outreach system. **No code, migrations,
-states, providers, or tests exist for it.** Full plan preserved here for when it resumes.
+**Milestone 7A1 (deterministic candidate foundation) is IMPLEMENTED** (tag `phase-7a1-competitor-candidates`,
+migration `0029_competitor_research.sql`): fixtures/operator-CSV providers, exact approved 100-point
+comparability model, immutable/versioned DRAFT runs, fail-closed live-provider guard, CLI
+`competitor-research-plan|run|review`, default-off `COMPETITOR_RESEARCH_ENABLED`. No website capture, email
+change, AI, live provider, Gmail/Sheets, or sending. See `docs/phase-7a-competitor-research.md` for the full
+plan and the 7A2–7A4 milestones (website evidence capture, pattern generation + email enrichment, controlled
+live validation), which remain unapproved.
+
+The full plan below was deferred by operator on 2026-07-16 and then resumed for 7A1.
 
 - **Purpose:** for a *selected* lead (deterministic gate on Phase 6 opportunity score + comparison-relevant
   finding categories), gather **bounded, evidence-backed** context on how a few verified local competitors

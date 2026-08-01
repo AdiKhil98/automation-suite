@@ -33,6 +33,30 @@ and local render/preview/screenshot/review-package tooling. V1 remains authorita
 paid call, deployment, screenshot-review model, email, Gmail, or scheduling path was added; the lifecycle
 still cannot reach a real AUTO_REVIEW_PASSED, HUMAN_APPROVED, or deployment-eligible state.
 
+## Phase 7A1 — deterministic competitor candidate foundation (IMPLEMENTED; no capture/email/AI/live/sending)
+
+- Migration `0029_competitor_research.sql` adds two additive tables and changes no existing table:
+  `competitor_research_runs` (immutable/versioned; DRAFT|SUPERSEDED; idempotency unique index on
+  `(lead_id,input_hash,config_hash)`; per-lead version unique index) and `competitor_candidates`
+  (raw + normalized fields, disposition, score, per-component `score_breakdown`/`gate_results` jsonb,
+  machine + human reasons). Capture-purpose CHECK is untouched (`COMPETITOR_CAPTURE` is a 7A2 concern).
+- Deterministic comparability model with the EXACT operator-approved 100-point weights (category 45/25,
+  service overlap 20, proximity 15/8, business-type 10/5/0, market 6 + language 4, location-count 0),
+  threshold 70, confidence bands, and pre-scoring gates (self, prospect-branch via PSL, non-eligible
+  listing, market mismatch, weak category, related-overlap, missing coords, out-of-radius). No AI, no
+  hidden defaults; identical normalized input yields identical output. `COMPARABILITY_RULES_VERSION=comp-cmp-1`.
+- Radius: 5 km primary, expand to 10 km only when < 2 valid inside 5 km; actual distance persisted.
+  Selection: dedup (domain/provider-id/identity), one branch per parent brand (no chain domination),
+  rank by score↓ then distance↑ then domain, cap 3. Fewer-than-two is a valid outcome, not a failure.
+- Providers: `fixture` (JSON) and `operator_csv` only, reusing a Google-Places-shaped contract adapter.
+  Live-provider requests fail closed (`LiveProviderNotAllowedError`) — never a silent fallback. Bounded
+  input count. CLI: `competitor-research-plan` (read-only), `competitor-research-run` (dry report by
+  default; `--apply` persists a DRAFT run and requires `COMPETITOR_RESEARCH_ENABLED=true`),
+  `competitor-research-review` (read-only). One prospect at a time; no bulk/campaign mode.
+- Flags default safe: `COMPETITOR_RESEARCH_ENABLED=false`. No website capture, no email-composer change
+  (`competitor_evidence_used` stays `NONE`), no Gmail, no Sheets, no sending. 52 focused unit tests + a
+  DB-gated integration test. Milestones 7A2–7A4 remain unapproved. See `docs/phase-7a-competitor-research.md`.
+
 ## Phase 17A — outreach tracking & follow-up operations (tracking only; NEVER sends)
 
 - Migration `0026_outreach_tracking.sql` adds six additive `outreach_*` tables and changes no existing

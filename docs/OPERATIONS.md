@@ -66,6 +66,58 @@ session poolers, and remote hosts are rejected before a connection opens.
 Never run `pnpm test:integration` or `pnpm cli reset-test-data` against Supabase. Keep the operational and local
 test connections separate.
 
+## Phase 7A1 — deterministic competitor candidate research (fixtures/CSV only)
+
+Deterministic candidate selection for ONE prospect at a time from fixtures or an operator CSV. No
+website capture, no email change, no AI, no live provider, no Gmail/Sheets, no sending. Persisting a
+DRAFT run requires `COMPETITOR_RESEARCH_ENABLED=true`; a dry report needs nothing enabled.
+
+**Operator CSV schema** (header row required; see `docs/examples/competitor-research-sample.csv`):
+
+```text
+role,provider_candidate_id,business_name,website,primary_category,secondary_categories,latitude,longitude,address,city,market,language,business_type,parent_brand,branch_id
+```
+
+- Exactly one `role=prospect` row (supplies the prospect's comparability attributes; should match the
+  lead's domain). Every other row is `role=competitor`.
+- `secondary_categories` is a `;`-separated list of services. `business_type` is e.g. `independent` or
+  `chain`. Malformed competitor rows are never dropped silently — they persist with a row-level reason.
+- A fixture JSON alternative (`{prospect, candidates[]}`) is at `docs/examples/competitor-research-sample.json`.
+
+**Bash:**
+
+```bash
+# Read-only preview (no DB writes)
+pnpm cli competitor-research-plan --lead <lead-id> --provider operator_csv --csv docs/examples/competitor-research-sample.csv
+
+# Dry report — evaluate + rank, zero DB writes (default)
+pnpm cli competitor-research-run --lead <lead-id> --provider operator_csv --csv docs/examples/competitor-research-sample.csv
+
+# Apply — persist an immutable DRAFT run (requires COMPETITOR_RESEARCH_ENABLED=true)
+pnpm cli competitor-research-run --lead <lead-id> --provider operator_csv --csv docs/examples/competitor-research-sample.csv --apply
+
+# Fixture provider (JSON)
+pnpm cli competitor-research-run --lead <lead-id> --provider fixture --fixture docs/examples/competitor-research-sample.json
+
+# Read-only review of persisted runs
+pnpm cli competitor-research-review --lead <lead-id>
+```
+
+**PowerShell:**
+
+```text
+$env:COMPETITOR_RESEARCH_ENABLED = 'true'   # only needed for --apply
+pnpm cli competitor-research-plan --lead <lead-id> --provider operator_csv --csv docs/examples/competitor-research-sample.csv
+pnpm cli competitor-research-run  --lead <lead-id> --provider operator_csv --csv docs/examples/competitor-research-sample.csv
+pnpm cli competitor-research-run  --lead <lead-id> --provider operator_csv --csv docs/examples/competitor-research-sample.csv --apply
+pnpm cli competitor-research-review --lead <lead-id>
+```
+
+Scoring is the exact operator-approved 100-point model (category 45/25, service overlap 20, proximity
+15/8, business-type 10/5/0, market 6 + language 4; threshold 70; 5 km primary / 10 km fallback). A
+requested live provider (e.g. `google_places`) fails closed — it never silently falls back to fixtures.
+No website evidence or email enrichment exists yet (Phase 7A2/7A3).
+
 ## Collection & qualification commands (Phase 2 / Phase 3)
 
 ```text

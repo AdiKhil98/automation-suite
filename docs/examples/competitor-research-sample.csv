@@ -1,0 +1,6 @@
+role,provider_candidate_id,business_name,website,primary_category,secondary_categories,latitude,longitude,address,city,market,language,business_type,parent_brand,branch_id
+prospect,,Smile Clinic,https://smileclinic.example,dentist,teeth whitening;implants;invisalign;veneers,51.5074,-0.1278,1 High Street,London,london,en,independent,,
+competitor,pid-101,Bright Dental,https://brightdental.example,dentist,teeth whitening;implants;invisalign,51.5100,-0.1300,10 Market St,London,london,en,independent,,
+competitor,pid-102,City Orthodontics,https://cityortho.example,orthodontist,teeth whitening;implants;invisalign;veneers,51.5150,-0.1250,22 Queen St,London,london,en,independent,,
+competitor,pid-103,Far Away Dental,https://faraway.example,dentist,teeth whitening;implants;invisalign,51.6000,-0.1300,99 Distant Rd,Barnet,london,en,independent,,
+competitor,pid-104,Directory Listing,https://yelp.com/biz/somewhere,dentist,,51.5090,-0.1290,,London,london,en,,,

@@ -1,0 +1,42 @@
+{
+  "prospect": {
+    "website": "https://smileclinic.example",
+    "primaryCategory": "dentist",
+    "secondaryCategories": ["teeth whitening", "implants", "invisalign", "veneers"],
+    "latitude": 51.5074,
+    "longitude": -0.1278,
+    "city": "London",
+    "market": "london",
+    "language": "en",
+    "businessType": "independent",
+    "parentBrand": null
+  },
+  "candidates": [
+    {
+      "providerCandidateId": "pid-101",
+      "businessName": "Bright Dental",
+      "website": "https://brightdental.example",
+      "primaryCategory": "dentist",
+      "secondaryCategories": ["teeth whitening", "implants", "invisalign"],
+      "latitude": 51.51,
+      "longitude": -0.13,
+      "city": "London",
+      "market": "london",
+      "language": "en",
+      "businessType": "independent"
+    },
+    {
+      "providerCandidateId": "pid-102",
+      "businessName": "City Orthodontics",
+      "website": "https://cityortho.example",
+      "primaryCategory": "orthodontist",
+      "secondaryCategories": ["teeth whitening", "implants", "invisalign", "veneers"],
+      "latitude": 51.515,
+      "longitude": -0.125,
+      "city": "London",
+      "market": "london",
+      "language": "en",
+      "businessType": "independent"
+    }
+  ]
+}
