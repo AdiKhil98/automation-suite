@@ -218,6 +218,13 @@
       "when": 1785788400000,
       "tag": "0030_competitor_evidence_capture",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1785874800000,
+      "tag": "0031_competitor_pattern_packages",
+      "breakpoints": true
     }
   ]
 }

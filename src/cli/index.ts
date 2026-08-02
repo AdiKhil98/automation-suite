@@ -40,6 +40,12 @@ import { competitorCapturePlanCommand } from './commands/competitor-capture-plan
 import { competitorCaptureRunCommand } from './commands/competitor-capture-run.js';
 import { competitorCaptureReviewCommand } from './commands/competitor-capture-review.js';
 import { competitorCaptureInvalidateCommand } from './commands/competitor-capture-invalidate.js';
+import { competitorPatternPlanCommand } from './commands/competitor-pattern-plan.js';
+import { competitorPatternRunCommand } from './commands/competitor-pattern-run.js';
+import { competitorPatternReviewCommand } from './commands/competitor-pattern-review.js';
+import { competitorPatternApproveCommand } from './commands/competitor-pattern-approve.js';
+import { competitorPatternRejectCommand } from './commands/competitor-pattern-reject.js';
+import { competitorPatternInvalidateCommand } from './commands/competitor-pattern-invalidate.js';
 import { withConfigOnly, withContext } from './context.js';
 import { websiteVerificationStatusCommand } from './commands/website-verification-status.js';
 import { demoV2OrchestrationFixtureCommand } from './commands/demo-v2-orchestrate-fixture.js';
@@ -762,6 +768,54 @@ program
   .option('--apply', 'perform the invalidation (default is a dry run)')
   .action((opts: { lead: string; evidence: string; apply?: boolean }) =>
     withContext((ctx) => competitorCaptureInvalidateCommand(ctx, opts)));
+
+program
+  .command('competitor-pattern-plan')
+  .description('Phase 7A3A: read-only plan of the cross-competitor pattern denominators + proposed prospect contrasts for a lead. Validates research run, capture run, mappings, and freshness. No network, no DB writes, no email.')
+  .requiredOption('--lead <id>', 'lead id')
+  .option('--research-run <id>', 'specific research run id (default: latest DRAFT run for the lead)')
+  .option('--capture-run <id>', 'specific capture run id (default: latest active capture run for the research run)')
+  .action((opts: { lead: string; researchRun?: string; captureRun?: string }) => withContext((ctx) => competitorPatternPlanCommand(ctx, opts)));
+
+program
+  .command('competitor-pattern-run')
+  .description('Phase 7A3A: build a deterministic competitor pattern package for ONE lead + ONE approved research/capture set. Dry report by default; --apply persists an immutable DRAFT package (requires COMPETITOR_PATTERN_ENABLED=true). Idempotent. No AI, no live provider, no email, no Gmail/Sheets, no sending.')
+  .requiredOption('--lead <id>', 'lead id (one prospect at a time)')
+  .option('--research-run <id>', 'specific research run id (default: latest DRAFT run for the lead)')
+  .option('--capture-run <id>', 'specific capture run id (default: latest active capture run for the research run)')
+  .option('--apply', 'persist a DRAFT package (idempotent); requires COMPETITOR_PATTERN_ENABLED=true')
+  .action((opts: { lead: string; researchRun?: string; captureRun?: string; apply?: boolean }) => withContext((ctx) => competitorPatternRunCommand(ctx, opts)));
+
+program
+  .command('competitor-pattern-review')
+  .description('Phase 7A3A: read-only review of persisted competitor pattern packages — counts, evidence sources, contrasts, confidence, exclusions, prohibited-claim validation. Produces no email wording.')
+  .requiredOption('--lead <id>', 'lead id')
+  .option('--package <id>', 'a specific package id (default: all packages for the lead)')
+  .action((opts: { lead: string; package?: string }) => withContext((ctx) => competitorPatternReviewCommand(ctx, opts)));
+
+program
+  .command('competitor-pattern-approve')
+  .description('Phase 7A3A: human approval of a DRAFT/REVIEWED package. Dry-run by default; --apply requires --operator identity + COMPETITOR_PATTERN_ENABLED=true and only approves when all validation gates pass. Creates no outreach, no lead-state change, no email, no send.')
+  .requiredOption('--package <id>', 'package id to approve')
+  .option('--operator <name>', 'operator identity (REQUIRED for --apply)')
+  .option('--apply', 'perform the approval (default is a dry run)')
+  .action((opts: { package: string; operator?: string; apply?: boolean }) => withContext((ctx) => competitorPatternApproveCommand(ctx, opts)));
+
+program
+  .command('competitor-pattern-reject')
+  .description('Phase 7A3A: explicit operator rejection of a DRAFT/REVIEWED package. Dry-run by default; --apply requires --operator + COMPETITOR_PATTERN_ENABLED=true. Immutable history preserved (row not deleted).')
+  .requiredOption('--package <id>', 'package id to reject')
+  .option('--operator <name>', 'operator identity (REQUIRED for --apply)')
+  .option('--apply', 'perform the rejection (default is a dry run)')
+  .action((opts: { package: string; operator?: string; apply?: boolean }) => withContext((ctx) => competitorPatternRejectCommand(ctx, opts)));
+
+program
+  .command('competitor-pattern-invalidate')
+  .description('Phase 7A3A: operator invalidation of a package (evidence changed). Dry-run by default; --apply requires --operator + COMPETITOR_PATTERN_ENABLED=true. Non-terminal → INVALIDATED. History + evidence refs preserved (nothing deleted).')
+  .requiredOption('--package <id>', 'package id to invalidate')
+  .option('--operator <name>', 'operator identity (REQUIRED for --apply)')
+  .option('--apply', 'perform the invalidation (default is a dry run)')
+  .action((opts: { package: string; operator?: string; apply?: boolean }) => withContext((ctx) => competitorPatternInvalidateCommand(ctx, opts)));
 
 program.parseAsync(process.argv).catch((err: unknown) => {
   const message = err instanceof Error ? err.message : String(err);

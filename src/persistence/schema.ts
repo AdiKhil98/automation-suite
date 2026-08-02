@@ -2503,3 +2503,133 @@ export const competitorEvidenceItems = pgTable(
     profileCk: check('competitor_evidence_items_profile_ck', sql`${t.profile} IN ('desktop','mobile')`),
   }),
 );
+
+// --- Phase 7A3A: deterministic competitor pattern packages (additive; immutable/versioned) ---
+// No email, no AI, no Gmail/Sheets, no sending. Approval never happens automatically; supersession
+// marks prior DRAFT packages SUPERSEDED and never deletes history.
+
+const COMPETITOR_PATTERN_RESULTS = "'ALL_OBSERVED','MAJORITY_OBSERVED','NO_PATTERN','INSUFFICIENT_DATA'";
+const COMPETITOR_PACKAGE_STATUSES = "'DRAFT','REVIEWED','APPROVED','REJECTED','SUPERSEDED','INVALIDATED'";
+const COMPETITOR_WORDING_FORMS = "'TWO_OF_TWO','TWO_OF_THREE','ALL_OF_THREE','NONE'";
+
+export const competitorPatternPackages = pgTable(
+  'competitor_pattern_packages',
+  {
+    id: text('id').primaryKey(),
+    leadId: text('lead_id')
+      .notNull()
+      .references(() => leads.id, { onDelete: 'cascade' }),
+    researchRunId: text('research_run_id')
+      .notNull()
+      .references(() => competitorResearchRuns.id, { onDelete: 'cascade' }),
+    status: text('status').notNull().default('DRAFT'),
+    version: integer('version').notNull(),
+    inputHash: text('input_hash').notNull(),
+    configHash: text('config_hash').notNull(),
+    packageHash: text('package_hash').notNull(),
+    rulesVersion: text('rules_version').notNull(),
+    confidence: text('confidence').notNull(),
+    freshnessEvaluatedAt: timestamp('freshness_evaluated_at', { withTimezone: true }).notNull(),
+    selectedCompetitorIds: jsonb('selected_competitor_ids').notNull(),
+    captureRunIds: jsonb('capture_run_ids').notNull(),
+    eligibleEvidenceCount: integer('eligible_evidence_count').notNull(),
+    excludedEvidenceCount: integer('excluded_evidence_count').notNull(),
+    exclusionReasons: jsonb('exclusion_reasons').notNull(),
+    prohibitedClaims: jsonb('prohibited_claims').notNull(),
+    // Immutable approval/rejection/invalidation/supersession metadata (append-only).
+    approvedBy: text('approved_by'),
+    approvedAt: timestamp('approved_at', { withTimezone: true }),
+    rejectedBy: text('rejected_by'),
+    rejectedAt: timestamp('rejected_at', { withTimezone: true }),
+    invalidatedBy: text('invalidated_by'),
+    invalidatedAt: timestamp('invalidated_at', { withTimezone: true }),
+    supersededBy: text('superseded_by'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    leadIdx: index('competitor_pattern_packages_lead_idx').on(t.leadId),
+    idempotencyUk: uniqueIndex('competitor_pattern_packages_idempotency_uk').on(t.leadId, t.inputHash, t.configHash),
+    versionUk: uniqueIndex('competitor_pattern_packages_version_uk').on(t.leadId, t.version),
+    statusCk: check('competitor_pattern_packages_status_ck', sql.raw(`status IN (${COMPETITOR_PACKAGE_STATUSES})`)),
+    confidenceCk: check('competitor_pattern_packages_confidence_ck', sql`${t.confidence} IN ('HIGH','MEDIUM','LOW')`),
+  }),
+);
+
+export const competitorPatterns = pgTable(
+  'competitor_patterns',
+  {
+    id: text('id').primaryKey(),
+    packageId: text('package_id')
+      .notNull()
+      .references(() => competitorPatternPackages.id, { onDelete: 'cascade' }),
+    category: text('category').notNull(),
+    result: text('result').notNull(),
+    presentCount: integer('present_count').notNull(),
+    absentCount: integer('absent_count').notNull(),
+    unknownCount: integer('unknown_count').notNull(),
+    usableDenominator: integer('usable_denominator').notNull(),
+    totalSelected: integer('total_selected').notNull(),
+    participatingCompetitorIds: jsonb('participating_competitor_ids').notNull(),
+    evidenceItemIds: jsonb('evidence_item_ids').notNull(),
+    confidence: text('confidence').notNull(),
+    wordingForm: text('wording_form').notNull(),
+    wordingText: text('wording_text'),
+    consequenceLabel: text('consequence_label'),
+    numericMedian: doublePrecision('numeric_median'),
+    numericValues: jsonb('numeric_values').notNull(),
+    isDepth: boolean('is_depth').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    packageIdx: index('competitor_patterns_package_idx').on(t.packageId),
+    resultCk: check('competitor_patterns_result_ck', sql.raw(`result IN (${COMPETITOR_PATTERN_RESULTS})`)),
+    confidenceCk: check('competitor_patterns_confidence_ck', sql`${t.confidence} IN ('HIGH','MEDIUM','LOW')`),
+    wordingFormCk: check('competitor_patterns_wording_form_ck', sql.raw(`wording_form IN (${COMPETITOR_WORDING_FORMS})`)),
+    countsCk: check('competitor_patterns_counts_ck', sql`${t.presentCount} >= 0 AND ${t.absentCount} >= 0 AND ${t.unknownCount} >= 0 AND ${t.usableDenominator} >= 0 AND ${t.totalSelected} >= 0`),
+  }),
+);
+
+export const competitorProspectContrasts = pgTable(
+  'competitor_prospect_contrasts',
+  {
+    id: text('id').primaryKey(),
+    packageId: text('package_id')
+      .notNull()
+      .references(() => competitorPatternPackages.id, { onDelete: 'cascade' }),
+    patternId: text('pattern_id').references(() => competitorPatterns.id, { onDelete: 'set null' }),
+    category: text('category').notNull(),
+    contrastKind: text('contrast_kind').notNull(),
+    prospectState: text('prospect_state').notNull(),
+    prospectEvidenceRef: text('prospect_evidence_ref').notNull(),
+    confidence: text('confidence').notNull(),
+    consequenceLabel: text('consequence_label').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    packageIdx: index('competitor_prospect_contrasts_package_idx').on(t.packageId),
+    kindCk: check('competitor_prospect_contrasts_kind_ck', sql`${t.contrastKind} IN ('BOOLEAN')`),
+    stateCk: check('competitor_prospect_contrasts_state_ck', sql`${t.prospectState} IN ('ABSENT')`),
+    confidenceCk: check('competitor_prospect_contrasts_confidence_ck', sql`${t.confidence} IN ('HIGH','MEDIUM','LOW')`),
+  }),
+);
+
+export const competitorPatternEvidenceRefs = pgTable(
+  'competitor_pattern_evidence_refs',
+  {
+    id: text('id').primaryKey(),
+    packageId: text('package_id')
+      .notNull()
+      .references(() => competitorPatternPackages.id, { onDelete: 'cascade' }),
+    kind: text('kind').notNull(),
+    evidenceItemId: text('evidence_item_id').notNull(),
+    captureRunId: text('capture_run_id'),
+    competitorCandidateId: text('competitor_candidate_id'),
+    category: text('category'),
+    sourceUrl: text('source_url'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    packageIdx: index('competitor_pattern_evidence_refs_package_idx').on(t.packageId),
+    kindCk: check('competitor_pattern_evidence_refs_kind_ck', sql`${t.kind} IN ('COMPETITOR','PROSPECT')`),
+  }),
+);

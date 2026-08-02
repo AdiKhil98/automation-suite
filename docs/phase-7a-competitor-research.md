@@ -28,6 +28,38 @@
 > AI, Gmail/Sheets, or sending. CLI: `competitor-capture-plan|run|review|invalidate`. Flags
 > `COMPETITOR_CAPTURE_ENABLED=false`, `COMPETITOR_CAPTURE_PROVIDER=fixture` by default.
 >
+> **✅ 7A3A IMPLEMENTED (2026-08-02).** Migration `0031_competitor_pattern_packages.sql` (additive:
+> tables `competitor_pattern_packages`, `competitor_patterns`, `competitor_prospect_contrasts`,
+> `competitor_pattern_evidence_refs`). Pure, deterministic pattern layer that turns SELECTED-competitor
+> 7A2 evidence into immutable, versioned, source-traceable **pattern packages**: per-distinct-brand
+> PRESENT/ABSENT/UNKNOWN classification, **PRESENT+ABSENT denominator** (missing data never negative).
+> **Verified ABSENT requires an EXPLICIT, scoped negative observation** for an ABSENT-capable category
+> (`PHONE_VISIBLE`, `BOOKING_CTA_VISIBLE`, `WHATSAPP_OR_DIRECT_MESSAGE_VISIBLE`,
+> `MOBILE_STICKY_CONTACT_CONTROL`) — "no item found", a bounded/partial capture, or a non-ABSENT-capable
+> category is UNKNOWN, and site-wide absence is never inferred. Phase 7A2 stores only positive presence
+> facts today, so **ABSENT never arises from live data and prospect contrasts are withheld** (the
+> mechanism is honored if 7A2/prospect capture later emits scoped negatives). The `≥2` / `≥2/3` presence
+> threshold (§6/§7); numeric depth medians (**never contrasted** — no verified prospect depth exists);
+> **boolean prospect contrasts only for the operator-approved unambiguous mapping** (`PHONE_VISIBLE↔tel`,
+> `WHATSAPP_OR_DIRECT_MESSAGE_VISIBLE↔messaging-host link/mailto`, `BOOKING_CTA_VISIBLE↔cta/form`) and
+> only with an **explicit, scoped verified prospect negative** (a missing primitive is never absence).
+> Freshness is re-derived at generation, shown at review, and **re-checked at approval** (an APPROVED
+> transition fails if supporting evidence became stale/superseded/invalidated/unsafe after the DRAFT).
+> HIGH/MEDIUM/LOW confidence
+> (contrast ≤ min(pattern, prospect)); anonymized count-bound wording; a **hard validator** that FAILS
+> (never warns) on performance/revenue/conversion/ranking/volume claims, sample-of-one, missing source
+> refs, missing-prospect-as-absence, count/wording mismatch, or competitor-name leakage. CLI
+> `competitor-pattern-plan|run|review|approve|reject|invalidate`; flag `COMPETITOR_PATTERN_ENABLED=false`
+> by default (dry planning/review always allowed; persistence + status changes require it). Approval is
+> explicit, requires an operator identity, and never auto-approves. **Email enrichment remains
+> unimplemented (Phase 7A3B):** `EmailBrief.competitorPackage` is untouched, `email-schema.ts` /
+> `email-validation.ts` / prompts are untouched, and `competitor_evidence_used` stays `NONE`. **No** AI,
+> network, Gmail, Sheets, email composition, or sending. **Prospect-mapping deviation:** the plan (§4/§8)
+> anticipated richer prospect presence + depth contrasts; inspection showed the prospect side stores only
+> low-level DOM primitives (`capture_evidence`: tel/cta/form/mailto/link…) and no verified nav depth, so
+> per the "withhold rather than invent a mapping" rule only the three unambiguous boolean mappings above
+> are wired and depth prospect-contrasts are withheld entirely (operator-approved 2026-08-02).
+>
 > **Deviation from this plan (§2.1/§11).** The plan assumed reuse of `CaptureService` +
 > `website_capture_runs` via a new purpose. Inspection showed `CaptureService` is prospect-lead-bound
 > (requires `READY_FOR_CAPTURE`, writes lead facts, transitions lead state) and

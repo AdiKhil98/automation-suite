@@ -40,7 +40,7 @@ No phase begins before the previous one is approved with `APPROVE PHASE X`.
 | 4 | Independent enrichment & website discovery | `phase-4-enrichment` | ✅ approved |
 | 5 | Website capture & evidence extraction | `phase-5-website-capture` | ✅ approved |
 | 6 | AI website audit & opportunity analysis | `phase-6-ai-audit` | approved; Gate B deferred |
-| 7 | Competitor research (optional module) | `phase-7-competitor-research` | 7A1 DONE (`phase-7a1-competitor-candidates`); 7A2 DONE (`phase-7a2-competitor-evidence`); 7A3–7A4 planned |
+| 7 | Competitor research (optional module) | `phase-7-competitor-research` | 7A1 DONE (`phase-7a1-competitor-candidates`); 7A2 DONE (`phase-7a2-competitor-evidence`); 7A3A DONE (`phase-7a3a-competitor-patterns`); 7A3B (email enrichment) + 7A4 planned |
 | 8 | Demo template & demo decision engine | `phase-8-demo-generation` | approved |
 | 9 | Email writer & reviewer | `phase-9-email-generation` | approved |
 | 10 | Review dashboard | `phase-10-review-dashboard` | approved |
@@ -305,6 +305,20 @@ with a fail-closed (no-fallback) guarded live path; CLI `competitor-capture-plan
 default-off `COMPETITOR_CAPTURE_ENABLED`. **No** comparative pattern, `competitor_evidence_used` change (stays
 `NONE`), AI, Gmail/Sheets, or sending. The 7A3 (pattern generation + email enrichment) and 7A4 (controlled
 live validation) milestones remain unapproved.
+
+**Milestone 7A3A (deterministic competitor pattern packages) is IMPLEMENTED** (tag
+`phase-7a3a-competitor-patterns`, migration `0031_competitor_pattern_packages.sql`): pure deterministic
+pattern layer that turns SELECTED-competitor 7A2 evidence into immutable, versioned, source-traceable
+pattern packages — per-distinct-brand PRESENT/ABSENT/UNKNOWN classification, PRESENT+ABSENT denominator
+(missing data never negative), 2-of-N presence threshold, numeric depth medians (never contrasted),
+boolean prospect contrasts only for the operator-approved unambiguous mapping (`PHONE_VISIBLE↔tel`,
+`WHATSAPP↔messaging-host link/mailto`, `BOOKING_CTA↔cta/form`) with verified prospect ABSENT, HIGH/MEDIUM/
+LOW confidence, anonymized count-bound wording, and a hard validator that FAILS on performance/revenue/
+ranking/volume claims, sample-of-one, missing sources, count/wording mismatch, or competitor-name leakage.
+CLI `competitor-pattern-plan|run|review|approve|reject|invalidate`; default-off `COMPETITOR_PATTERN_ENABLED`;
+human approval requires explicit operator identity and never auto-approves. **No** AI, network, email
+composition/schema/prompt change (`competitor_evidence_used` stays `NONE`), Gmail, Sheets, or sending.
+**7A3B (email enrichment) remains unimplemented**; 7A4 (controlled live validation) remains unapproved.
 
 The full plan below was deferred by operator on 2026-07-16 and then resumed for 7A1.
 

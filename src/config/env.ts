@@ -96,6 +96,13 @@ const envSchema = z.object({
   COMPETITOR_CAPTURE_TIMEOUT_MS: z.coerce.number().int().positive().default(15_000),
   COMPETITOR_EVIDENCE_MAX_AGE_DAYS: z.coerce.number().int().positive().default(30),
 
+  // --- Phase 7A3A: deterministic competitor pattern packages ---
+  // Disabled by default. Dry planning/review/generation is read-only and always allowed; PERSISTING a
+  // package (competitor-pattern-run --apply) or changing a package's status (approve/reject/invalidate
+  // --apply) requires this flag = true. This flag enables no email, AI, Gmail, Sheets, or sending path
+  // — those remain unbuilt/disabled. `competitor_evidence_used` stays NONE.
+  COMPETITOR_PATTERN_ENABLED: boolString(false),
+
   // --- Phase 4: enrichment ---
   ENRICHMENT_CONTEXT_PROVIDER: z.enum(['facts', 'manual', 'google', 'mock']).default('facts'),
   ENRICHMENT_CANDIDATE_PROVIDER: z.enum(['mock', 'manual', 'search']).default('mock'),

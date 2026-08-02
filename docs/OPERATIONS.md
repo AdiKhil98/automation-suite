@@ -175,6 +175,83 @@ pnpm cli competitor-capture-run --lead <lead-id> --provider playwright --confirm
 A live request missing `COMPETITOR_CAPTURE_ENABLED=true`, `--provider playwright`, or
 `--confirm-live-capture` exits nonzero and captures nothing.
 
+## Phase 7A3A — deterministic competitor pattern packages (email enrichment NOT implemented)
+
+Builds an immutable, source-traceable competitor **pattern package** for one prospect + one approved
+7A1 research run + 7A2 capture run. Deterministic only — **no AI**, no network, no email composition.
+Email enrichment (populating `EmailBrief.competitorPackage`, widening `competitor_evidence_used`) is
+**Phase 7A3B and remains unimplemented**; `competitor_evidence_used` stays `NONE`.
+
+**Prerequisite:** a persisted 7A1 DRAFT run **and** a persisted 7A2 DRAFT capture run for the lead.
+
+**Denominator logic.** Per distinct competitor brand (one branch per brand), each category is classified
+PRESENT / ABSENT / UNKNOWN. The usable denominator counts **PRESENT + ABSENT only** — UNKNOWN (no
+eligible evidence, **no item found**, stale, ambiguous, withheld, skipped detector, or bounded/partial
+capture) is never counted as negative evidence. A **verified ABSENT requires an EXPLICIT, scoped negative
+observation** for an ABSENT-capable category (`PHONE_VISIBLE`, `BOOKING_CTA_VISIBLE`,
+`WHATSAPP_OR_DIRECT_MESSAGE_VISIBLE`, `MOBILE_STICKY_CONTACT_CONTROL`). Site-wide absence is never
+inferred from a homepage-only or bounded capture; every other category's absence is always UNKNOWN.
+Because Phase 7A2 currently stores only positive presence facts, **ABSENT never arises from live data
+today** — the rule is honored if/when 7A2 emits scoped negatives.
+
+**Presence-pattern threshold.** A positive pattern needs `denominator ≥ 2`, `presentCount ≥ 2`, and
+`presentCount/denominator ≥ 2/3` → `ALL_OBSERVED` (all present) or `MAJORITY_OBSERVED`; otherwise
+`NO_PATTERN` / `INSUFFICIENT_DATA`. Never a conclusion from a sample of one.
+
+**Depth categories.** `MOBILE_NAVIGATION_DEPTH` / `CONTACT_PATH_DEPTH` produce a numeric median summary
+only and **never a prospect contrast** in this milestone (no verified prospect depth is stored).
+
+**Prospect contrasts (boolean).** Only for the operator-approved mapping — `PHONE_VISIBLE↔tel`,
+`WHATSAPP_OR_DIRECT_MESSAGE_VISIBLE↔messaging-host link/mailto`, `BOOKING_CTA_VISIBLE↔cta/form` — and
+only when a positive pattern exists AND the prospect evidence system holds an **explicit, scoped verified
+negative** for the mapped category. A **missing** prospect primitive is never treated as absence →
+UNKNOWN → no contrast. Phase 5 prospect capture stores only positive primitives, so **contrasts are
+withheld entirely from live data** until an explicit-negative capability exists.
+
+**Approval-time freshness.** Freshness is re-derived from timestamps at generation, shown at review, and
+**re-checked against live state at approval** — an APPROVED transition FAILS if any supporting evidence
+became stale, superseded, invalidated, or unsafe after the DRAFT was created.
+
+**Confidence.** Pattern HIGH (denom 3, all HIGH, fresh, ≥2 present) / MEDIUM (denom ≥2, HIGH|MEDIUM,
+fresh) / LOW; only HIGH|MEDIUM patterns are approvable. Contrast confidence ≤ min(pattern, prospect).
+
+**Prohibited language (hard validation failure, not a warning).** Any performance/revenue/conversion/
+ranking/volume claim, superlative ("best-performing", "market leader"), sample-of-one wording, missing
+source reference, count/wording mismatch, or competitor name in external wording blocks the package and
+prevents approval. External wording is anonymized only ("two nearby clinics", "two of three comparable
+nearby clinics", "all three comparable nearby clinics").
+
+**Flags (defaults):** `COMPETITOR_PATTERN_ENABLED=false`. Dry planning/review/generation is read-only
+and always allowed; **persisting** a package or **changing** its status requires the flag = true.
+
+**Workflow (the exact PowerShell dry-run):**
+
+```text
+# Read-only plan — proposed denominators + contrasts; no network, no writes, no email
+pnpm cli competitor-pattern-plan --lead <lead-id>
+
+# DRY REPORT — build the package deterministically without persisting
+pnpm cli competitor-pattern-run --lead <lead-id>
+
+# Persist an immutable DRAFT package (idempotent); requires the flag
+$env:COMPETITOR_PATTERN_ENABLED = 'true'
+pnpm cli competitor-pattern-run --lead <lead-id> --apply
+
+# Read-only review (counts, sources, contrasts, exclusions, prohibited-claim validation)
+pnpm cli competitor-pattern-review --lead <lead-id>
+
+# Human approval — dry run, then explicit apply with operator identity (only if all gates pass)
+pnpm cli competitor-pattern-approve --package <package-id>
+pnpm cli competitor-pattern-approve --package <package-id> --operator <name> --apply
+
+# Reject / invalidate (dry run first; --operator + flag required for --apply; history preserved)
+pnpm cli competitor-pattern-reject --package <package-id> --operator <name> --apply
+pnpm cli competitor-pattern-invalidate --package <package-id> --operator <name> --apply
+```
+
+Approval creates **no** outreach record, changes **no** lead state, modifies **no** email, and sends
+**nothing**. Rejected/invalidated packages are stamped and retained (never deleted).
+
 ## Collection & qualification commands (Phase 2 / Phase 3)
 
 ```text

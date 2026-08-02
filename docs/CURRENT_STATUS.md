@@ -85,6 +85,54 @@ still cannot reach a real AUTO_REVIEW_PASSED, HUMAN_APPROVED, or deployment-elig
   prospect-vs-competitor statement, `competitor_evidence_used` change (stays `NONE`), AI, Gmail, Sheets,
   or sending. Focused unit tests + a DB-gated integration test. Milestones 7A3–7A4 remain unapproved.
 
+## Phase 7A3A — deterministic competitor pattern packages (IMPLEMENTED; no email/AI/Gmail/Sheets/sending)
+
+- Migration `0031_competitor_pattern_packages.sql`: additive tables `competitor_pattern_packages`
+  (immutable/versioned; `DRAFT|REVIEWED|APPROVED|REJECTED|SUPERSEDED|INVALIDATED`; idempotency unique
+  index on `(lead_id,input_hash,config_hash)`; per-lead version unique index), `competitor_patterns`,
+  `competitor_prospect_contrasts`, and `competitor_pattern_evidence_refs`. No existing table altered.
+- Pure, deterministic pattern layer (`pattern-{constants,types,eligibility,logic,wording,confidence,
+  hash,validator,service}.ts`). NO AI. `COMPETITOR_PATTERN_RULES_VERSION=competitor-pattern-2026-08-01`.
+- **Eligibility**: only evidence from a SELECTED 7A1 candidate, on an ACTIVE (non-superseded) capture,
+  that is active, FRESH (30-day, re-derived from timestamps), HIGH|MEDIUM, `safeForOutreach`, with a
+  stored source URL, an approved category, and observation `DIRECT_OBSERVATION`/`DETERMINISTIC_
+  INTERPRETATION` (never `UNSUPPORTED_INFERENCE`).
+- **Denominator**: per distinct brand, classify PRESENT / ABSENT / UNKNOWN. Denominator = PRESENT +
+  ABSENT only; UNKNOWN (missing/withheld/stale/ambiguous/inaccessible/**no item found**) is NEVER
+  negative evidence. **Verified ABSENT requires an EXPLICIT, scoped negative observation** for an
+  ABSENT-capable category (`PHONE_VISIBLE`, `BOOKING_CTA_VISIBLE`, `WHATSAPP_OR_DIRECT_MESSAGE_VISIBLE`,
+  `MOBILE_STICKY_CONTACT_CONTROL` — above-the-fold controls verifiable from the bounded capture). "No
+  item found", silence, a skipped detector, or a bounded/partial capture is UNKNOWN; site-wide absence
+  is never inferred. Every other category's absence is always UNKNOWN. **Phase 7A2 stores only positive
+  presence facts, so ABSENT never arises from live data today** — the mechanism exists and is honored if
+  7A2 later emits scoped negatives. Presence pattern iff `denominator ≥ 2 && presentCount ≥ 2 &&
+  presentCount/denominator ≥ 2/3` (`ALL_OBSERVED` / `MAJORITY_OBSERVED`); else `NO_PATTERN` /
+  `INSUFFICIENT_DATA`. One branch per brand.
+- **Prospect contrasts** (boolean) only for the explicit operator-approved mapping — `PHONE_VISIBLE↔tel`,
+  `WHATSAPP_OR_DIRECT_MESSAGE_VISIBLE↔messaging-host link/mailto`, `BOOKING_CTA_VISIBLE↔cta/form` — and
+  only when a positive pattern exists AND the prospect evidence system holds an **explicit, scoped
+  verified negative** for the mapped category. A **missing** low-level prospect primitive is NEVER
+  treated as absence → UNKNOWN → no contrast. Phase 5 prospect capture stores only positive primitives,
+  so **contrasts are withheld entirely from live data** until an explicit-negative capability exists.
+  **Depth categories** (nav/contact depth) are numeric summaries only, never contrasted.
+- **Approval-time freshness**: freshness is re-derived from timestamps at generation, shown at review,
+  and **re-checked against LIVE state at approval** — an APPROVED transition FAILS if any supporting
+  evidence became stale, superseded, invalidated, or unsafe after the DRAFT was created (the stored
+  generation-time status is never trusted on its own).
+- **Confidence**: pattern HIGH (denom 3, all HIGH, fresh, ≥2 present) / MEDIUM (denom ≥2, HIGH|MEDIUM,
+  fresh) / LOW; only HIGH|MEDIUM patterns are approvable; contrast confidence bounded by the lower of
+  pattern + prospect evidence. Anonymized count-bound wording only ("two nearby clinics"…); competitor
+  names never externalized.
+- **Hard validator** FAILS (never warns) on prohibited performance/revenue/conversion/ranking/volume
+  claims, sample-of-one, missing source refs, missing-prospect-as-absence, count/wording mismatch,
+  competitor-name leakage, or invalid confidence/freshness. Approval never automatic.
+- CLI `competitor-pattern-{plan,run,review,approve,reject,invalidate}`; flag `COMPETITOR_PATTERN_ENABLED`
+  default off (dry planning/review always allowed; persistence + status changes require the flag).
+  Approval requires an explicit `--operator` identity and creates no outreach/lead-state/email/send.
+  `competitor_evidence_used` stays `NONE`; the email composer is untouched (Phase 7A3B, unbuilt).
+  Focused unit tests (pattern-logic/eligibility/wording/confidence/validator/service + migration) plus a
+  DB-gated integration test. No network, AI, Gmail, Sheets, email composition, or sending occurs.
+
 ## Phase 17A — outreach tracking & follow-up operations (tracking only; NEVER sends)
 
 - Migration `0026_outreach_tracking.sql` adds six additive `outreach_*` tables and changes no existing
