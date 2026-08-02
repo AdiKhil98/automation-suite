@@ -252,6 +252,45 @@ pnpm cli competitor-pattern-invalidate --package <package-id> --operator <name> 
 Approval creates **no** outreach record, changes **no** lead state, modifies **no** email, and sends
 **nothing**. Rejected/invalidated packages are stamped and retained (never deleted).
 
+## Phase 7A3B — competitor email enrichment (deterministic, default-off; NEVER drafts/sends)
+
+Optionally strengthen a prospect's outreach email with ONE explicitly selected APPROVED competitor pattern
+package. The prospect's own verified issue stays the primary basis; the competitor context is anonymized,
+deterministic (no model-authored competitor text), and revalidated at composition. **Gmail drafting and
+sending remain entirely outside this milestone.**
+
+Preconditions: `COMPETITOR_EMAIL_ENRICHMENT_ENABLED=true`, an APPROVED package for the SAME lead whose
+supporting evidence is still fresh/active, and a prospect audit whose primary verified issue is booking- or
+contact-related (so a competitor pattern can materially align). Enrichment is English-only in 7A3B.
+
+```text
+# Prospect-only preview (no package) — unchanged fallback, read-only
+pnpm cli outreach-compose-preview --lead <lead-id>
+
+# Enriched dry preview (read-only): full revalidation + selection + traceability, NOTHING persisted
+pnpm cli outreach-compose-preview --lead <lead-id> --competitor-package <package-id>
+
+# Optional explicit pattern selection within the package (else deterministic selection)
+pnpm cli outreach-compose-preview --lead <lead-id> --competitor-package <package-id> --competitor-pattern <pattern-id>
+
+# Persist the composed enriched email + provenance + claim ledger (still NO Gmail draft, NO send)
+pnpm cli outreach-compose-preview --lead <lead-id> --competitor-package <package-id> --apply
+```
+
+Exact PowerShell dry-preview:
+
+```powershell
+$env:COMPETITOR_EMAIL_ENRICHMENT_ENABLED = 'true'; pnpm cli outreach-compose-preview --lead <lead-id> --competitor-package <package-id>
+```
+
+The dry preview prints the final subject + body, the schema version (`email-copy-schema-3`), the final
+`competitor_evidence_used` (`APPROVED_COMPETITOR_PATTERN_PACKAGE`), the package id/version/hash, the selected
+pattern + contrast and why it was selected, the prospect→pattern category mapping, the claim ledger, evidence
+freshness, the identity-leakage result, the prohibited-claim result, and the composed message hash. Any
+stale/invalid package, missing alignment, identity leak, or prohibited claim **fails closed** (nonzero exit)
+— it never silently downgrades to a prospect-only email under an explicit package request. Human email review
+remains mandatory; package approval never auto-approves an email.
+
 ## Collection & qualification commands (Phase 2 / Phase 3)
 
 ```text

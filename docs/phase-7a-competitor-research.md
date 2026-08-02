@@ -4,6 +4,38 @@
 > (deterministic candidate foundation, fixtures/CSV only) — see the banner below. Milestones
 > 7A2–7A4 remain planning only and each require separate explicit operator approval per `CLAUDE.md`.
 
+> **✅ 7A3B IMPLEMENTED (2026-08-03) — approved plan + operator amendments.** Optional, default-off,
+> **deterministic** integration of an APPROVED competitor pattern package into the existing email
+> composition + review pipeline. Flag `COMPETITOR_EMAIL_ENRICHMENT_ENABLED=false` by default. Additive
+> migration `0032_email_competitor_enrichment.sql` (companion tables `email_competitor_enrichment` +
+> `email_claim_ledger`; no historical email row altered). `EMAIL_SCHEMA_VERSION` bumped
+> `email-copy-schema-2` → `email-copy-schema-3`; `competitor_evidence_used` widened
+> `NONE` → `NONE | APPROVED_COMPETITOR_PATTERN_PACKAGE`. **Operator amendments recorded and honored:**
+> (1) the FINAL composed artifact — not the raw model output — carries schema-3 +
+> `APPROVED_COMPETITOR_PATTERN_PACKAGE` + package provenance + claim ledger, and is the artifact used
+> for preview/review/approval/persistence/hashing (an enriched body is never persisted/approved while
+> the record still says `NONE`); (2) enrichment must **materially** relate to the prospect's primary
+> verified issue via an explicit audit-category↔evidence-category alignment, else it fails closed with
+> an explanation (never a silent prospect-only email under an explicit `--competitor-package` request);
+> (3) a **fully deterministic pattern-selection order** (contrast-tied-to-primary-issue → exact
+> category match → HIGH>MEDIUM → ALL_OBSERVED>MAJORITY_OBSERVED → larger denominator → larger present
+> count → stable pattern id), plus an explicit `--competitor-pattern <id>` selector that fails closed on
+> an invalid pick; (4) an explicit internal `CompositionPlan` (typed ordered sections) renders the final
+> body — no fragile blank-line/regex splitting as the primary contract; (5) fixed reviewed
+> **consequence-label templates** (one per `ConsequenceLabel`), never a model-authored consequence and
+> never a raw enum in the email; (6) the competitor sentence is generated ONLY from approved package
+> metadata + deterministic templates, preserving exact stored counts (no raw competitor text / names /
+> domains / model competitor prose); (7) a **claim ledger** with bounded spans for every substantive
+> sentence, and missing comparative traceability is a hard failure; (8) **revalidation at composition,
+> review and approval** — reload package + evidence, recompute the package, compare `packageHash` to the
+> stored approved hash, re-derive freshness/active state, rerun leakage + prohibited-claim validation,
+> and validate the FINAL rendered body (a stale/invalid package blocks review/approval; a changed package
+> or body creates a new composition/message version, never a mutation). **Milestone deviation:**
+> enrichment is limited to English-language leads in 7A3B (the approved anonymized wording is English
+> only; German leads fail closed rather than mixing languages or fabricating a translation).
+> **No** Gmail draft, send, sending-flag change, Gmail/Sheets access, live model call, website access,
+> or network request is added or performed. See `docs/CURRENT_STATUS.md` and `docs/OPERATIONS.md`.
+
 > **✅ 7A1 IMPLEMENTED (2026-08-01).** Migration `0029_competitor_research.sql` (additive: tables
 > `competitor_research_runs`, `competitor_candidates`). Deterministic candidate selection with the
 > EXACT approved 100-point model (§6.2), fixtures/operator-CSV providers only, one prospect at a

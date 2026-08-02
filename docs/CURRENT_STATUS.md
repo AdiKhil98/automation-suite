@@ -133,6 +133,59 @@ still cannot reach a real AUTO_REVIEW_PASSED, HUMAN_APPROVED, or deployment-elig
   Focused unit tests (pattern-logic/eligibility/wording/confidence/validator/service + migration) plus a
   DB-gated integration test. No network, AI, Gmail, Sheets, email composition, or sending occurs.
 
+## Phase 7A3B — competitor email enrichment (deterministic, default-off; NEVER drafts/sends)
+
+- Optional, deterministic integration of ONE explicitly selected APPROVED competitor pattern package into
+  the existing email composition/review pipeline. Flag `COMPETITOR_EMAIL_ENRICHMENT_ENABLED=false` by
+  default; enrichment additionally requires an explicit `--competitor-package <id>` that is same-lead,
+  APPROVED, non-superseded/invalidated, and passes full composition-time revalidation.
+- **The model never authors competitor text.** The composer inserts the package's already-approved
+  anonymized `wordingText` + a fixed cautious-consequence template VERBATIM. New module
+  `src/domain/email/competitor-enrichment.ts` (pure) owns alignment, deterministic selection, wording +
+  consequence templates, the claim ledger, and the final-body validator;
+  `competitor-email-composer.ts` assembles the FINAL artifact + composed-message hash.
+  `COMPETITOR_ENRICHMENT_RULES_VERSION=competitor-email-enrichment-2026-08-03`.
+- **Schema:** `EMAIL_SCHEMA_VERSION` bumped `email-copy-schema-2` → `email-copy-schema-3`;
+  `competitor_evidence_used` widened `z.literal('NONE')` → `enum('NONE','APPROVED_COMPETITOR_PATTERN_PACKAGE')`
+  (writer Zod + JSON schema). Prospect-only generation is byte-compatible (raw model output stays `NONE`).
+  The **final composed artifact** — not the raw model output — carries schema-3 +
+  `APPROVED_COMPETITOR_PATTERN_PACKAGE` + provenance + ledger, and is the artifact previewed/reviewed/
+  approved/persisted/hashed. An enriched body is never persisted/approved while the record still says `NONE`.
+- **Material alignment:** an explicit audit-category↔evidence-category map (`BOOKING_FRICTION`/`CTA_CLARITY`
+  → `BOOKING_CTA_VISIBLE`; `CONTACT_FRICTION` → `PHONE_VISIBLE`/`WHATSAPP_OR_DIRECT_MESSAGE_VISIBLE`) ties the
+  competitor pattern to the prospect's primary verified issue. No aligned pattern → fail closed (never a
+  silent prospect-only email under an explicit package request).
+- **Deterministic selection order:** contrast-tied-to-primary-issue → exact category match → HIGH>MEDIUM →
+  ALL_OBSERVED>MAJORITY_OBSERVED → larger denominator → larger present count → stable pattern id. Explicit
+  `--competitor-pattern <id>` selector fails closed on an invalid/misaligned pick.
+- **Structured composition:** an explicit `CompositionPlan` (typed ordered sections: prospect observation →
+  one competitor+consequence section → recommendation) renders the final body — no blank-line/regex
+  splitting as the contract. Prospect observation is always first; exactly one competitor section; no
+  competitor language in the subject; existing length/tone gates preserved.
+- **Revalidation at compose/review/approve:** reloads the package + evidence, recomputes the package,
+  requires the recomputed `packageHash` to equal the stored approved hash, re-derives freshness/active state
+  (reusing `recheckSupportingEvidence`), reruns leakage + prohibited-claim validation, and validates the
+  FINAL rendered body. A stale/invalid package blocks composition/approval. A changed package or body
+  creates a NEW email id (new composition/message version) — history is never mutated.
+- **Persistence:** additive migration `0032_email_competitor_enrichment.sql` (companion tables
+  `email_competitor_enrichment` + `email_claim_ledger`; no existing table altered; guarded reverse in
+  `scripts/rollback/`). The enriched draft + package provenance + per-claim ledger + composed-message hash
+  persist together (`--apply`); prospect-only emails write no companion rows.
+- **CLI:** `outreach-compose-preview --lead <id> [--competitor-package <id>] [--competitor-pattern <id>]
+  [--apply]` — read-only preview by default, showing subject/body, mode, package id/version/hash, selected
+  pattern/contrast + why, prospect→pattern mapping, claim ledger, freshness, leakage + prohibited-claim
+  results, and the composed message hash. **No Gmail draft, no send.**
+- **Milestone deviation:** enrichment is English-only in 7A3B (the approved wording is English; German leads
+  fail closed rather than mix languages or fabricate a translation). The `BOOKING_DISCOVERABILITY`
+  consequence template avoids the word "immediately" so it never collides with the existing fake-urgency
+  copy gate.
+- Status: implemented; lint/typecheck/build green; 1090 unit tests pass (incl. 46 new 7A3B cases across
+  eligibility, deterministic selection, alignment/fail-closed, schema widening, composition, claim ledger,
+  final-body validation — leakage, prohibited claims, count mismatch, missing traceability — and the
+  composed-message hash). A DB-gated PostgreSQL persistence test is added (runs where a local test DB is
+  configured). **No live model call, website access, network request, Gmail access/draft, Sheet write, or
+  email send occurred during implementation or tests.**
+
 ## Phase 17A — outreach tracking & follow-up operations (tracking only; NEVER sends)
 
 - Migration `0026_outreach_tracking.sql` adds six additive `outreach_*` tables and changes no existing

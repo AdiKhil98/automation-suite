@@ -21,6 +21,14 @@ export type EmailScanResult = (typeof SCAN_RESULTS)[number];
 export const DEMO_ALIGNMENT_RESULTS = ['PASS', 'NOT_APPLICABLE', 'FAIL'] as const;
 export type DemoAlignmentResult = (typeof DEMO_ALIGNMENT_RESULTS)[number];
 
+/**
+ * Phase 7A3B — competitor evidence mode on an email artifact. `NONE` is prospect-only (the raw model
+ * output always emits NONE; the model never authors competitor text). `APPROVED_COMPETITOR_PATTERN_PACKAGE`
+ * is set by the deterministic composer on the FINAL enriched artifact only.
+ */
+export const EMAIL_COMPETITOR_EVIDENCE_MODES = ['NONE', 'APPROVED_COMPETITOR_PATTERN_PACKAGE'] as const;
+export type EmailCompetitorEvidenceMode = (typeof EMAIL_COMPETITOR_EVIDENCE_MODES)[number];
+
 export const MAX_EMAIL_WORDS = 120;
 export const MAX_SUBJECT_LENGTH = 80;
 
@@ -35,7 +43,7 @@ export interface EmailWriterOutput {
   strategic_angle: string;
   business_relevance: string;
   urgency_basis: string;
-  competitor_evidence_used: 'NONE';
+  competitor_evidence_used: EmailCompetitorEvidenceMode;
   primary_cta: EmailPrimaryCta;
   prohibited_phrase_scan: EmailScanResult;
   punctuation_scan: EmailScanResult;

@@ -119,7 +119,15 @@ export function validateEmail(out: EmailWriterOutput, ctx: EmailValidationContex
   if (PERFORMANCE_RE.test(allModelText)) violations.push('contains_performance_claim');
   if (FAKE_URGENCY_RE.test(allModelText)) violations.push('contains_fake_urgency');
   if (UNSUPPORTED_BEHAVIOR_RE.test(allModelText)) violations.push('contains_unsupported_customer_behavior');
-  if (COMPETITOR_RE.test(allModelText) || out.competitor_evidence_used !== 'NONE') {
+  // Phase 7A3B — competitor handling is conditional on the evidence mode.
+  // NONE (default, and always the RAW MODEL OUTPUT): any competitor language is unsupported — hard fail.
+  // APPROVED_COMPETITOR_PATTERN_PACKAGE (final composer artifact only): the anonymized, package-supported
+  // wording is permitted in the BODY, but the subject must stay competitor-free and the deep checks
+  // (exact wording, identity leakage, exact counts, per-sentence traceability) are enforced separately by
+  // `validateEnrichedComposition`. Performance/volume/ranking language stays blocked in both modes above.
+  if (out.competitor_evidence_used === 'APPROVED_COMPETITOR_PATTERN_PACKAGE') {
+    if (subjects.some((s) => COMPETITOR_RE.test(s))) violations.push('competitor_language_in_subject');
+  } else if (COMPETITOR_RE.test(allModelText) || out.competitor_evidence_used !== 'NONE') {
     violations.push('unsupported_competitor_language');
   }
   if (CTA_IN_BODY_RE.test(body)) violations.push('cta_in_model_body');

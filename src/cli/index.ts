@@ -46,6 +46,7 @@ import { competitorPatternReviewCommand } from './commands/competitor-pattern-re
 import { competitorPatternApproveCommand } from './commands/competitor-pattern-approve.js';
 import { competitorPatternRejectCommand } from './commands/competitor-pattern-reject.js';
 import { competitorPatternInvalidateCommand } from './commands/competitor-pattern-invalidate.js';
+import { outreachComposePreviewCommand } from './commands/outreach-compose-preview.js';
 import { withConfigOnly, withContext } from './context.js';
 import { websiteVerificationStatusCommand } from './commands/website-verification-status.js';
 import { demoV2OrchestrationFixtureCommand } from './commands/demo-v2-orchestrate-fixture.js';
@@ -388,6 +389,16 @@ program
   .requiredOption('--campaign <name>', 'campaign name (see src/config/campaigns.ts)')
   .option('--limit <n>', 'max leads to write emails for this run')
   .action((opts: { campaign: string; limit?: string }) => withContext((ctx) => generateEmailsCommand(ctx, opts)));
+
+program
+  .command('outreach-compose-preview')
+  .description('Phase 7A3B: preview a prospect-only or competitor-enriched email (deterministic; read-only unless --apply). Never creates a Gmail draft or sends.')
+  .requiredOption('--lead <id>', 'lead id')
+  .option('--competitor-package <id>', 'explicit APPROVED competitor pattern package id to enrich with (else prospect-only)')
+  .option('--competitor-pattern <id>', 'explicit pattern id within the package (else deterministic selection)')
+  .option('--apply', 'persist the composed enriched email + provenance + claim ledger (still no Gmail/send)')
+  .action((opts: { lead: string; competitorPackage?: string; competitorPattern?: string; apply?: boolean }) =>
+    withContext((ctx) => outreachComposePreviewCommand(ctx, opts)));
 
 program
   .command('deploy-demos')

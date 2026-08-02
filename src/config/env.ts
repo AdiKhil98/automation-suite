@@ -103,6 +103,13 @@ const envSchema = z.object({
   // — those remain unbuilt/disabled. `competitor_evidence_used` stays NONE.
   COMPETITOR_PATTERN_ENABLED: boolString(false),
 
+  // Phase 7A3B — optional competitor email enrichment. Disabled by default. Even when true, enrichment
+  // additionally requires an EXPLICIT --competitor-package <id> that is APPROVED, same-lead, non-stale,
+  // and passes full composition-time revalidation. It enables NO Gmail draft, send, sending-flag change,
+  // Gmail/Sheets access, live model call, website access, or network request. Prospect-only email
+  // generation is unaffected and remains the default path.
+  COMPETITOR_EMAIL_ENRICHMENT_ENABLED: boolString(false),
+
   // --- Phase 4: enrichment ---
   ENRICHMENT_CONTEXT_PROVIDER: z.enum(['facts', 'manual', 'google', 'mock']).default('facts'),
   ENRICHMENT_CANDIDATE_PROVIDER: z.enum(['mock', 'manual', 'search']).default('mock'),

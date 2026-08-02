@@ -1,13 +1,17 @@
 import { z } from 'zod';
 import {
   DEMO_ALIGNMENT_RESULTS,
+  EMAIL_COMPETITOR_EVIDENCE_MODES,
   MAX_SUBJECT_LENGTH,
   PRIMARY_CTAS,
   REVIEW_DECISIONS,
   SCAN_RESULTS,
 } from './email-types.js';
 
-export const EMAIL_SCHEMA_VERSION = 'email-copy-schema-2';
+// Bumped once for Phase 7A3B: `competitor_evidence_used` widened from the NONE-only literal to the
+// NONE | APPROVED_COMPETITOR_PATTERN_PACKAGE union. Prospect-only emails (raw model output = NONE)
+// remain fully compatible; the enriched value is set by the deterministic composer on the final artifact.
+export const EMAIL_SCHEMA_VERSION = 'email-copy-schema-3';
 
 export const emailWriterSchema = z.object({
   subject_options: z.array(z.string().trim().min(1).max(MAX_SUBJECT_LENGTH)).length(3),
@@ -18,7 +22,7 @@ export const emailWriterSchema = z.object({
   strategic_angle: z.string().trim().min(1).max(400),
   business_relevance: z.string().trim().min(1).max(500),
   urgency_basis: z.string().trim().min(1).max(400),
-  competitor_evidence_used: z.literal('NONE'),
+  competitor_evidence_used: z.enum(EMAIL_COMPETITOR_EVIDENCE_MODES),
   primary_cta: z.enum(PRIMARY_CTAS),
   prohibited_phrase_scan: z.enum(SCAN_RESULTS),
   punctuation_scan: z.enum(SCAN_RESULTS),
@@ -65,7 +69,7 @@ export const EMAIL_WRITER_JSON_SCHEMA = strictObject(
     strategic_angle: { type: 'string' },
     business_relevance: { type: 'string' },
     urgency_basis: { type: 'string' },
-    competitor_evidence_used: { type: 'string', enum: ['NONE'] },
+    competitor_evidence_used: { type: 'string', enum: [...EMAIL_COMPETITOR_EVIDENCE_MODES] },
     primary_cta: { type: 'string', enum: [...PRIMARY_CTAS] },
     prohibited_phrase_scan: { type: 'string', enum: [...SCAN_RESULTS] },
     punctuation_scan: { type: 'string', enum: [...SCAN_RESULTS] },

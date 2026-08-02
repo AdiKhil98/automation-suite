@@ -2633,3 +2633,82 @@ export const competitorPatternEvidenceRefs = pgTable(
     kindCk: check('competitor_pattern_evidence_refs_kind_ck', sql`${t.kind} IN ('COMPETITOR','PROSPECT')`),
   }),
 );
+
+// --- Phase 7A3B: competitor email enrichment (companion traceability; additive, immutable) ---
+
+const EMAIL_COMPETITOR_EVIDENCE_MODES_SQL = "'NONE','APPROVED_COMPETITOR_PATTERN_PACKAGE'";
+const EMAIL_CLAIM_TYPES_SQL =
+  "'PROSPECT_OBSERVATION','COMPETITOR_PATTERN','PROSPECT_CONTRAST','CAUTIOUS_CONSEQUENCE','RECOMMENDATION','CTA'";
+
+/**
+ * One row per ENRICHED composed email artifact. Prospect-only emails have NO row here. Package
+ * provenance is stored as plain text (not FKs) so historical traceability survives package supersession/
+ * expiry. The composed-message hash pins the exact enriched artifact used for preview/review/approval.
+ */
+export const emailCompetitorEnrichment = pgTable(
+  'email_competitor_enrichment',
+  {
+    id: text('id').primaryKey(),
+    emailId: text('email_id')
+      .notNull()
+      .references(() => emailDrafts.id, { onDelete: 'cascade' }),
+    leadId: text('lead_id')
+      .notNull()
+      .references(() => leads.id, { onDelete: 'cascade' }),
+    competitorEvidenceUsed: text('competitor_evidence_used').notNull(),
+    schemaVersion: text('schema_version').notNull(),
+    rulesVersion: text('rules_version').notNull(),
+    packageId: text('package_id').notNull(),
+    packageVersion: integer('package_version').notNull(),
+    packageHash: text('package_hash').notNull(),
+    selectedPatternId: text('selected_pattern_id').notNull(),
+    selectedContrastId: text('selected_contrast_id'),
+    primaryIssueEvidenceId: text('primary_issue_evidence_id').notNull(),
+    primaryIssueFindingRef: text('primary_issue_finding_ref').notNull(),
+    alignmentAuditCategory: text('alignment_audit_category').notNull(),
+    alignmentEvidenceCategory: text('alignment_evidence_category').notNull(),
+    revalidatedAt: timestamp('revalidated_at', { withTimezone: true }).notNull(),
+    recomputedHashMatched: boolean('recomputed_hash_matched').notNull(),
+    composedMessageHash: text('composed_message_hash').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    emailUk: uniqueIndex('email_competitor_enrichment_email_uk').on(t.emailId),
+    leadIdx: index('email_competitor_enrichment_lead_idx').on(t.leadId),
+    modeCk: check('email_competitor_enrichment_mode_ck', sql.raw(`competitor_evidence_used IN (${EMAIL_COMPETITOR_EVIDENCE_MODES_SQL})`)),
+  }),
+);
+
+/**
+ * Per-claim traceability ledger for a composed email. Bounded text span + exact provenance per
+ * substantive sentence. Append-only; historical rows are never mutated when a package later changes.
+ */
+export const emailClaimLedger = pgTable(
+  'email_claim_ledger',
+  {
+    id: text('id').primaryKey(),
+    emailId: text('email_id')
+      .notNull()
+      .references(() => emailDrafts.id, { onDelete: 'cascade' }),
+    enrichmentId: text('enrichment_id').references(() => emailCompetitorEnrichment.id, { onDelete: 'cascade' }),
+    ordinal: integer('ordinal').notNull(),
+    claimType: text('claim_type').notNull(),
+    text: text('text').notNull(),
+    prospectEvidenceIds: jsonb('prospect_evidence_ids').notNull(),
+    patternId: text('pattern_id'),
+    contrastId: text('contrast_id'),
+    competitorEvidenceIds: jsonb('competitor_evidence_ids').notNull(),
+    packageId: text('package_id'),
+    packageVersion: integer('package_version'),
+    packageHash: text('package_hash'),
+    rulesVersion: text('rules_version').notNull(),
+    validatedAt: timestamp('validated_at', { withTimezone: true }).notNull(),
+    externallySafe: boolean('externally_safe').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    emailIdx: index('email_claim_ledger_email_idx').on(t.emailId),
+    emailOrdinalUk: uniqueIndex('email_claim_ledger_email_ordinal_uk').on(t.emailId, t.ordinal),
+    claimTypeCk: check('email_claim_ledger_claim_type_ck', sql.raw(`claim_type IN (${EMAIL_CLAIM_TYPES_SQL})`)),
+  }),
+);

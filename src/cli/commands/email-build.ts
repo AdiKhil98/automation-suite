@@ -14,21 +14,26 @@ export interface BuiltEmail {
   providerName: string;
 }
 
-/** Build the email writer service. Paid OpenAI calls are hard-gated exactly like the audit
- * and composer services. Any missing piece throws before any lead is touched. */
-export function buildEmailService(ctx: CliContext): BuiltEmail {
+/** Build the email LLM provider with the same paid-call hard gates the writer/audit services use.
+ * Mock is the default; OpenAI requires every paid-call precondition. No call is made here. */
+export function buildEmailProvider(ctx: CliContext): LlmProvider {
   const c = ctx.config;
-  let provider: LlmProvider;
   if (c.LLM_PROVIDER === 'openai') {
     if (!c.ALLOW_PAID_LLM_CALLS) throw new Error('LLM_PROVIDER=openai requires ALLOW_PAID_LLM_CALLS=true (paid-call kill switch is off).');
     if (!c.OPENAI_API_KEY) throw new Error('LLM_PROVIDER=openai requires OPENAI_API_KEY.');
     if (!PRICE_VERIFIED_AT) throw new Error('LLM price table not verified; reconcile pricing.ts before any paid call.');
     if (!priceKnown(c.EMAIL_WRITER_MODEL)) throw new Error(`No verified price for email writer model "${c.EMAIL_WRITER_MODEL}".`);
     if (!priceKnown(c.EMAIL_REVIEWER_MODEL)) throw new Error(`No verified price for email reviewer model "${c.EMAIL_REVIEWER_MODEL}".`);
-    provider = new OpenAiResponsesProvider({ apiKey: c.OPENAI_API_KEY, logger: ctx.logger });
-  } else {
-    provider = new MockLlmProvider(defaultMockEmailResponder);
+    return new OpenAiResponsesProvider({ apiKey: c.OPENAI_API_KEY, logger: ctx.logger });
   }
+  return new MockLlmProvider(defaultMockEmailResponder);
+}
+
+/** Build the email writer service. Paid OpenAI calls are hard-gated exactly like the audit
+ * and composer services. Any missing piece throws before any lead is touched. */
+export function buildEmailService(ctx: CliContext): BuiltEmail {
+  const c = ctx.config;
+  const provider: LlmProvider = buildEmailProvider(ctx);
 
   const service = new EmailWriterService({
     provider,
