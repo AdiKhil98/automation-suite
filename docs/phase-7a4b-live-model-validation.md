@@ -632,3 +632,107 @@ Combined status **READY_FOR_OPERATOR_REVIEW**: Terra base (mock) → determinist
 deterministic mock and every automated test uses mocked providers. No production database write, network
 request, Gmail, Sheets, draft, or send occurred. `AGENTS.md` was not touched. No migration or production-model
 default was changed (additive only). Phase 7A4C (operator go/no-go) remains a separate, unapproved milestone.
+
+---
+
+## 19. Phase 7A4B1 — live-email determinism fix (2026-08-03)
+
+**Status: IMPLEMENTED. lint + typecheck + build green; standard unit suite (`vitest run tests/unit`) passes
+with 24 new determinism cases. No live model, network, production DB, Gmail, Sheets, draft, or send occurred.**
+
+### 19.1 Root cause
+
+The first real fictional **LIVE** Terra run produced a strong result (baseline 77 → enriched 97, +20) but
+`combinedStatus = VALIDATION_FAILED` on a single hard gate: `unstable_claim_spans_or_hash` —
+"composed message hash not reproducible."
+
+The composition was **never** non-deterministic. The defect was entirely inside the hard gate. Gate 16 in
+`src/evaluation/email/hard-gates.ts` re-composes the email to check hash stability, but it re-composed from
+the **pinned fixture** `baseEmailDraft` instead of `result.baseDraft` — the ACTUAL draft the artifact under
+test was composed from:
+
+```ts
+// BEFORE (defective)
+const recomposed = composeEnrichedEmail({ prospectDraft: baseEmailDraft, /* … */ });
+```
+
+- In the **offline 7A4A** path, `runValidationHarness()` defaults `baseDraft = baseEmailDraft`, so the two
+  coincided and the gate passed — the bug was invisible.
+- In the **live 7A4B** path, the base draft is the live **Terra** output (different subject + body). Gate 16
+  re-composed from the fixture, produced a different subject/body, and therefore a different composed-message
+  hash → a false "not reproducible."
+
+**Proof it was a gate defect, not real nondeterminism:** the quality rubric's own reproducibility check
+(`validation-report.ts::buildEnrichedRubricInput`) already re-composed from `result.baseDraft` (correctly)
+and **passed** in the same failed run (integrity 20/20, `composed_hash_reproducible: true`). Only the
+fixture-importing hard gate disagreed. Replaying the saved failed artifact offline reproduces its stored
+composed-message hash `0d7e742c…` exactly.
+
+**Exact differing field:** the `subject` and `body` inputs to the canonical composed-message hash — both
+derived from the base draft, and the gate fed it the wrong (fixture) base draft.
+
+### 19.2 The fix
+
+- **Gate 16 recomposes from `result.baseDraft`** (the actual base draft), never a pinned fixture; the
+  `baseEmailDraft` import was removed from `hard-gates.ts`. A safety gate must not depend on a test fixture.
+  The claim-span check now uses the real body-derived spans and the gate emits a bounded, secret-free
+  diagnostic (differing field, expected vs recomputed hash, body/subject/spans/provenance differed) on
+  failure.
+
+### 19.3 Canonical composed-message hash contract
+
+`computeComposedMessageHash` (exported from `competitor-email-composer.ts`) is now the single source of truth
+reused by the composer, the hard gate, and the offline replay. It binds every semantic + provenance-critical
+field and EXCLUDES ephemeral execution metadata:
+
+- **Included (semantic / provenance-critical):** final schema version, subject, rendered body, competitor-
+  evidence mode, package id + version + hash, selected pattern id, selected contrast id, enrichment rules
+  version, and the normalized claim ledger (each claim's text + prospect/competitor evidence references +
+  pattern/contrast ids).
+- **Excluded (ephemeral):** provider request/response ids, token usage, cost, latency, and report-generation
+  timestamps — none are inputs to the hash. A required audit timestamp remains persisted OUTSIDE the hash
+  input (`generatedAt`, provider `call` metadata), so it never changes the semantic hash.
+- **Determinism guarantees:** canonically sorted object keys, sorted evidence-reference arrays (equivalent
+  references in any order hash identically), normalized newlines (CRLF/CR → LF), UTF-8-stable `JSON.stringify`
+  encoding, explicit null handling. These normalizations are **no-ops** on already-canonical input — the
+  stored `0d7e742c…` hash is byte-identical before and after — so the contract is a stabilization, not a
+  value change for well-formed artifacts.
+
+### 19.4 Claim-span contract
+
+`deriveClaimSpans(finalBody, ledger)` (in `competitor-enrichment.ts`) derives bounded `{ start, end, valid }`
+offsets for every substantive claim from the FINAL rendered body:
+
+- offsets are exact and `valid` iff `body.slice(start,end) === text` (bounded, verified traceability);
+- ordering follows the ledger, which mirrors body order by construction;
+- a forward-advancing cursor assigns each claim the first occurrence at/after the previous span's end, so
+  **duplicate sentence text maps to distinct, unambiguous offsets**;
+- the CTA marker claim (`cta:<KIND>`) is intentionally excluded (not body text);
+- pure and deterministic — no randomness, no current-timestamp or locale/timezone dependency. The
+  missing-traceability validation is unchanged (a claim that does not resolve fails the gate).
+
+### 19.5 Offline replay command
+
+`competitor-email-live-validation-replay` (module `src/evaluation/email/live/replay.ts`) validates the fix
+without spending another paid live call. It:
+
+- accepts the saved local report (default `.local-data/competitor-email-validation/live/latest.json`);
+- verifies the live report hash and the deterministic-report determinism hash first (fails on any
+  altered/incomplete artifact);
+- **FULL** mode (report carries the persisted sanitized Terra base draft): re-runs the entire deterministic
+  pipeline from that exact draft and compares the recomputed composed hash, claim spans, and determinism hash
+  to the stored report;
+- **REDUCED** mode (legacy report without the base draft): recomputes the composed hash canonically from the
+  stored rendered subject/body + claim ledger (fixture harness supplies deterministic package provenance) and
+  re-derives + validates the claim spans;
+- makes **zero** Terra/Sol calls, **zero** network requests, and performs **zero** Gmail/Sheets/draft/send or
+  production-database actions.
+
+Going forward the live report persists the sanitized Terra base draft (`terraBaseDraft`, fictional-prospect
+copy only, no provider metadata/secrets) to enable FULL replay; it is intentionally excluded from
+`reportHash` so existing report hashes are unchanged.
+
+### 19.6 Requirement before another paid live run
+
+The offline replay MUST pass (`REPRODUCIBLE`) against the latest saved artifact before authorizing another
+paid live Terra/Sol run. Exact commands are in `docs/OPERATIONS.md`.

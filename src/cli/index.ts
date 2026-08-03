@@ -56,6 +56,7 @@ import { competitorEmailValidationReviewCommand } from './commands/competitor-em
 import { competitorEmailLiveValidationPlanCommand } from './commands/competitor-email-live-validation-plan.js';
 import { competitorEmailLiveValidationRunCommand } from './commands/competitor-email-live-validation-run.js';
 import { competitorEmailLiveValidationReviewCommand } from './commands/competitor-email-live-validation-review.js';
+import { competitorEmailLiveValidationReplayCommand } from './commands/competitor-email-live-validation-replay.js';
 import {
   demoV2PreviewCommand, demoV2RenderCommand, demoV2RenderHashCommand, demoV2ScreenshotsCommand,
   type RenderLanguage,
@@ -149,6 +150,14 @@ program
   .option('--report <path>', 'path to a saved live-report json')
   .option('--out <dir>', 'directory containing latest.json (git-ignored)')
   .action((opts: { report?: string; out?: string }) => competitorEmailLiveValidationReviewCommand(opts));
+
+program
+  .command('competitor-email-live-validation-replay')
+  .description('Phase 7A4B1: OFFLINE determinism replay of a saved live report — re-derive package, enrichment, claim spans, composed hash, and hard gates; report reproducibility. Zero Terra/Sol, network, Gmail, Sheets, draft, send, or production DB.')
+  .option('--report <path>', 'path to a saved live-report json')
+  .option('--out <dir>', 'directory containing latest.json (git-ignored)')
+  .option('--json', 'print the replay result as JSON instead of text')
+  .action((opts: { report?: string; out?: string; json?: boolean }) => competitorEmailLiveValidationReplayCommand(opts));
 
 program
   .command('demo-v2-render')

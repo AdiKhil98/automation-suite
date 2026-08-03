@@ -8,17 +8,35 @@
 import { COMPETITOR_EVIDENCE_MODE_APPROVED } from './constants.js';
 import { buildEmailContext } from '../../domain/email/email-render.js';
 import { composeEnrichedEmail } from '../../domain/email/competitor-email-composer.js';
+import { claimSpansResolved, type ClaimSpan } from '../../domain/email/competitor-enrichment.js';
 import { EMAIL_SCHEMA_VERSION } from '../../domain/email/email-schema.js';
-import { baseEmailDraft } from '../../fixtures/competitor-email-validation/synthetic-dental-scenario.js';
 import { type HarnessSuccess } from './harness.js';
 
 /** Detects competitor language in the subject line (mirrors the copy gate's competitor regex intent). */
 const SUBJECT_COMPETITOR_RE = /\b(?:competitors?|competition|other (?:clinics?|practices?|businesses)|market leaders?|rivals?)\b/i;
 
+/**
+ * Bounded, secret-free diagnostic emitted ONLY when the determinism gate fails. It names the differing
+ * canonical field, shows the expected vs recomputed composed-message hash, and flags whether the body,
+ * subject, claim spans, or provenance differed on re-composition. It never contains API keys, headers, or
+ * raw provider material — only the deterministically recomputed email fields already present in the report.
+ */
+export interface DeterminismDiagnostic {
+  differingField: 'composed_message_hash' | 'claim_spans' | 'both' | 'none';
+  expectedHash: string;
+  recomputedHash: string;
+  bodyDiffered: boolean;
+  subjectDiffered: boolean;
+  claimSpansDiffered: boolean;
+  provenanceDiffered: boolean;
+}
+
 export interface HardGateResult {
   id: string;
   passed: boolean;
   detail: string | null;
+  /** Populated ONLY for the determinism gate (`unstable_claim_spans_or_hash`); null on that gate when it passes. */
+  diagnostic?: DeterminismDiagnostic | null;
 }
 
 export interface HardGateReport {
@@ -31,11 +49,20 @@ function hasViolation(violations: string[], prefix: string): boolean {
   return violations.some((v) => v === prefix || v.startsWith(`${prefix}:`) || v.startsWith(prefix));
 }
 
+/** Two claim-span lists are identical iff every claim type, text, and bounded offset matches in order. */
+function claimSpansEqual(a: ClaimSpan[], b: ClaimSpan[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((s, i) => {
+    const t = b[i]!;
+    return s.claimType === t.claimType && s.text === t.text && s.start === t.start && s.end === t.end && s.valid === t.valid;
+  });
+}
+
 /** Evaluate every hard safety gate against the enriched artifact produced by the harness. */
 export function evaluateHardGates(result: HarnessSuccess): HardGateReport {
   const gates: HardGateResult[] = [];
-  const add = (id: string, passed: boolean, detail: string | null = null): void => {
-    gates.push({ id, passed, detail });
+  const add = (id: string, passed: boolean, detail: string | null = null, diagnostic?: DeterminismDiagnostic | null): void => {
+    gates.push(diagnostic === undefined ? { id, passed, detail } : { id, passed, detail, diagnostic });
   };
 
   const enriched = result.enriched;
@@ -104,18 +131,43 @@ export function evaluateHardGates(result: HarnessSuccess): HardGateReport {
   // 15. Final schema is not email-copy-schema-3.
   add('final_schema_not_schema3', enriched.schemaOk && enriched.schemaVersion === EMAIL_SCHEMA_VERSION);
 
-  // 16. Unstable claim spans or message hash: every ledger claim text resolves into the rendered body,
-  //     and re-composing the identical inputs reproduces the exact composed-message hash.
-  const spansResolve = ledger.every((e) => e.claimType === 'CTA' || body.includes(e.text) || body.includes(e.text.replace(/^cta:/, '')));
+  // 16. Unstable claim spans or message hash: every ledger claim resolves to a bounded body substring, and
+  //     RE-COMPOSING THE IDENTICAL INPUTS reproduces the exact composed-message hash + claim spans. The
+  //     recompose MUST use the ACTUAL base draft the artifact under test was composed from
+  //     (`result.baseDraft`) — never a pinned fixture — otherwise a live (Terra-authored) base would always
+  //     mismatch the fixture and report a false "not reproducible". This is the Phase 7A4B1 fix.
+  const spansResolve = claimSpansResolved(enriched.claimSpans);
   const recomposed = composeEnrichedEmail({
-    prospectDraft: baseEmailDraft,
+    prospectDraft: result.baseDraft,
     emailInputs: result.emailInputs,
     validationCtx: ctx,
     plan: result.plan,
     pkg: result.enrichmentPackage,
   });
   const hashStable = recomposed.composedMessageHash === enriched.composedMessageHash;
-  add('unstable_claim_spans_or_hash', spansResolve && hashStable, hashStable ? null : 'composed message hash not reproducible');
+  const spansStable = claimSpansEqual(recomposed.claimSpans, enriched.claimSpans);
+  const stable = spansResolve && hashStable && spansStable;
+  const diagnostic: DeterminismDiagnostic | null = stable
+    ? null
+    : {
+      differingField: !hashStable && (!spansStable || !spansResolve) ? 'both' : !hashStable ? 'composed_message_hash' : 'claim_spans',
+      expectedHash: enriched.composedMessageHash,
+      recomputedHash: recomposed.composedMessageHash,
+      bodyDiffered: recomposed.rendered.body !== enriched.rendered.body,
+      subjectDiffered: recomposed.rendered.subject !== enriched.rendered.subject,
+      claimSpansDiffered: !spansStable || !spansResolve,
+      provenanceDiffered:
+        recomposed.plan.selection.pattern.patternId !== enriched.plan.selection.pattern.patternId ||
+        (recomposed.plan.selection.contrast?.contrastId ?? null) !== (enriched.plan.selection.contrast?.contrastId ?? null),
+    };
+  add(
+    'unstable_claim_spans_or_hash',
+    stable,
+    stable
+      ? null
+      : `${hashStable ? 'claim spans not reproducible' : 'composed message hash not reproducible'} (field=${diagnostic!.differingField}, body_differed=${String(diagnostic!.bodyDiffered)})`,
+    diagnostic,
+  );
 
   const failedIds = gates.filter((g) => !g.passed).map((g) => g.id);
   return { gates, allPassed: failedIds.length === 0, failedIds };

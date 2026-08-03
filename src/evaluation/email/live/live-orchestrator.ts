@@ -96,7 +96,7 @@ export async function runLiveValidation(deps: LiveOrchestratorDeps): Promise<Liv
 
   // Deterministic FAIL (pipeline or hard-gate) -> VALIDATION_FAILED; Sol cannot rescue safety, so skip it.
   if (!outcome.ok || deterministic.result === 'FAIL') {
-    return buildLiveReport({ ...base, now: now(), terra, deterministic, sol: SOL_NOT_RUN });
+    return buildLiveReport({ ...base, now: now(), terra, deterministic, sol: SOL_NOT_RUN, terraBaseDraft: terraResult.draft });
   }
 
   // --- Stage 3: single Sol ADVISORY critique over sanitized, anonymized input. ---
@@ -117,5 +117,5 @@ export async function runLiveValidation(deps: LiveOrchestratorDeps): Promise<Liv
     }
     : { ran: true, malformed: solResult.reason === 'SOL_MALFORMED_RESPONSE', reason: solResult.reason, critique: null, materiallyWorse: null, call: solResult.call };
 
-  return buildLiveReport({ ...base, now: now(), terra, deterministic, sol });
+  return buildLiveReport({ ...base, now: now(), terra, deterministic, sol, terraBaseDraft: terraResult.draft });
 }

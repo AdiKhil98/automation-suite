@@ -9,6 +9,7 @@ import { createHash } from 'node:crypto';
 import { renderReportText, type ValidationReport, type ValidationResultKind } from '../validation-report.js';
 import { COMPETITOR_EMAIL_VALIDATION_RULES_VERSION } from '../constants.js';
 import { type SolCritiqueParsed } from '../../../domain/email/sol-critique-schema.js';
+import { type EmailWriterParsed } from '../../../domain/email/email-schema.js';
 import { type CombinedOperatorStatus, type LiveModelCall } from './live-types.js';
 
 export interface LiveSolResult {
@@ -39,6 +40,14 @@ export interface LiveValidationReport {
   terra: LiveTerraResult;
   deterministic: ValidationReport | null;
   sol: LiveSolResult;
+  /**
+   * The sanitized prospect-only base draft Terra produced (null when Terra failed before a valid draft).
+   * Persisted so the offline replay can re-run the FULL deterministic pipeline from the exact base draft
+   * WITHOUT another live call. It is fictional-prospect copy only — no competitor data, provider metadata,
+   * or secrets — and is intentionally EXCLUDED from `reportHash` (its rendered subject/body already bind
+   * transitively via `deterministic.determinismHash`), so adding it never changes an existing report hash.
+   */
+  terraBaseDraft: EmailWriterParsed | null;
   combinedStatus: CombinedOperatorStatus;
   combinedReasons: string[];
   reportHash: string;
@@ -101,6 +110,7 @@ export interface BuildLiveReportArgs {
   terra: LiveTerraResult;
   deterministic: ValidationReport | null;
   sol: LiveSolResult;
+  terraBaseDraft?: EmailWriterParsed | null;
 }
 
 export function buildLiveReport(args: BuildLiveReportArgs): LiveValidationReport {
@@ -136,6 +146,7 @@ export function buildLiveReport(args: BuildLiveReportArgs): LiveValidationReport
     terra: args.terra,
     deterministic: args.deterministic,
     sol: args.sol,
+    terraBaseDraft: args.terraBaseDraft ?? null,
     combinedStatus: status,
     combinedReasons: reasons,
     reportHash: '',

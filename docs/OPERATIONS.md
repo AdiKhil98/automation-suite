@@ -291,6 +291,50 @@ stale/invalid package, missing alignment, identity leak, or prohibited claim **f
 — it never silently downgrades to a prospect-only email under an explicit package request. Human email review
 remains mandatory; package approval never auto-approves an email.
 
+## Phase 7A4B / 7A4B1 — guarded fictional live-model validation + offline determinism replay
+
+The guarded fictional live-model validation (`competitor-email-live-validation-run`) is MOCK by default; a
+paid LIVE run requires every guard (see `docs/phase-7a4b-live-model-validation.md` §7). Reports are written to
+git-ignored `.local-data/competitor-email-validation/live/`.
+
+**Phase 7A4B1 determinism replay (offline; ZERO live model / network / DB / Gmail / Sheets / draft / send).**
+Re-derives the package, enrichment, claim spans, composed-message hash, and hard gates from a saved report and
+reports reproducibility. It fails on an altered/incomplete artifact (report-hash or determinism-hash mismatch)
+and prints a bounded, secret-free diagnostic on any determinism-gate failure.
+
+```text
+# Offline replay of the latest saved live report (default path)
+pnpm cli competitor-email-live-validation-replay
+
+# Replay a specific saved report as JSON
+pnpm cli competitor-email-live-validation-replay --report .local-data/competitor-email-validation/live/latest.json --json
+```
+
+Exact PowerShell — offline replay against the saved (possibly failed) artifact:
+
+```powershell
+pnpm cli competitor-email-live-validation-replay --out .local-data/competitor-email-validation/live
+```
+
+A `REPRODUCIBLE` result (exit 0) confirms the composed-message hash + claim spans re-derive exactly from the
+saved artifact with zero live calls. **The replay MUST pass before authorizing another paid live run.**
+
+Exact PowerShell — the ONE later guarded live rerun (only after the replay passes; makes at most one Terra +
+one Sol paid call; still no DB/Gmail/Sheets/draft/send):
+
+```powershell
+$env:COMPETITOR_EMAIL_LIVE_VALIDATION_ENABLED = 'true'; $env:LLM_PROVIDER = 'openai'; $env:ALLOW_PAID_LLM_CALLS = 'true'; pnpm cli competitor-email-live-validation-run --confirm-live --fixture synthetic-dental --confirm-no-real-prospect --max-live-calls 2
+```
+
+`OPENAI_API_KEY` must be present in the environment (never pass it on the command line). Any missing guard
+exits nonzero before any model call; explicit live intent never falls back to mock.
+
+**Metadata excluded from the semantic composed-message hash** (never affects reproducibility): provider
+request/response ids, token usage, cost, latency, and report-generation timestamps. **Provenance-critical
+(always bound into the hash):** schema version, subject, rendered body, evidence mode, package id/version/hash,
+selected pattern + contrast ids, enrichment rules version, and the normalized claim ledger (claim text +
+prospect/competitor evidence references). A required audit timestamp is persisted OUTSIDE the hash input.
+
 ## Collection & qualification commands (Phase 2 / Phase 3)
 
 ```text

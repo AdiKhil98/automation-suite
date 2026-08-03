@@ -205,3 +205,37 @@ export const baseEmailDraft: EmailWriterParsed = {
   human_style_result: 'PASS',
   demo_alignment_result: 'NOT_APPLICABLE',
 };
+
+/**
+ * Phase 7A4B1 committed regression fixture — a SANITIZED reconstruction of the base draft a LIVE Terra run
+ * produced (the run that exposed the non-reproducible composed-message hash). It is a DIFFERENT prospect-
+ * only draft than `baseEmailDraft` (different subject + wording), reconstructed from the saved live report's
+ * rendered baseline (subject, inner paragraphs) and CTA — enough to reproduce the exact failing scenario
+ * OFFLINE. It carries NO API metadata, request/response ids, tokens, cost, or secrets. Its ONLY purpose is
+ * the determinism regression test: composing from a live-authored base (not the pinned fixture) must still
+ * produce a reproducible hash + stable claim spans once gate 16 recomposes from the ACTUAL base draft.
+ */
+export const liveTerraBaseDraft: EmailWriterParsed = {
+  subject_options: [
+    'Northgate Dental Studio’s mobile booking path',
+    'Making the booking step easier to find on mobile',
+    'The appointment path on your phone site',
+  ],
+  selected_subject: 'Northgate Dental Studio’s mobile booking path',
+  selected_subject_reason: 'Points to the concrete mobile booking path without hype.',
+  email_body:
+    'On the mobile page, no booking action appears in the first screen, while the phone number sits in the footer.\n\n' +
+    'For someone looking to arrange dental care on a phone, that makes the route to booking less direct. ' +
+    'Bringing a clear booking option near the top would make the next step visible when the page first opens.',
+  evidence_ids: [BOOKING_FINDING_ID, 'fact-business-name'],
+  strategic_angle: 'Surface the booking step in the first mobile screen.',
+  business_relevance: 'How a new patient reaches booking affects whether they act on the site.',
+  urgency_basis: 'This is a standing usability point, not time sensitive.',
+  competitor_evidence_used: 'NONE',
+  primary_cta: 'REPLY_FOR_DETAILS',
+  prohibited_phrase_scan: 'PASS',
+  punctuation_scan: 'PASS',
+  genericity_score: 20,
+  human_style_result: 'PASS',
+  demo_alignment_result: 'NOT_APPLICABLE',
+};

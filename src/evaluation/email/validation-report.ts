@@ -13,6 +13,7 @@ import { composeEnrichedEmail } from '../../domain/email/competitor-email-compos
 import { PRIMARY_CTAS } from '../../domain/email/email-types.js';
 import { type ConsequenceLabel } from '../../domain/competitor/pattern-constants.js';
 import { evaluateHardGates, type HardGateReport } from './hard-gates.js';
+import { type ClaimSpan } from '../../domain/email/competitor-enrichment.js';
 import { categoryPoints, scoreEmail, type RubricInput, type RubricScore } from './email-quality-rubric.js';
 import { ACCEPTANCE, COMPETITOR_EMAIL_VALIDATION_RULES_VERSION } from './constants.js';
 import { type HarnessOutcome, type HarnessSuccess } from './harness.js';
@@ -73,6 +74,8 @@ export interface ValidationReport {
   improvementExplanation: string[];
   awkwardWordingNotes: string[];
   composedMessageHash: string | null;
+  /** Bounded, body-derived claim spans for the enriched artifact (null when no enriched email was produced). */
+  claimSpans: ClaimSpan[] | null;
   determinismHash: string;
 }
 
@@ -187,7 +190,7 @@ export function buildReport(outcome: HarnessOutcome): ValidationReport {
       evidenceReferences: { competitorEvidenceIds: [], prospectEvidenceIds: [] },
       claimLedger: [], baseline: null, enriched: null, scoreDifference: null, hardGates: null,
       lengthComparison: { baselineWords: null, enrichedWords: null, delta: null },
-      improvementExplanation: [], awkwardWordingNotes: [], composedMessageHash: null, determinismHash: '',
+      improvementExplanation: [], awkwardWordingNotes: [], composedMessageHash: null, claimSpans: null, determinismHash: '',
     };
     base.determinismHash = hashReport(base);
     return base;
@@ -262,6 +265,7 @@ export function buildReport(outcome: HarnessOutcome): ValidationReport {
     improvementExplanation,
     awkwardWordingNotes,
     composedMessageHash: enriched.composedMessageHash,
+    claimSpans: enriched.claimSpans,
     determinismHash: '',
   };
   report.determinismHash = hashReport(report);
@@ -350,7 +354,16 @@ export function renderReportText(report: ValidationReport): string {
   }
   lines.push(`  ${'TOTAL'.padEnd(34)} ${String(report.baseline!.rubric.total).padStart(2)} → ${String(report.enriched!.rubric.total).padStart(2)} / 100   (difference ${String(report.scoreDifference)})`);
   lines.push('\n## Hard safety gates');
-  for (const g of report.hardGates!.gates) lines.push(`  [${g.passed ? 'PASS' : 'FAIL'}] ${g.id}${g.detail ? ` — ${g.detail}` : ''}`);
+  for (const g of report.hardGates!.gates) {
+    lines.push(`  [${g.passed ? 'PASS' : 'FAIL'}] ${g.id}${g.detail ? ` — ${g.detail}` : ''}`);
+    if (g.diagnostic && !g.passed) {
+      const d = g.diagnostic;
+      lines.push(`        differing field: ${d.differingField}`);
+      lines.push(`        expected hash:   ${d.expectedHash.slice(0, 16)}`);
+      lines.push(`        recomputed hash: ${d.recomputedHash.slice(0, 16)}`);
+      lines.push(`        body differed: ${String(d.bodyDiffered)}   subject differed: ${String(d.subjectDiffered)}   spans differed: ${String(d.claimSpansDiffered)}   provenance differed: ${String(d.provenanceDiffered)}`);
+    }
+  }
   lines.push('\n## Claim ledger');
   report.claimLedger.forEach((e, i) => lines.push(`  [${String(i)}] ${e.claimType}: "${e.text.length > 70 ? `${e.text.slice(0, 70)}…` : e.text}"`));
   lines.push('\n## What materially improved');

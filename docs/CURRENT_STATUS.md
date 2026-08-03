@@ -186,6 +186,41 @@ still cannot reach a real AUTO_REVIEW_PASSED, HUMAN_APPROVED, or deployment-elig
   configured). **No live model call, website access, network request, Gmail access/draft, Sheet write, or
   email send occurred during implementation or tests.**
 
+## Phase 7A4B1 — live-email determinism fix (deterministic; no live model/network/DB/Gmail/Sheets/send)
+
+- **Root cause.** The first fictional LIVE Terra run scored well (baseline 77 → enriched 97, +20) but failed
+  one hard gate, `unstable_claim_spans_or_hash` ("composed message hash not reproducible"). The composition
+  was never non-deterministic: gate 16 in `hard-gates.ts` re-composed from the PINNED FIXTURE `baseEmailDraft`
+  instead of `result.baseDraft` (the actual base). Offline (7A4A) the two coincide so the bug was invisible;
+  live, the Terra-authored base differs, so the fixture recompose yielded a different subject/body → different
+  hash. The quality rubric already recomposed from `result.baseDraft` correctly and passed on the same run,
+  and replaying the saved artifact reproduces its stored hash `0d7e742c…` exactly — proving a gate defect, not
+  real nondeterminism. Differing field: the subject/body inputs to the composed-message hash.
+- **Fix.** Gate 16 now recomposes from `result.baseDraft` (fixture import removed — a safety gate never depends
+  on a test fixture), validates the real body-derived claim spans, and emits a bounded, secret-free diagnostic
+  (differing field, expected vs recomputed hash, body/subject/spans/provenance flags) on failure.
+- **Canonical hash contract.** `computeComposedMessageHash` (exported from `competitor-email-composer.ts`) is
+  the single source of truth reused by the composer, the gate, and the replay. It binds schema version,
+  subject, rendered body, evidence mode, package id/version/hash, selected pattern + contrast ids, enrichment
+  rules version, and the normalized claim ledger (claim text + prospect/competitor evidence refs + pattern/
+  contrast ids). It EXCLUDES ephemeral metadata (provider request/response ids, tokens, cost, latency, report
+  timestamps). Deterministic: sorted keys, sorted evidence-reference arrays, normalized newlines, UTF-8-stable
+  encoding, explicit nulls — all no-ops on well-formed input, so the stored hash is byte-identical.
+- **Claim spans.** New `deriveClaimSpans(body, ledger)` derives exact bounded `{start,end,valid}` offsets from
+  the final body; a forward cursor handles duplicate sentence text unambiguously; the CTA marker is excluded;
+  pure and timestamp/locale-independent. `claimSpans` now persist on the composed artifact and the report.
+- **Offline replay.** New `competitor-email-live-validation-replay` (+ pure `live/replay.ts`) re-derives the
+  package, enrichment, claim spans, composed hash, and hard gates from a saved report and reports
+  reproducibility — FULL mode from a persisted sanitized Terra base draft, REDUCED mode (legacy reports) from
+  the stored rendered fields + fixture provenance. It verifies report + determinism hashes first and makes
+  ZERO Terra/Sol, network, Gmail, Sheets, draft, send, or production-DB calls. Live reports now persist the
+  sanitized `terraBaseDraft` (fictional copy only; excluded from `reportHash`) to enable FULL replay.
+- Status: implemented; lint/typecheck/build green; standard unit suite (`vitest run tests/unit`) passes with 24
+  new determinism cases (canonical-hash sensitivity + invariance, duplicate-span determinism, reproduce-before/
+  pass-after of the exact unstable scenario, FULL/REDUCED replay, altered-artifact integrity, zero-side-effect
+  import scan). **The saved failed artifact replays as REPRODUCIBLE with zero live calls.** Replay must pass
+  before another paid live run (see `docs/OPERATIONS.md`).
+
 ## Phase 17A — outreach tracking & follow-up operations (tracking only; NEVER sends)
 
 - Migration `0026_outreach_tracking.sql` adds six additive `outreach_*` tables and changes no existing

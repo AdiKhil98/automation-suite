@@ -414,6 +414,60 @@ export function buildClaimLedger(
   return ledger;
 }
 
+// ---- stable claim spans (body-derived offsets for every substantive claim) ----
+
+export interface ClaimSpan {
+  claimType: ClaimType;
+  /** The exact claim text this span indexes in the final rendered body. */
+  text: string;
+  /** 0-based start offset into the final rendered body; -1 when the claim text is not a body substring. */
+  start: number;
+  /** Exclusive end offset (start + text.length); -1 when not found. */
+  end: number;
+  /** True iff the body substring [start,end) exactly equals `text` (bounded, verified traceability). */
+  valid: boolean;
+}
+
+/**
+ * Derive stable claim spans from the FINAL rendered body and the claim ledger. Spans follow ledger order,
+ * which mirrors body order by construction (prospect observation → competitor / optional contrast /
+ * cautious consequence → recommendation). A forward-advancing cursor assigns each claim the FIRST
+ * occurrence at or after the previous span's end, so DUPLICATE sentence text maps to distinct, unambiguous
+ * offsets rather than collapsing onto the first match. The CTA claim carries a synthetic marker text
+ * (`cta:<KIND>`) that is intentionally NOT part of the rendered body and is excluded here.
+ *
+ * Pure and deterministic: no randomness, no current-timestamp dependency, no locale/timezone formatting.
+ * Identical (body, ledger) inputs always yield identical spans.
+ */
+export function deriveClaimSpans(finalBody: string, ledger: ClaimLedgerEntry[]): ClaimSpan[] {
+  const spans: ClaimSpan[] = [];
+  let cursor = 0;
+  for (const entry of ledger) {
+    if (entry.claimType === 'CTA') continue;
+    const start = finalBody.indexOf(entry.text, cursor);
+    if (start === -1) {
+      spans.push({ claimType: entry.claimType, text: entry.text, start: -1, end: -1, valid: false });
+      continue;
+    }
+    const end = start + entry.text.length;
+    spans.push({
+      claimType: entry.claimType,
+      text: entry.text,
+      start,
+      end,
+      // Span validation: confirm the indexed body substring exactly matches the claim text.
+      valid: finalBody.slice(start, end) === entry.text,
+    });
+    cursor = end;
+  }
+  return spans;
+}
+
+/** True only when every derived claim span resolved to an exact bounded body substring. */
+export function claimSpansResolved(spans: ClaimSpan[]): boolean {
+  return spans.every((s) => s.valid);
+}
+
 // ---- final-body validation (defense in depth on the composed artifact) ----
 
 export interface EnrichedValidationResult {
