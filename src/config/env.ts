@@ -110,6 +110,24 @@ const envSchema = z.object({
   // generation is unaffected and remains the default path.
   COMPETITOR_EMAIL_ENRICHMENT_ENABLED: boolString(false),
 
+  // --- Phase 7A4B — guarded FICTIONAL live-model email validation (default OFF) ---
+  // Advisory validation only. Even when enabled, a live run additionally requires the shared paid-call
+  // gate (LLM_PROVIDER=openai + ALLOW_PAID_LLM_CALLS=true + OPENAI_API_KEY + verified prices) AND explicit
+  // CLI confirmations (--confirm-live, --fixture synthetic-dental, --confirm-no-real-prospect,
+  // --max-live-calls 2). It uses ONLY the fictional dental scenario, makes at most one Terra + one Sol
+  // call, writes only a local git-ignored report, and enables NO Gmail, Sheets, draft, send, production DB
+  // write, or production go-live decision. Terra GENERATES the base email; Sol performs an ADVISORY
+  // comparative critique (approved routing; production EMAIL_WRITER_MODEL / EMAIL_REVIEWER_MODEL unchanged).
+  COMPETITOR_EMAIL_LIVE_VALIDATION_ENABLED: boolString(false),
+  COMPETITOR_EMAIL_LIVE_VALIDATION_TERRA_MODEL: z.string().default('gpt-5.6-terra'),
+  COMPETITOR_EMAIL_LIVE_VALIDATION_SOL_MODEL: z.string().default('gpt-5.6-sol'),
+  COMPETITOR_EMAIL_LIVE_VALIDATION_TERRA_EFFORT: z.enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']).default('medium'),
+  COMPETITOR_EMAIL_LIVE_VALIDATION_SOL_EFFORT: z.enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']).default('medium'),
+  COMPETITOR_EMAIL_LIVE_VALIDATION_MAX_COST_USD: z.coerce.number().nonnegative().default(0.4),
+  COMPETITOR_EMAIL_LIVE_VALIDATION_MAX_OUTPUT_TOKENS: z.coerce.number().int().positive().default(1_500),
+  COMPETITOR_EMAIL_LIVE_VALIDATION_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),
+  COMPETITOR_EMAIL_LIVE_VALIDATION_RETENTION_DAYS: z.coerce.number().int().positive().default(30),
+
   // --- Phase 4: enrichment ---
   ENRICHMENT_CONTEXT_PROVIDER: z.enum(['facts', 'manual', 'google', 'mock']).default('facts'),
   ENRICHMENT_CANDIDATE_PROVIDER: z.enum(['mock', 'manual', 'search']).default('mock'),

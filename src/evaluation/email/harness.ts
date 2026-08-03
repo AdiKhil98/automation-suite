@@ -124,6 +124,12 @@ export interface HarnessSuccess {
   baselineValidation: EmailValidationResult;
   enriched: ComposedEnrichedEmail;
   emailInputs: EmailInputs;
+  /**
+   * The exact base draft both artifacts were composed from. Phase 7A4A passes the pinned fixture; Phase
+   * 7A4B injects a live Terra-generated draft. Threaded through so the report scores the ACTUAL base used
+   * (never re-reads the fixture), preserving the fair-comparison contract for both milestones.
+   */
+  baseDraft: EmailWriterParsed;
 }
 
 export type HarnessOutcome = HarnessSuccess | HarnessFailure;
@@ -171,7 +177,7 @@ function toPatternEvidenceItem(
  * Run the complete offline pipeline. Every stage uses the real service; a prerequisite that cannot be
  * met returns a typed failure (never a silent prospect-only "success").
  */
-export async function runValidationHarness(): Promise<HarnessOutcome> {
+export async function runValidationHarness(baseDraft: EmailWriterParsed = baseEmailDraft): Promise<HarnessOutcome> {
   const now = FIXTURE_NOW;
 
   // --- Stage 1: real Phase 7A1 selection (persisted to the in-memory research store). ---
@@ -332,13 +338,13 @@ export async function runValidationHarness(): Promise<HarnessOutcome> {
   const emailInputs: EmailInputs = { facts: leadFacts, findings: safeFindings, demo: null };
   const validationCtx = buildEmailContext(emailInputs);
 
-  const baselineParsed = emailWriterSchema.safeParse(baseEmailDraft);
-  const baselineRendered = renderEmail(baseEmailDraft, emailInputs);
-  const baselineValidation = validateEmail(baseEmailDraft, validationCtx);
+  const baselineParsed = emailWriterSchema.safeParse(baseDraft);
+  const baselineRendered = renderEmail(baseDraft, emailInputs);
+  const baselineValidation = validateEmail(baseDraft, validationCtx);
   const baseline: RenderedArtifact = {
     subject: baselineRendered.subject,
     body: baselineRendered.body,
-    competitorEvidenceUsed: baseEmailDraft.competitor_evidence_used,
+    competitorEvidenceUsed: baseDraft.competitor_evidence_used,
     schemaVersion: EMAIL_SCHEMA_VERSION,
     schemaOk: baselineParsed.success,
     rendered: baselineRendered,
@@ -359,7 +365,7 @@ export async function runValidationHarness(): Promise<HarnessOutcome> {
   if (!outcome.ok) return fail('plan', `enrichment planning failed closed: ${outcome.reason}`);
 
   const enriched = composeEnrichedEmail({
-    prospectDraft: baseEmailDraft,
+    prospectDraft: baseDraft,
     emailInputs,
     validationCtx,
     plan: outcome.plan,
@@ -368,6 +374,7 @@ export async function runValidationHarness(): Promise<HarnessOutcome> {
 
   return {
     ok: true,
+    baseDraft,
     scenarioLabel: SCENARIO_LABEL,
     leadId: SYNTHETIC_LEAD_ID,
     researchOutcome: research.selection.outcome,

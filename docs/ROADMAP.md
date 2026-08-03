@@ -40,7 +40,7 @@ No phase begins before the previous one is approved with `APPROVE PHASE X`.
 | 4 | Independent enrichment & website discovery | `phase-4-enrichment` | ✅ approved |
 | 5 | Website capture & evidence extraction | `phase-5-website-capture` | ✅ approved |
 | 6 | AI website audit & opportunity analysis | `phase-6-ai-audit` | approved; Gate B deferred |
-| 7 | Competitor research (optional module) | `phase-7-competitor-research` | 7A1 DONE (`phase-7a1-competitor-candidates`); 7A2 DONE (`phase-7a2-competitor-evidence`); 7A3A DONE (`phase-7a3a-competitor-patterns`); 7A3B DONE (`phase-7a3b-competitor-email-enrichment`); 7A4 planned |
+| 7 | Competitor research (optional module) | `phase-7-competitor-research` | 7A1 DONE (`phase-7a1-competitor-candidates`); 7A2 DONE (`phase-7a2-competitor-evidence`); 7A3A DONE (`phase-7a3a-competitor-patterns`); 7A3B DONE (`phase-7a3b-competitor-email-enrichment`); 7A4A DONE (offline synthetic harness); 7A4B DONE (`phase-7a4b-live-model-validation`, guarded live-model validation; mock default, no live run); 7A4C (operator go/no-go) pending |
 | 8 | Demo template & demo decision engine | `phase-8-demo-generation` | approved |
 | 9 | Email writer & reviewer | `phase-9-email-generation` | approved |
 | 10 | Review dashboard | `phase-10-review-dashboard` | approved |

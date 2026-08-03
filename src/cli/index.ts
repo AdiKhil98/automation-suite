@@ -53,6 +53,9 @@ import { demoV2OrchestrationFixtureCommand } from './commands/demo-v2-orchestrat
 import { competitorEmailValidationPlanCommand } from './commands/competitor-email-validation-plan.js';
 import { competitorEmailValidationRunCommand } from './commands/competitor-email-validation-run.js';
 import { competitorEmailValidationReviewCommand } from './commands/competitor-email-validation-review.js';
+import { competitorEmailLiveValidationPlanCommand } from './commands/competitor-email-live-validation-plan.js';
+import { competitorEmailLiveValidationRunCommand } from './commands/competitor-email-live-validation-run.js';
+import { competitorEmailLiveValidationReviewCommand } from './commands/competitor-email-live-validation-review.js';
 import {
   demoV2PreviewCommand, demoV2RenderCommand, demoV2RenderHashCommand, demoV2ScreenshotsCommand,
   type RenderLanguage,
@@ -121,6 +124,31 @@ program
   .option('--report <path>', 'path to a saved report.json')
   .option('--out <dir>', 'directory containing report.json (git-ignored)')
   .action((opts: { report?: string; out?: string }) => competitorEmailValidationReviewCommand(opts));
+
+program
+  .command('competitor-email-live-validation-plan')
+  .description('Phase 7A4B: print the fictional fixture, Terra/Sol routing, the two-call budget, stages, and required live guards. Read-only; no model/network/DB.')
+  .action(() => withConfigOnly((config) => { competitorEmailLiveValidationPlanCommand(config); return Promise.resolve(); }));
+
+program
+  .command('competitor-email-live-validation-run')
+  .description('Phase 7A4B: guarded fictional live-model validation (Terra base + Sol advisory critique). Mock by default; --confirm-live requires all guards. At most one Terra + one Sol call; local git-ignored report only. No production DB, Gmail, Sheets, draft, or send.')
+  .option('--confirm-live', 'make real Terra + Sol calls (requires every guard; never falls back to mock)')
+  .option('--fixture <id>', 'fictional fixture id (must be synthetic-dental)')
+  .option('--confirm-no-real-prospect', 'confirm the fixture is fictional and no real prospect is involved')
+  .option('--max-live-calls <n>', 'maximum live model calls (must be 2)')
+  .option('--json', 'print the report as JSON instead of text')
+  .option('--no-write', 'do not write the report to .local-data/competitor-email-validation/live/')
+  .option('--out <dir>', 'output directory (git-ignored)')
+  .action((opts: { confirmLive?: boolean; fixture?: string; confirmNoRealProspect?: boolean; maxLiveCalls?: string; json?: boolean; write?: boolean; out?: string }) =>
+    withConfigOnly((config, logger) => competitorEmailLiveValidationRunCommand(config, logger, opts)));
+
+program
+  .command('competitor-email-live-validation-review')
+  .description('Phase 7A4B: re-render a saved live validation report (routing, deterministic result, Sol advisory, combined status) and verify its report hash. Read-only.')
+  .option('--report <path>', 'path to a saved live-report json')
+  .option('--out <dir>', 'directory containing latest.json (git-ignored)')
+  .action((opts: { report?: string; out?: string }) => competitorEmailLiveValidationReviewCommand(opts));
 
 program
   .command('demo-v2-render')

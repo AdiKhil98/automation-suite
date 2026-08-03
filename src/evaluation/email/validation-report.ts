@@ -11,7 +11,6 @@ import { createHash } from 'node:crypto';
 import { buildEmailContext } from '../../domain/email/email-render.js';
 import { composeEnrichedEmail } from '../../domain/email/competitor-email-composer.js';
 import { PRIMARY_CTAS } from '../../domain/email/email-types.js';
-import { baseEmailDraft } from '../../fixtures/competitor-email-validation/synthetic-dental-scenario.js';
 import { type ConsequenceLabel } from '../../domain/competitor/pattern-constants.js';
 import { evaluateHardGates, type HardGateReport } from './hard-gates.js';
 import { categoryPoints, scoreEmail, type RubricInput, type RubricScore } from './email-quality-rubric.js';
@@ -90,7 +89,7 @@ function buildEnrichedRubricInput(result: HarnessSuccess): RubricInput {
   const competitorEntry = enriched.ledger.find((e) => e.claimType === 'COMPETITOR_PATTERN');
   const ev = enriched.enrichedValidation.violations;
   const recomposed = composeEnrichedEmail({
-    prospectDraft: baseEmailDraft, emailInputs: result.emailInputs, validationCtx: ctx, plan, pkg: result.enrichmentPackage,
+    prospectDraft: result.baseDraft, emailInputs: result.emailInputs, validationCtx: ctx, plan, pkg: result.enrichmentPackage,
   });
   const alignedCategory = plan.selection.alignment.evidenceCategory;
 
@@ -129,13 +128,14 @@ function buildEnrichedRubricInput(result: HarnessSuccess): RubricInput {
 
 function buildBaselineRubricInput(result: HarnessSuccess): RubricInput {
   const ctx = buildEmailContext(result.emailInputs);
-  const paras = baseEmailDraft.email_body.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
+  const baseDraft = result.baseDraft;
+  const paras = baseDraft.email_body.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
   const prospectCited =
-    baseEmailDraft.evidence_ids.every((id) => ctx.availableEvidenceIds.has(id)) &&
-    baseEmailDraft.evidence_ids.some((id) => ctx.acceptedFindingIds.has(id));
+    baseDraft.evidence_ids.every((id) => ctx.availableEvidenceIds.has(id)) &&
+    baseDraft.evidence_ids.some((id) => ctx.acceptedFindingIds.has(id));
   return {
     mode: 'NONE',
-    modelBody: baseEmailDraft.email_body,
+    modelBody: baseDraft.email_body,
     renderedBody: result.baseline.body,
     subject: result.baseline.subject,
     modelParagraphs: paras,
@@ -150,7 +150,7 @@ function buildBaselineRubricInput(result: HarnessSuccess): RubricInput {
     consequenceSentence: null,
     recommendationText: paras[1] ?? null,
     recommendationCount: paras.length >= 2 ? 1 : 0,
-    ctaValid: (PRIMARY_CTAS as readonly string[]).includes(baseEmailDraft.primary_cta),
+    ctaValid: (PRIMARY_CTAS as readonly string[]).includes(baseDraft.primary_cta),
     prospectEvidenceCited: prospectCited,
     hashReproducible: true,
     packageIntegrityOk: !result.baseline.body.includes(result.plan.competitorSentence),
@@ -254,11 +254,11 @@ export function buildReport(outcome: HarnessOutcome): ValidationReport {
       claimType: e.claimType, text: e.text, patternId: e.patternId, contrastId: e.contrastId,
       prospectEvidenceIds: e.prospectEvidenceIds, competitorEvidenceIds: e.competitorEvidenceIds,
     })),
-    baseline: { subject: outcome.baseline.subject, body: outcome.baseline.body, evidenceMode: outcome.baseline.competitorEvidenceUsed, schemaVersion: outcome.baseline.schemaVersion, rubric: baselineScore, wordCount: wordCount(baseEmailDraft.email_body) },
+    baseline: { subject: outcome.baseline.subject, body: outcome.baseline.body, evidenceMode: outcome.baseline.competitorEvidenceUsed, schemaVersion: outcome.baseline.schemaVersion, rubric: baselineScore, wordCount: wordCount(outcome.baseDraft.email_body) },
     enriched: { subject: enriched.rendered.subject, body: enriched.rendered.body, evidenceMode: enriched.artifact.competitor_evidence_used, schemaVersion: enriched.schemaVersion, rubric: enrichedScore, wordCount: wordCount(enriched.artifact.email_body) },
     scoreDifference: diff,
     hardGates,
-    lengthComparison: { baselineWords: wordCount(baseEmailDraft.email_body), enrichedWords: wordCount(enriched.artifact.email_body), delta: wordCount(enriched.artifact.email_body) - wordCount(baseEmailDraft.email_body) },
+    lengthComparison: { baselineWords: wordCount(outcome.baseDraft.email_body), enrichedWords: wordCount(enriched.artifact.email_body), delta: wordCount(enriched.artifact.email_body) - wordCount(outcome.baseDraft.email_body) },
     improvementExplanation,
     awkwardWordingNotes,
     composedMessageHash: enriched.composedMessageHash,
