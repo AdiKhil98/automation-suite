@@ -50,6 +50,9 @@ import { outreachComposePreviewCommand } from './commands/outreach-compose-previ
 import { withConfigOnly, withContext } from './context.js';
 import { websiteVerificationStatusCommand } from './commands/website-verification-status.js';
 import { demoV2OrchestrationFixtureCommand } from './commands/demo-v2-orchestrate-fixture.js';
+import { competitorEmailValidationPlanCommand } from './commands/competitor-email-validation-plan.js';
+import { competitorEmailValidationRunCommand } from './commands/competitor-email-validation-run.js';
+import { competitorEmailValidationReviewCommand } from './commands/competitor-email-validation-review.js';
 import {
   demoV2PreviewCommand, demoV2RenderCommand, demoV2RenderHashCommand, demoV2ScreenshotsCommand,
   type RenderLanguage,
@@ -98,6 +101,26 @@ program
   .requiredOption('--fixture <name>', 'premium-german-dental | english-specialist-clinic | french-clinic | hebrew-rtl-clinic | arabic-rtl-clinic')
   .option('--stage <name>', 'intelligence | content | translation | assets | brief | plan | report', 'report')
   .action((opts: { fixture: string; stage?: string }) => demoV2OrchestrationFixtureCommand(opts));
+
+program
+  .command('competitor-email-validation-plan')
+  .description('Phase 7A4A: print the synthetic scenario, pipeline stages, rubric, and hard gates. Read-only; no network/DB/model/Gmail.')
+  .action(() => { competitorEmailValidationPlanCommand(); });
+
+program
+  .command('competitor-email-validation-run')
+  .description('Phase 7A4A: run the fixture-only baseline-vs-enriched competitor email quality comparison and write a local, git-ignored report. No production DB write, network, live model, Gmail, Sheets, draft, or send.')
+  .option('--json', 'print the report as JSON instead of text')
+  .option('--no-write', 'do not write the report to .local-data/competitor-email-validation/')
+  .option('--out <dir>', 'output directory (git-ignored)')
+  .action((opts: { json?: boolean; write?: boolean; out?: string }) => competitorEmailValidationRunCommand(opts));
+
+program
+  .command('competitor-email-validation-review')
+  .description('Phase 7A4A: re-render a saved validation report with claim traceability and verify its determinism hash. Read-only.')
+  .option('--report <path>', 'path to a saved report.json')
+  .option('--out <dir>', 'directory containing report.json (git-ignored)')
+  .action((opts: { report?: string; out?: string }) => competitorEmailValidationReviewCommand(opts));
 
 program
   .command('demo-v2-render')
