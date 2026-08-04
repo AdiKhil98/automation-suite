@@ -57,6 +57,8 @@ import { competitorEmailLiveValidationPlanCommand } from './commands/competitor-
 import { competitorEmailLiveValidationRunCommand } from './commands/competitor-email-live-validation-run.js';
 import { competitorEmailLiveValidationReviewCommand } from './commands/competitor-email-live-validation-review.js';
 import { competitorEmailLiveValidationReplayCommand } from './commands/competitor-email-live-validation-replay.js';
+import { competitorEmailLiveValidationRecomposeCommand } from './commands/competitor-email-live-validation-recompose.js';
+import { competitorEmailLiveValidationRereviewCommand } from './commands/competitor-email-live-validation-rereview.js';
 import {
   demoV2PreviewCommand, demoV2RenderCommand, demoV2RenderHashCommand, demoV2ScreenshotsCommand,
   type RenderLanguage,
@@ -158,6 +160,29 @@ program
   .option('--out <dir>', 'directory containing latest.json (git-ignored)')
   .option('--json', 'print the replay result as JSON instead of text')
   .action((opts: { report?: string; out?: string; json?: boolean }) => competitorEmailLiveValidationReplayCommand(opts));
+
+program
+  .command('competitor-email-live-validation-recompose')
+  .description('Phase 7A4B2: OFFLINE recomposition of a saved full live report — reuse the exact saved Terra base draft, rebuild the enriched email with current deterministic templates, rerun the rubric + all hard gates, and write a NEW local report (never overwriting the source). Zero Terra/Sol, network, Gmail, Sheets, draft, send, or production DB.')
+  .option('--report <path>', 'path to a saved live-report json')
+  .option('--out <dir>', 'directory containing latest.json (git-ignored)')
+  .option('--no-write', 'do not write the recomposition report')
+  .option('--json', 'print the recomposition result as JSON instead of text')
+  .action((opts: { report?: string; out?: string; write?: boolean; json?: boolean }) => competitorEmailLiveValidationRecomposeCommand(opts));
+
+program
+  .command('competitor-email-live-validation-rereview')
+  .description('Phase 7A4B2: guarded Sol-ONLY re-review — reuse the exact saved Terra base draft (no Terra call), recompose with current templates, require deterministic PASS, then make EXACTLY ONE Sol advisory call under --confirm-live + all guards. Mock by default; never retries/falls back; writes a NEW report linked to the source. No production DB, Gmail, Sheets, draft, or send.')
+  .option('--report <path>', 'path to a valid full source live-report json')
+  .option('--confirm-live', 'make the single real Sol call (requires every guard; never falls back to mock)')
+  .option('--fixture <id>', 'fictional fixture id (must be synthetic-dental)')
+  .option('--confirm-no-real-prospect', 'confirm the fixture is fictional and no real prospect is involved')
+  .option('--max-live-calls <n>', 'maximum live model calls (must be 1)')
+  .option('--json', 'print the report as JSON instead of text')
+  .option('--no-write', 'do not write the re-review report')
+  .option('--out <dir>', 'output directory (git-ignored)')
+  .action((opts: { report?: string; confirmLive?: boolean; fixture?: string; confirmNoRealProspect?: boolean; maxLiveCalls?: string; json?: boolean; write?: boolean; out?: string }) =>
+    withConfigOnly((config, logger) => competitorEmailLiveValidationRereviewCommand(config, logger, opts)));
 
 program
   .command('demo-v2-render')

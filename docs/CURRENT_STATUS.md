@@ -221,6 +221,52 @@ still cannot reach a real AUTO_REVIEW_PASSED, HUMAN_APPROVED, or deployment-elig
   import scan). **The saved failed artifact replays as REPRODUCIBLE with zero live calls.** Replay must pass
   before another paid live run (see `docs/OPERATIONS.md`).
 
+## Phase 7A4B2 — competitor email copy-flow fix + Sol-only re-review (deterministic; no live model/network/DB/Gmail/Sheets/send)
+
+- **Root cause.** The first fictional LIVE run passed deterministically (baseline 77 → enriched 97, Sol
+  preferred ENRICHED 89 vs 80) but combined status was `REQUIRES_REVISION`: the competitor section rendered a
+  fixed cautious-consequence sentence that duplicated the Terra recommendation's booking-friction consequence,
+  and a hardcoded contrast (`…not currently surfaced the same way.`) plus the frame verb "surface" read as
+  mechanical rubric language. Both strings rendered unconditionally.
+- **Revised rendering rule (structured, not semantic).** When the base draft structurally carries an aligned
+  prospect observation AND an aligned recommendation, the external competitor section is EXACTLY ONE
+  conversational competitor-pattern sentence. A separate consequence renders only when the base lacks an
+  aligned recommendation; a contrast only when the base lacks an aligned prospect observation (and a contrast
+  exists); otherwise omitted. Driven by the presence/absence of the structured `PROSPECT_OBSERVATION` /
+  `RECOMMENDATION` sections (`decideCompetitorRender`), never by free-text guessing.
+- **Before → after:** `All three comparable nearby clinics surface a booking action directly on their homepage.
+  On your own site this option is not currently surfaced the same way. That may make booking harder…` →
+  `All three comparable nearby clinics make booking available directly from their homepage.` Flow: Terra
+  observation → one competitor sentence → Terra recommendation → Terra CTA. Scores (77 → 97) and the exact
+  three-of-three count unchanged; composed hash changes by design (`09dbc2bd…` → `ad6ae0c4…`).
+- **Claim ledger** now contains ONLY externally rendered sentences (`PROSPECT_OBSERVATION → COMPETITOR_PATTERN
+  → RECOMMENDATION → CTA`); the contrast/consequence label + evidence references remain internal package/plan
+  provenance, so material alignment and the rubric are unaffected.
+- **Category templates** are fixed, conversational, count-safe, no "surface" (booking / phone / direct
+  messaging only — no capability broadening). A new 17th hard gate `structured_copy_redundancy`
+  (`detectStructuredRedundancy`, derived from the structured ledger — never word overlap) fails closed if the
+  same approved consequence meaning would ever be expressed twice.
+- **New offline command** `competitor-email-live-validation-recompose` verifies a saved report's integrity,
+  reuses the exact saved Terra base draft, rebuilds the enriched email with current templates, reruns the
+  rubric + all hard gates, and writes a NEW local report (never overwriting the source). Zero model/network/
+  DB/Gmail/Sheets/draft/send. The offline recomposition of the saved live artifact is a deterministic PASS
+  (17/17 gates, 77 → 97).
+- **New guarded command** `competitor-email-live-validation-rereview` reuses the exact stored Terra draft (NO
+  Terra call), recomposes, REQUIRES deterministic PASS before Sol, then makes EXACTLY ONE Sol call
+  (`gpt-5.6-sol`) over sanitized fictional data — mock by default, all live guards required, `--max-live-calls
+  1`, no retry/fallback, no email modified after Sol. Writes a new report linked to the source; never runs a
+  production DB, Gmail, Sheets, draft, or send path. **The live Sol-only re-review was NOT run during
+  implementation.**
+- **Acceptance policy unchanged.** `READY_FOR_OPERATOR_REVIEW` still requires deterministic PASS + a clean Sol
+  advisory; any Sol critical issue still yields `REQUIRES_REVISION`.
+- Status: implemented; lint/typecheck/build green; full unit suite (1191) passes, incl. a new copy-flow suite
+  (one-sentence insertion, three-of-three count preserved, mechanical wording absent, no redundant
+  contrast/consequence, Terra opening/recommendation/subject unchanged, ledger = rendered claims only,
+  internal provenance preserved, structured redundancy gate, structural-not-semantic decision, count-safe
+  templates, recompose zero-model + fail-closed, re-review zero-Terra / exactly-one-Sol / requires-PASS /
+  one-call-cap / no-fallback, and DB/Gmail/Sheets/draft/send import scans). **No Terra, Sol, network,
+  production DB, Gmail, Sheets, draft, or send operation occurred during implementation or tests.**
+
 ## Phase 17A — outreach tracking & follow-up operations (tracking only; NEVER sends)
 
 - Migration `0026_outreach_tracking.sql` adds six additive `outreach_*` tables and changes no existing

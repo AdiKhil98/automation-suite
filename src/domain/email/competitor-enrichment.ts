@@ -72,12 +72,28 @@ export const CONSEQUENCE_TEMPLATES: Record<ConsequenceLabel, string> = {
   LOCATION_INFORMATION_ACCESS: 'That places key location information deeper in the current path.',
 };
 
-/** Fixed, category-scoped presence frame for the anonymized competitor sentence. Factual, non-performance. */
+/**
+ * Fixed, category-scoped conversational template for the anonymized competitor sentence (§4). Each is
+ * factual, anonymized, count-safe (the exact stored `wordingText` count phrase is inserted verbatim),
+ * concise, non-accusatory, and free of any performance/volume/ranking claim. Deliberately avoids the word
+ * "surface"/"surfaced" — the previous frame read as inserted rubric language. Only the three currently
+ * enrichable categories (booking + the two contact channels — those carrying a consequence label and a
+ * prospect alignment) have a template; this NEVER broadens evidence capabilities. Location/hours and FAQ
+ * templates are documented as future examples but are not aligned/enrichable today, so none is added here.
+ */
 const COMPETITOR_PATTERN_FRAMES: Partial<Record<EvidenceCategory, (wording: string) => string>> = {
-  BOOKING_CTA_VISIBLE: (w) => `${capitalize(w)} surface a booking action directly on their homepage.`,
-  PHONE_VISIBLE: (w) => `${capitalize(w)} show a phone number directly on their homepage.`,
+  BOOKING_CTA_VISIBLE: (w) => `${capitalize(w)} make booking available directly from their homepage.`,
+  PHONE_VISIBLE: (w) => `${capitalize(w)} show a direct phone option on their homepage.`,
   WHATSAPP_OR_DIRECT_MESSAGE_VISIBLE: (w) => `${capitalize(w)} offer a direct messaging option on their homepage.`,
 };
+
+/**
+ * Fixed, natural contrast sentence used ONLY in the fallback case where the base draft structurally lacks
+ * an aligned prospect observation (see §2/§3). Deliberately avoids the retired mechanical phrasing
+ * ("surface"/"surfaced the same way", "on your own site this option…") that Sol flagged. In the current
+ * synthetic scenario the base always carries an aligned prospect observation, so this is not rendered.
+ */
+const CONTRAST_TEMPLATE = 'Your homepage does not currently include that option.';
 
 function capitalize(text: string): string {
   return text.length === 0 ? text : text[0]!.toUpperCase() + text.slice(1);
@@ -312,7 +328,7 @@ export function planEnrichment(req: EnrichmentRequest): EnrichmentOutcome {
   const competitorSentence = frame(pattern.wordingText!);
   const consequenceSentence = CONSEQUENCE_TEMPLATES[consequenceLabel];
   const contrast = contrastsByCategory.get(pattern.category) ?? null;
-  const contrastSentence = contrast ? 'On your own site this option is not currently surfaced the same way.' : null;
+  const contrastSentence = contrast ? CONTRAST_TEMPLATE : null;
 
   return {
     ok: true,
@@ -333,28 +349,88 @@ export function planEnrichment(req: EnrichmentRequest): EnrichmentOutcome {
   };
 }
 
+// ---- structured render decision (§2/§3: one competitor sentence by default) ----
+
+/**
+ * Whether the external competitor section should additionally render a contrast and/or a cautious
+ * consequence, decided from STRUCTURED base-composition facts (never free-text semantic guessing).
+ */
+export interface CompetitorRenderDecision {
+  /** The base draft carries an aligned prospect observation (its opening structured section). */
+  baseHasAlignedProspectObservation: boolean;
+  /** The base draft carries an aligned recommendation/consequence (a following structured section). */
+  baseHasAlignedRecommendation: boolean;
+  /** Render the deterministic prospect-contrast sentence in the competitor section. */
+  renderContrast: boolean;
+  /** Render the fixed cautious-consequence sentence in the competitor section. */
+  renderConsequence: boolean;
+}
+
+/**
+ * Decide the competitor-section content from structured base facts (§3). By DEFAULT the section contains
+ * ONLY the competitor-pattern sentence. A separate consequence is rendered ONLY when the base plan
+ * DEMONSTRABLY lacks an aligned recommendation/consequence; a separate contrast ONLY when the base plan
+ * demonstrably lacks an aligned prospect observation (and the package actually holds a contrast). When the
+ * base already supplies both, the extra sentences are omitted — the contrast/consequence remain available
+ * as internal provenance on the plan. If a lack cannot be proven, the extra sentence is omitted (fail-safe).
+ */
+export function decideCompetitorRender(
+  baseHasAlignedProspectObservation: boolean,
+  baseHasAlignedRecommendation: boolean,
+  hasContrast: boolean,
+): CompetitorRenderDecision {
+  return {
+    baseHasAlignedProspectObservation,
+    baseHasAlignedRecommendation,
+    renderConsequence: !baseHasAlignedRecommendation,
+    renderContrast: hasContrast && !baseHasAlignedProspectObservation,
+  };
+}
+
 // ---- composition + ledger ----
 
 /**
- * Build the explicit ordered composition sections for the email BODY (greeting/CTA/signoff are added
- * later by the deterministic renderer). Order: prospect observation → competitor pattern (+ optional
- * contrast) + cautious consequence → recommendation. The competitor + consequence are ONE paragraph
- * (the single competitor section). `prospectParagraphs` are the model's prospect-only body paragraphs.
+ * Build the explicit ordered composition sections for the email BODY (greeting/CTA/signoff are added later
+ * by the deterministic renderer). Order: prospect observation → competitor section → recommendation. The
+ * competitor section holds ONE concise competitor-pattern sentence by default; a contrast/consequence is
+ * added only when `decideCompetitorRender` proves the base structurally lacks that aligned element.
+ * `prospectParagraphs` are the base (Terra) prospect-only body paragraphs; the base is a single-aligned-issue
+ * prospect draft, so its opening paragraph IS the aligned prospect observation and its remainder the aligned
+ * recommendation. Presence/absence of those structured sections — not word matching — drives the decision.
  */
 export function buildCompositionSections(plan: EnrichmentPlan, prospectParagraphs: string[]): CompositionSection[] {
   const paragraphs = prospectParagraphs.map((p) => p.trim()).filter(Boolean);
-  const sections: CompositionSection[] = [];
   const opening = paragraphs[0] ?? '';
+  const recommendation = paragraphs.slice(1).join('\n\n').trim();
+  const decision = decideCompetitorRender(opening.length > 0, recommendation.length > 0, plan.contrastSentence !== null);
+
+  const sections: CompositionSection[] = [];
   sections.push({ kind: 'PROSPECT_OBSERVATION', text: opening });
 
   const competitorParts = [plan.competitorSentence];
-  if (plan.contrastSentence) competitorParts.push(plan.contrastSentence);
-  competitorParts.push(plan.consequenceSentence);
+  if (decision.renderContrast && plan.contrastSentence) competitorParts.push(plan.contrastSentence);
+  if (decision.renderConsequence) competitorParts.push(plan.consequenceSentence);
   sections.push({ kind: 'COMPETITOR_PATTERN', text: competitorParts.join(' ') });
 
-  const recommendation = paragraphs.slice(1).join('\n\n').trim();
   if (recommendation) sections.push({ kind: 'RECOMMENDATION', text: recommendation });
   return sections;
+}
+
+/**
+ * Re-derive the competitor-render decision from BUILT sections (structural, not semantic): the presence of a
+ * non-empty PROSPECT_OBSERVATION / RECOMMENDATION section reflects exactly the base facts
+ * `buildCompositionSections` used, so the ledger, redundancy gate, and final-body validator stay consistent
+ * with what was rendered without re-parsing prose.
+ */
+function decisionFromSections(plan: EnrichmentPlan, sections: CompositionSection[]): CompetitorRenderDecision {
+  const opening = sections.find((s) => s.kind === 'PROSPECT_OBSERVATION');
+  const recommendation = sections.find((s) => s.kind === 'RECOMMENDATION');
+  const hasContrast = plan.contrastSentence !== null && plan.selection.contrast !== null;
+  return decideCompetitorRender(
+    Boolean(opening && opening.text.trim().length > 0),
+    Boolean(recommendation && recommendation.text.trim().length > 0),
+    hasContrast,
+  );
 }
 
 /** Render the enriched email BODY (inner content only) from the composition sections. */
@@ -376,6 +452,9 @@ export function buildClaimLedger(
   const primaryEvidenceId = plan.selection.primaryIssue.evidenceId;
   const pattern = plan.selection.pattern;
   const contrast = plan.selection.contrast;
+  // The ledger must contain ONLY sentences actually rendered externally (§2). The contrast/consequence
+  // provenance is preserved on `plan.selection` regardless of whether their sentences were rendered.
+  const decision = decisionFromSections(plan, sections);
 
   for (const section of sections) {
     if (section.kind === 'PROSPECT_OBSERVATION') {
@@ -390,18 +469,20 @@ export function buildClaimLedger(
         prospectEvidenceIds: [], patternId: pattern.patternId, contrastId: null,
         competitorEvidenceIds: [...pattern.evidenceItemIds], externallySafe: true,
       });
-      if (plan.contrastSentence && contrast) {
+      if (decision.renderContrast && plan.contrastSentence && contrast) {
         ledger.push({
           claimType: 'PROSPECT_CONTRAST', text: plan.contrastSentence,
           prospectEvidenceIds: [contrast.prospectEvidenceRef], patternId: pattern.patternId, contrastId: contrast.contrastId,
           competitorEvidenceIds: [], externallySafe: true,
         });
       }
-      ledger.push({
-        claimType: 'CAUTIOUS_CONSEQUENCE', text: plan.consequenceSentence,
-        prospectEvidenceIds: [], patternId: pattern.patternId,
-        contrastId: contrast?.contrastId ?? null, competitorEvidenceIds: [], externallySafe: true,
-      });
+      if (decision.renderConsequence) {
+        ledger.push({
+          claimType: 'CAUTIOUS_CONSEQUENCE', text: plan.consequenceSentence,
+          prospectEvidenceIds: [], patternId: pattern.patternId,
+          contrastId: contrast?.contrastId ?? null, competitorEvidenceIds: [], externallySafe: true,
+        });
+      }
     } else if (section.kind === 'RECOMMENDATION') {
       ledger.push({
         claimType: 'RECOMMENDATION', text: section.text,
@@ -412,6 +493,41 @@ export function buildClaimLedger(
   }
   void pkg;
   return ledger;
+}
+
+// ---- structured redundancy gate (§5: no duplicated approved consequence meaning) ----
+
+/**
+ * Deterministic, STRUCTURED redundancy detection (never word-overlap heuristics). It fails when the enriched
+ * copy would express the same approved consequence meaning more than once:
+ *   1. the competitor section renders a cautious consequence whose label is ALSO represented by the base's
+ *      following recommendation/consequence section (the exact Sol-flagged "stated twice" defect);
+ *   2. more than one externally rendered competitor-section sentence serves the same approved consequence
+ *      label (a rendered contrast + a rendered consequence both carry the pattern's single label);
+ *   3. an external contrast is rendered even though the base already supplies the aligned prospect
+ *      observation, so the contrast merely repeats the opening observation.
+ * Derived purely from the structured claim ledger, so it mirrors exactly what was rendered externally. The
+ * base's aligned prospect observation / recommendation are the corresponding structured ledger entries.
+ */
+export function detectStructuredRedundancy(ledger: ClaimLedgerEntry[]): string[] {
+  const violations: string[] = [];
+  const nonEmpty = (kind: ClaimType): boolean => ledger.some((e) => e.claimType === kind && e.text.trim().length > 0);
+  const baseHasAlignedProspectObservation = nonEmpty('PROSPECT_OBSERVATION');
+  const baseHasAlignedRecommendation = nonEmpty('RECOMMENDATION');
+  const consequenceRendered = ledger.some((e) => e.claimType === 'CAUTIOUS_CONSEQUENCE');
+  const contrastRendered = ledger.some((e) => e.claimType === 'PROSPECT_CONTRAST');
+
+  if (consequenceRendered && baseHasAlignedRecommendation) {
+    violations.push('redundant_consequence_with_base_recommendation');
+  }
+  if (consequenceRendered && contrastRendered) {
+    // Contrast and cautious consequence both carry the pattern's single approved consequence label.
+    violations.push('redundant_multiple_sentences_same_consequence_label');
+  }
+  if (contrastRendered && baseHasAlignedProspectObservation) {
+    violations.push('redundant_contrast_repeats_prospect_observation');
+  }
+  return violations;
 }
 
 // ---- stable claim spans (body-derived offsets for every substantive claim) ----
@@ -491,11 +607,16 @@ export function validateEnrichedComposition(
   const violations: string[] = [];
   const lower = finalBody.toLowerCase();
   const pattern = plan.selection.pattern;
+  // What was actually rendered externally (§2) — consequence/contrast checks apply only when rendered.
+  const consequenceRendered = ledger.some((e) => e.claimType === 'CAUTIOUS_CONSEQUENCE');
+  const contrastRendered = ledger.some((e) => e.claimType === 'PROSPECT_CONTRAST');
 
   // 1. The exact anonymized competitor sentence must appear verbatim in the body.
   if (!finalBody.includes(plan.competitorSentence)) violations.push('competitor_sentence_not_in_body');
-  // 2. The exact consequence-template sentence must appear verbatim.
-  if (!finalBody.includes(plan.consequenceSentence)) violations.push('consequence_sentence_not_in_body');
+  // 2. When rendered, the exact consequence-template sentence must appear verbatim.
+  if (consequenceRendered && !finalBody.includes(plan.consequenceSentence)) violations.push('consequence_sentence_not_in_body');
+  // 2b. When rendered, the exact contrast sentence must appear verbatim.
+  if (contrastRendered && plan.contrastSentence && !finalBody.includes(plan.contrastSentence)) violations.push('contrast_sentence_not_in_body');
 
   // 3. Exact stored counts preserved: the wording form must match the pattern's counts, and the anonymized
   //    count phrase must be exactly the package's wordingText (no fabricated "two of three").
@@ -507,10 +628,15 @@ export function validateEnrichedComposition(
     violations.push('competitor_count_form_inconsistent');
   }
 
-  // 4. Consequence must come from the fixed template table for the pattern's consequence label.
-  const label = pattern.consequenceLabel;
-  if (!label || !CONSEQUENCE_LABELS.includes(label)) violations.push('consequence_label_unsupported');
-  else if (plan.consequenceSentence !== CONSEQUENCE_TEMPLATES[label]) violations.push('consequence_not_from_template');
+  // 4. When rendered, the consequence must come from the fixed template table for the pattern's label.
+  if (consequenceRendered) {
+    const label = pattern.consequenceLabel;
+    if (!label || !CONSEQUENCE_LABELS.includes(label)) violations.push('consequence_label_unsupported');
+    else if (plan.consequenceSentence !== CONSEQUENCE_TEMPLATES[label]) violations.push('consequence_not_from_template');
+  }
+
+  // 4b. Structured redundancy: never express the same approved consequence meaning twice (§5).
+  violations.push(...detectStructuredRedundancy(ledger));
 
   // 5. Identity leakage: no competitor name token (>= 4 chars) or domain may appear in the final body.
   for (const raw of pkg.identityTokens) {

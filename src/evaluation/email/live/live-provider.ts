@@ -74,3 +74,29 @@ export function buildLiveValidationProvider(config: AppConfig, logger: Logger, o
 
   return { provider: new OpenAiResponsesProvider({ apiKey: config.OPENAI_API_KEY, logger }), mode: 'LIVE' };
 }
+
+/**
+ * Phase 7A4B2 — provider builder for the guarded Sol-ONLY re-review. Identical fail-closed posture, but the
+ * budget ceiling is EXACTLY ONE call (Sol only; the Terra base draft is reused from a saved artifact, so no
+ * Terra call is made). Without `--confirm-live` -> deterministic mock (offline). With `--confirm-live` ->
+ * enforce EVERY guard and build the real OpenAI provider; on any missing guard THROW (no mock fallback).
+ * Only the Sol model price is required — no Terra call happens on this path.
+ */
+export function buildSolRereviewProvider(config: AppConfig, logger: Logger, opts: LiveGuardOptions): BuiltLiveProvider {
+  if (!opts.confirmLive) {
+    return { provider: new MockLlmProvider(defaultMockLiveValidationResponder), mode: 'MOCK' };
+  }
+
+  if (!config.COMPETITOR_EMAIL_LIVE_VALIDATION_ENABLED) throw new LiveGuardError('Sol-only re-review requires COMPETITOR_EMAIL_LIVE_VALIDATION_ENABLED=true');
+  if (opts.fixtureId !== LIVE_FIXTURE_ID) throw new LiveGuardError(`Sol-only re-review requires --fixture ${LIVE_FIXTURE_ID} (fictional scenario)`);
+  if (!opts.confirmNoRealProspect) throw new LiveGuardError('Sol-only re-review requires --confirm-no-real-prospect');
+  if (opts.maxLiveCalls !== 1) throw new LiveGuardError('Sol-only re-review requires --max-live-calls 1 (exactly one Sol call; the Terra base draft is reused)');
+  if (config.LLM_PROVIDER !== 'openai') throw new LiveGuardError('Sol-only re-review requires LLM_PROVIDER=openai (no mock fallback under explicit live intent)');
+  if (!config.ALLOW_PAID_LLM_CALLS) throw new LiveGuardError('Sol-only re-review requires ALLOW_PAID_LLM_CALLS=true (paid-call kill switch is off)');
+  if (!config.OPENAI_API_KEY) throw new LiveGuardError('Sol-only re-review requires OPENAI_API_KEY');
+  if (!PRICE_VERIFIED_AT) throw new LiveGuardError('LLM price table not verified; reconcile pricing.ts before any paid call');
+  const solModel = config.COMPETITOR_EMAIL_LIVE_VALIDATION_SOL_MODEL;
+  if (!priceKnown(solModel)) throw new LiveGuardError(`no verified price for Sol model "${solModel}"`);
+
+  return { provider: new OpenAiResponsesProvider({ apiKey: config.OPENAI_API_KEY, logger }), mode: 'LIVE' };
+}

@@ -169,6 +169,13 @@ export function evaluateHardGates(result: HarnessSuccess): HardGateReport {
     diagnostic,
   );
 
+  // 17. Structured copy redundancy (Phase 7A4B2 §5): the enriched copy must never express the same approved
+  //     consequence meaning twice — a rendered cautious consequence that duplicates the base recommendation,
+  //     two external sentences serving one consequence label, or a contrast repeating the prospect
+  //     observation. `validateEnrichedComposition` already surfaces these as `redundant_*` violations.
+  const redundant = ev.filter((v) => v.startsWith('redundant_'));
+  add('structured_copy_redundancy', redundant.length === 0, redundant.join('; ') || null);
+
   const failedIds = gates.filter((g) => !g.passed).map((g) => g.id);
   return { gates, allPassed: failedIds.length === 0, failedIds };
 }

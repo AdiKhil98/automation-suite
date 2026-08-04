@@ -104,12 +104,24 @@ describe('composeEnrichedEmail — final artifact', () => {
     expect(compose().composedMessageHash).toBe(compose().composedMessageHash);
   });
 
-  it('emits a claim ledger covering prospect observation, competitor, consequence, and CTA', () => {
+  it('emits a claim ledger of ONLY externally rendered claims (base has a recommendation → no consequence sentence)', () => {
+    // The two-paragraph base carries an aligned observation AND recommendation, so the competitor section is
+    // ONE sentence: the ledger holds no CAUTIOUS_CONSEQUENCE / PROSPECT_CONTRAST (Phase 7A4B2 §2).
     const kinds = compose().ledger.map((e) => e.claimType);
     expect(kinds).toContain('PROSPECT_OBSERVATION');
     expect(kinds).toContain('COMPETITOR_PATTERN');
-    expect(kinds).toContain('CAUTIOUS_CONSEQUENCE');
+    expect(kinds).toContain('RECOMMENDATION');
     expect(kinds).toContain('CTA');
+    expect(kinds).not.toContain('CAUTIOUS_CONSEQUENCE');
+    expect(kinds).not.toContain('PROSPECT_CONTRAST');
+  });
+
+  it('renders the cautious consequence only when the base LACKS an aligned recommendation (single-paragraph base)', () => {
+    const c = compose({ d: draft({ email_body: 'Your booking action sits below the fold on mobile.' }) });
+    const kinds = c.ledger.map((e) => e.claimType);
+    expect(kinds).toContain('CAUTIOUS_CONSEQUENCE');
+    expect(c.rendered.body).toContain('That may make booking harder for a first-time visitor to find.');
+    expect(c.ok).toBe(true);
   });
 
   it('never leaks a competitor identity token into the body', () => {

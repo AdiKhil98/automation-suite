@@ -329,6 +329,51 @@ $env:COMPETITOR_EMAIL_LIVE_VALIDATION_ENABLED = 'true'; $env:LLM_PROVIDER = 'ope
 `OPENAI_API_KEY` must be present in the environment (never pass it on the command line). Any missing guard
 exits nonzero before any model call; explicit live intent never falls back to mock.
 
+## Phase 7A4B2 — competitor copy-flow fix (one-sentence insertion) + Sol-only re-review
+
+**What changed.** The deterministic competitor insertion now strengthens the Terra-authored email WITHOUT
+duplicating its prospect consequence or sounding mechanical. When the base draft already carries an aligned
+prospect observation AND an aligned recommendation (the normal case), the external competitor section is
+exactly ONE conversational, count-safe sentence (e.g. `All three comparable nearby clinics make booking
+available directly from their homepage.`). The retired 3-sentence form (`…surface a booking action… On your
+own site this option is not currently surfaced the same way. That may make booking harder…`) is gone. The
+claim ledger now contains ONLY externally rendered sentences; the contrast/consequence label + evidence
+references remain internal package/plan provenance. A structured `structured_copy_redundancy` hard gate (17th
+gate) fails closed if the same approved consequence meaning would ever be expressed twice.
+
+**Offline recomposition (ZERO model / network / DB / Gmail / Sheets / draft / send).** Rebuilds the enriched
+email from the EXACT saved Terra base draft using the CURRENT templates, reruns the rubric + all hard gates,
+and writes a NEW local report — it NEVER overwrites the source artifact. Integrity (report hash, deterministic
+determinism hash, baseline match, package hash) is verified first.
+
+```text
+# Recompose the latest saved live report (default path); writes recompose-*.json alongside it
+pnpm cli competitor-email-live-validation-recompose
+
+# Recompose a specific saved live report as JSON, without writing a file
+pnpm cli competitor-email-live-validation-recompose --report .local-data/competitor-email-validation/live/<file>.json --no-write --json
+```
+
+A `PASS` result (exit 0) confirms integrity + a one-sentence competitor section + all hard gates + deterministic
+PASS, with zero live calls.
+
+**Guarded Sol-ONLY re-review (reuses the exact saved Terra draft; NO Terra call; EXACTLY ONE Sol call).** MOCK
+by default. It recomposes with current templates, REQUIRES a deterministic PASS before Sol, then makes exactly
+one advisory Sol call over sanitized fictional data; it never retries, never falls back to mock under live
+intent, and never modifies either email after Sol responds. It writes a NEW report linked to the source
+(`rereview-*.json`) and never overwrites the source. Exact PowerShell for the ONE authorized paid Sol-only
+re-review (operator-run; `OPENAI_API_KEY` must be present in the environment, never on the command line):
+
+```powershell
+$env:COMPETITOR_EMAIL_LIVE_VALIDATION_ENABLED = 'true'; $env:LLM_PROVIDER = 'openai'; $env:ALLOW_PAID_LLM_CALLS = 'true'; pnpm cli competitor-email-live-validation-rereview --report .local-data/competitor-email-validation/live/<real-live-report>.json --confirm-live --fixture synthetic-dental --confirm-no-real-prospect --max-live-calls 1
+```
+
+Any missing guard (feature flag, `LLM_PROVIDER=openai`, `ALLOW_PAID_LLM_CALLS=true`, API key, `--confirm-live`,
+`--fixture synthetic-dental`, `--confirm-no-real-prospect`, `--max-live-calls 1`, verified Sol price) exits
+nonzero before any model call. A non-PASS recomposition returns WITHOUT spending the Sol call. Point `--report`
+at the real live artifact (a timestamped `live-report-*.json`) — `latest.json` may be a mock report after a
+local mock re-run.
+
 **Metadata excluded from the semantic composed-message hash** (never affects reproducibility): provider
 request/response ids, token usage, cost, latency, and report-generation timestamps. **Provenance-critical
 (always bound into the hash):** schema version, subject, rendered body, evidence mode, package id/version/hash,

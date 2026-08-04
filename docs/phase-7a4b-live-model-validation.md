@@ -736,3 +736,98 @@ copy only, no provider metadata/secrets) to enable FULL replay; it is intentiona
 
 The offline replay MUST pass (`REPRODUCIBLE`) against the latest saved artifact before authorizing another
 paid live Terra/Sol run. Exact commands are in `docs/OPERATIONS.md`.
+
+## 20. Phase 7A4B2 — competitor copy-flow fix + Sol-only re-review
+
+### 20.1 Root cause (copy flow)
+
+The first fictional LIVE run scored well (deterministic PASS, baseline 77 → enriched 97; Sol preferred
+ENRICHED 89 vs 80) but combined status was `REQUIRES_REVISION` because Sol raised two copy defects:
+
+1. **The booking-discoverability consequence was stated twice.** The competitor section rendered a fixed
+   `CAUTIOUS_CONSEQUENCE` sentence (`That may make booking harder for a first-time visitor to find.`) while the
+   Terra-authored recommendation paragraph already expressed the same booking-friction consequence.
+2. **Mechanical wording.** A hardcoded contrast sentence (`On your own site this option is not currently
+   surfaced the same way.`) and the frame verb "surface" read like inserted rubric language rather than
+   outreach copy.
+
+Both were hardcoded strings that rendered unconditionally, regardless of what the base draft already said.
+
+### 20.2 Revised rendering rule (structured, not semantic)
+
+`buildCompositionSections` now derives, from the STRUCTURED base composition (its opening
+`PROSPECT_OBSERVATION` section and any following `RECOMMENDATION` section — presence/absence, never word
+matching), whether the base already carries an aligned prospect observation and an aligned
+recommendation/consequence:
+
+- **Default (base has both):** the external competitor section is EXACTLY ONE competitor-pattern sentence. No
+  contrast, no cautious consequence.
+- **Base lacks an aligned recommendation:** the cautious consequence is rendered to supply the missing aligned
+  element.
+- **Base lacks an aligned prospect observation (and the package holds a contrast):** the contrast is rendered.
+- If a lack cannot be proven deterministically, the extra sentence is omitted (fail-safe).
+
+`decideCompetitorRender` is the single pure decision; `buildClaimLedger` re-derives it from the built sections
+so the ledger, the redundancy gate, and the final-body validator stay consistent with what was rendered.
+
+### 20.3 Before → after (synthetic scenario)
+
+```
+before: All three comparable nearby clinics surface a booking action directly on their homepage. On your own
+        site this option is not currently surfaced the same way. That may make booking harder for a first-time
+        visitor to find.
+after:  All three comparable nearby clinics make booking available directly from their homepage.
+```
+
+Final flow: Terra prospect observation → one concise competitor-pattern sentence → Terra recommendation →
+Terra CTA. Baseline/enriched scores (77 → 97) and the exact three-of-three count are unchanged; the composed
+message hash changes by design (`09dbc2bd…` → `ad6ae0c4…`).
+
+### 20.4 Claim ledger + provenance
+
+The claim ledger contains ONLY sentences rendered externally — for the synthetic scenario:
+`PROSPECT_OBSERVATION → COMPETITOR_PATTERN → RECOMMENDATION → CTA` (no `PROSPECT_CONTRAST`, no
+`CAUTIOUS_CONSEQUENCE`). The contrast/consequence label and evidence references remain internal
+package/plan provenance (`plan.selection.contrast`, `plan.selection.pattern.consequenceLabel`), so material
+alignment and the rubric's material-relevance checks are unaffected.
+
+### 20.5 Natural category templates (§4)
+
+The three enrichable categories carry fixed conversational, count-safe templates (the exact stored count
+phrase is inserted verbatim; no "surface"): booking → `…make booking available directly from their
+homepage.`; phone → `…show a direct phone option on their homepage.`; direct messaging → `…offer a direct
+messaging option on their homepage.` No evidence capability is broadened (location/hours and FAQ remain
+non-aligned and are not rendered).
+
+### 20.6 Structured redundancy gate (§5)
+
+`detectStructuredRedundancy` (surfaced as the 17th hard gate `structured_copy_redundancy`) fails closed when:
+a rendered consequence duplicates the label of the base recommendation; more than one external sentence serves
+the one approved consequence label; or a contrast is rendered although the base already supplies the prospect
+observation. It is derived from the structured ledger, never from word overlap.
+
+### 20.7 Offline recomposition command (§6)
+
+`competitor-email-live-validation-recompose` (module `src/evaluation/email/live/recompose.ts`) loads a saved
+full live report, verifies report + determinism + baseline + package hashes, reuses the EXACT saved Terra base
+draft, rebuilds the enriched email/ledger/hashes with the current templates, reruns the rubric + all hard
+gates, and writes a NEW local report. It never overwrites the source and makes ZERO Terra/Sol, network,
+Gmail, Sheets, draft, send, or production-DB calls.
+
+### 20.8 Guarded Sol-only re-review command (§7)
+
+`competitor-email-live-validation-rereview` (module `src/evaluation/email/live/rereview.ts`) requires a valid
+full source artifact, reuses the exact stored Terra draft (NO Terra call), recomposes with current
+deterministic logic, REQUIRES a deterministic PASS before Sol, then makes EXACTLY ONE Sol call using the
+approved `gpt-5.6-sol` flag over sanitized fictional data. Guards (all required for the paid path):
+`COMPETITOR_EMAIL_LIVE_VALIDATION_ENABLED=true`, `LLM_PROVIDER=openai`, `ALLOW_PAID_LLM_CALLS=true`, an API
+key, `--confirm-live`, `--fixture synthetic-dental`, `--confirm-no-real-prospect`, and `--max-live-calls 1`.
+It never retries, never falls back to mock under live intent, and never modifies either email after Sol
+responds. The new report links back to the source by `sourceReportHash`.
+
+### 20.9 Combined status policy (unchanged)
+
+`READY_FOR_OPERATOR_REVIEW` still requires deterministic PASS, no Sol unsupported-claim suspicion, no Sol
+critical issue, enriched not materially worse, and a Sol PASS verdict. Mechanical wording without a critical
+issue may remain advisory; any Sol critical issue still yields `REQUIRES_REVISION`. The acceptance policy was
+not loosened.

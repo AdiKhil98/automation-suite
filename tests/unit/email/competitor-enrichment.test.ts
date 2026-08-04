@@ -204,10 +204,18 @@ describe('validateEnrichedComposition — hard fails', () => {
   it('blocks a missing competitor sentence', () => {
     expect(validateEnrichedComposition('Hello,\n\nJust prospect text.', plan, pkg(), ledger).ok).toBe(false);
   });
-  it('blocks an altered (non-template) consequence sentence', () => {
-    const altered: EnrichmentPlan = { ...plan, consequenceSentence: 'That means you lose customers.' };
-    const res = validateEnrichedComposition(goodBody, altered, pkg(), ledger);
+  it('blocks an altered (non-template) consequence sentence when the consequence is rendered', () => {
+    // A single-paragraph base lacks an aligned recommendation, so the cautious consequence IS rendered and
+    // therefore validated against the fixed template table.
+    const singleSections = buildCompositionSections(plan, ['Your booking sits below the fold.']);
+    const singleLedger = buildClaimLedger(plan, singleSections, pkg());
+    const altered: EnrichmentPlan = { ...plan, consequenceSentence: 'That is simply a different layout choice.' };
+    const alteredSections = buildCompositionSections(altered, ['Your booking sits below the fold.']);
+    const alteredBody = `Hello,\n\n${renderEnrichedBody(alteredSections)}\n\nIf this is relevant, reply.\n\nBest regards,`;
+    expect(singleLedger.some((e) => e.claimType === 'CAUTIOUS_CONSEQUENCE')).toBe(true);
+    const res = validateEnrichedComposition(alteredBody, altered, pkg(), buildClaimLedger(altered, alteredSections, pkg()));
     expect(res.ok).toBe(false);
+    expect(res.violations).toContain('consequence_not_from_template');
   });
   it('blocks missing comparative traceability', () => {
     const stripped = ledger.map((e) => (e.claimType === 'COMPETITOR_PATTERN' ? { ...e, patternId: null } : e));

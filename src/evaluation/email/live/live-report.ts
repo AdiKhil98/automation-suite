@@ -48,6 +48,13 @@ export interface LiveValidationReport {
    * transitively via `deterministic.determinismHash`), so adding it never changes an existing report hash.
    */
   terraBaseDraft: EmailWriterParsed | null;
+  /**
+   * Provenance link for a Sol-only re-review report (Phase 7A4B2): the `reportHash` of the source live
+   * report whose exact stored Terra base draft was reused. Null for an original live/mock run. Like
+   * `terraBaseDraft`, it is intentionally EXCLUDED from `reportHash` (pure provenance metadata), so adding
+   * it never changes an existing report hash.
+   */
+  sourceReportHash: string | null;
   combinedStatus: CombinedOperatorStatus;
   combinedReasons: string[];
   reportHash: string;
@@ -111,6 +118,7 @@ export interface BuildLiveReportArgs {
   deterministic: ValidationReport | null;
   sol: LiveSolResult;
   terraBaseDraft?: EmailWriterParsed | null;
+  sourceReportHash?: string | null;
 }
 
 export function buildLiveReport(args: BuildLiveReportArgs): LiveValidationReport {
@@ -147,6 +155,7 @@ export function buildLiveReport(args: BuildLiveReportArgs): LiveValidationReport
     deterministic: args.deterministic,
     sol: args.sol,
     terraBaseDraft: args.terraBaseDraft ?? null,
+    sourceReportHash: args.sourceReportHash ?? null,
     combinedStatus: status,
     combinedReasons: reasons,
     reportHash: '',

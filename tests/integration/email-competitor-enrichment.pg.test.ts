@@ -24,7 +24,7 @@ describe('email competitor enrichment persistence (PostgreSQL)', () => {
   function record(emailId: string, leadId: string): EnrichedEmailRecord {
     return {
       emailId, leadId, demoId: null, runId: null,
-      subject: 'Booking below the fold', body: 'Hello,\n\nYour booking sits low.\n\nTwo nearby clinics surface a booking action directly on their homepage. That may make booking harder for a first-time visitor to find.\n\nBest regards,',
+      subject: 'Booking below the fold', body: 'Hello,\n\nYour booking sits low.\n\nTwo nearby clinics make booking available directly from their homepage.\n\nRaising it near the top would help.\n\nBest regards,',
       ctaKind: 'reply', hasDemoUrlPlaceholder: false,
       writerPromptVersion: 'email-writer-2', reviewerPromptVersion: 'email-reviewer-2',
       schemaVersion: 'email-copy-schema-3', rulesVersion: 'email-copy-standard-2', provider: 'mock',
@@ -38,8 +38,8 @@ describe('email competitor enrichment persistence (PostgreSQL)', () => {
       },
       ledger: [
         { claimType: 'PROSPECT_OBSERVATION', text: 'Your booking sits low.', prospectEvidenceIds: ['f1'], patternId: null, contrastId: null, competitorEvidenceIds: [], externallySafe: true },
-        { claimType: 'COMPETITOR_PATTERN', text: 'Two nearby clinics surface a booking action directly on their homepage.', prospectEvidenceIds: [], patternId: 'p-book', contrastId: null, competitorEvidenceIds: ['e1', 'e2'], externallySafe: true },
-        { claimType: 'CAUTIOUS_CONSEQUENCE', text: 'That may make booking harder for a first-time visitor to find.', prospectEvidenceIds: [], patternId: 'p-book', contrastId: null, competitorEvidenceIds: [], externallySafe: true },
+        { claimType: 'COMPETITOR_PATTERN', text: 'Two nearby clinics make booking available directly from their homepage.', prospectEvidenceIds: [], patternId: 'p-book', contrastId: null, competitorEvidenceIds: ['e1', 'e2'], externallySafe: true },
+        { claimType: 'RECOMMENDATION', text: 'Raising it near the top would help.', prospectEvidenceIds: ['f1'], patternId: null, contrastId: null, competitorEvidenceIds: [], externallySafe: true },
         { claimType: 'CTA', text: 'cta:REPLY_FOR_DETAILS', prospectEvidenceIds: [], patternId: null, contrastId: null, competitorEvidenceIds: [], externallySafe: true },
       ],
     };

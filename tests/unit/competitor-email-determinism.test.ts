@@ -197,10 +197,10 @@ describe('Phase 7A4B1 — original unstable live scenario: reproduce before, pas
     expect(oldRecompose.composedMessageHash).not.toBe(s.enriched.composedMessageHash); // this is what falsely failed the run
   });
 
-  it('AFTER THE FIX: hard gate 16 recomposes from the actual base draft and passes; all 16 gates pass', async () => {
+  it('AFTER THE FIX: hard gate 16 recomposes from the actual base draft and passes; all gates pass', async () => {
     const s = await successOrThrow(liveTerraBaseDraft);
     const gates = evaluateHardGates(s);
-    expect(gates.gates).toHaveLength(16);
+    expect(gates.gates).toHaveLength(17); // Phase 7A4B2 added the structured_copy_redundancy gate
     expect(gates.failedIds).not.toContain('unstable_claim_spans_or_hash');
     expect(gates.allPassed).toBe(true);
     const g16 = gates.gates.find((g) => g.id === 'unstable_claim_spans_or_hash')!;

@@ -150,7 +150,7 @@ describe('Phase 7A4A — hard gate sensitivity', () => {
     const s = await successOrThrow();
     const gates = evaluateHardGates(s);
     expect(gates.allPassed).toBe(true);
-    expect(gates.gates).toHaveLength(16);
+    expect(gates.gates).toHaveLength(17);
   });
 
   it('competitor identity leakage fails the leakage gate', async () => {
