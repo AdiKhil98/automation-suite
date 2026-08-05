@@ -1,13 +1,52 @@
 import { getCampaign } from '../../config/campaigns.js';
+import { type Lead } from '../../domain/leads/lead.js';
 import { enrichLeads, type EnrichBatchItem } from '../../pipeline/enrich-leads.js';
 import { LeadFactsRepository } from '../../persistence/repositories/lead-facts.repo.js';
 import { PipelineRunsRepository } from '../../persistence/repositories/runs.repo.js';
+import { AppError } from '../../utils/errors.js';
 import { buildEnrichmentService } from './enrichment-build.js';
 import { type CliContext } from '../context.js';
 
 export interface EnrichLeadsCliOptions {
   campaign: string;
   limit?: string;
+  /** Enrich exactly one lead id; fail-closed, single-lead, no bulk fallback. */
+  lead?: string;
+}
+
+/**
+ * Pure selection of which leads a single enrichment run will process.
+ *
+ * `--lead <id>` (single-lead mode) is a fail-closed, exactly-one selection: the id
+ * must exist and be READY_FOR_ENRICHMENT, and NOTHING else is ever selected (no
+ * fallback to the global READY_FOR_ENRICHMENT queue, no limit expansion). This is
+ * what guarantees a targeted enrichment can never touch any other lead.
+ *
+ * Without `--lead`, behaviour is the existing batch: all READY_FOR_ENRICHMENT
+ * leads, bounded by `--limit` then `MAX_ENRICHMENTS_PER_RUN`.
+ */
+export function selectLeadsToEnrich(
+  all: Lead[],
+  opts: { lead?: string; limit?: number; maxPerRun: number },
+): Lead[] {
+  if (opts.lead != null && opts.lead !== '') {
+    const target = all.find((l) => l.id === opts.lead);
+    if (!target) {
+      throw new AppError('LEAD_NOT_FOUND', `Lead ${opts.lead} not found; refusing to enrich.`);
+    }
+    if (target.status !== 'READY_FOR_ENRICHMENT') {
+      throw new AppError(
+        'NOT_ENRICHABLE',
+        `Lead ${opts.lead} is ${target.status}, not READY_FOR_ENRICHMENT; refusing to enrich.`,
+      );
+    }
+    // Exactly one lead. No bulk fallback, no limit expansion, no retry.
+    return [target];
+  }
+
+  let ready = all.filter((l) => l.status === 'READY_FOR_ENRICHMENT');
+  if (opts.limit != null) ready = ready.slice(0, opts.limit);
+  return ready.slice(0, opts.maxPerRun);
 }
 
 export async function enrichLeadsCommand(ctx: CliContext, cliOpts: EnrichLeadsCliOptions): Promise<void> {
@@ -15,9 +54,11 @@ export async function enrichLeadsCommand(ctx: CliContext, cliOpts: EnrichLeadsCl
   const factsRepo = new LeadFactsRepository(ctx.db);
 
   const all = await ctx.leads.list(1000);
-  let ready = all.filter((l) => l.status === 'READY_FOR_ENRICHMENT');
-  if (cliOpts.limit) ready = ready.slice(0, Number.parseInt(cliOpts.limit, 10));
-  ready = ready.slice(0, ctx.config.MAX_ENRICHMENTS_PER_RUN);
+  const ready = selectLeadsToEnrich(all, {
+    lead: cliOpts.lead,
+    limit: cliOpts.limit != null ? Number.parseInt(cliOpts.limit, 10) : undefined,
+    maxPerRun: ctx.config.MAX_ENRICHMENTS_PER_RUN,
+  });
 
   const items: EnrichBatchItem[] = [];
   for (const lead of ready) {

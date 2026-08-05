@@ -37,6 +37,13 @@ export const campaigns: Record<string, Campaign> = {
     query: { textQuery: 'dentist in Manchester UK' },
     niche: dentalNiche,
   },
+  // Phase 7A4C-PREP controlled pilot: independent dental clinics, London market.
+  'dental-london-google': {
+    name: 'dental-london-google',
+    provider: 'google_places',
+    query: { textQuery: 'dentist in London UK' },
+    niche: dentalNiche,
+  },
   // Dedicated label for the Phase 6 Gate A single-lead live smoke test.
   'gate-a-zahnaerzte-berlin': {
     name: 'gate-a-zahnaerzte-berlin',

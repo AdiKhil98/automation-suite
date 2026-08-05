@@ -388,8 +388,9 @@ program
   .description('Discover & verify official websites for READY_FOR_ENRICHMENT leads (mock by default)')
   .requiredOption('--campaign <name>', 'campaign name (see src/config/campaigns.ts)')
   .option('--limit <n>', 'max leads to enrich this run')
-  .action((opts: { campaign: string; limit?: string }) =>
-    withContext((ctx) => enrichLeadsCommand(ctx, { campaign: opts.campaign, limit: opts.limit })),
+  .option('--lead <id>', 'enrich exactly one lead id (fail-closed, single-lead, no bulk fallback)')
+  .action((opts: { campaign: string; limit?: string; lead?: string }) =>
+    withContext((ctx) => enrichLeadsCommand(ctx, { campaign: opts.campaign, limit: opts.limit, lead: opts.lead })),
   );
 
 program
