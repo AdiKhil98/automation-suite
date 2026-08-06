@@ -22,6 +22,21 @@ export interface QualificationContext {
   now: Date;
 }
 
+/**
+ * Canonical form for niche-category comparison ONLY. Reconciles harmless
+ * representation differences between provider category values and the campaign
+ * allowlist (e.g. Google's `dental_clinic` vs the configured `dental clinic`):
+ * lowercase, trim, `_`/`-` → space, collapse repeated whitespace. Exact normalized
+ * equality only — no fuzzy/substring/synonym/stemming/inference.
+ */
+export function normalizeCategory(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 const REQUIRED_FACTS: FactType[] = ['business_name', 'business_status', 'category'];
 const CONTACT_OR_AUDIT_FACTS: FactType[] = [
   'official_domain',
@@ -116,8 +131,11 @@ export function evaluateQualification(
 
   const categoryFact = use('category');
   const category = categoryFact?.normalizedValue ?? categoryFact?.value ?? null;
-  if (category && !ctx.niche.allowedCategories.includes(category)) {
-    return rejected('gate.outsideNiche', `Category "${category}" is outside the campaign niche`);
+  if (category) {
+    const allowedNormalized = new Set(ctx.niche.allowedCategories.map(normalizeCategory));
+    if (!allowedNormalized.has(normalizeCategory(category))) {
+      return rejected('gate.outsideNiche', `Category "${category}" is outside the campaign niche`);
+    }
   }
 
   const ownership = valueOf('ownership_type');
