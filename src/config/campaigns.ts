@@ -44,6 +44,13 @@ export const campaigns: Record<string, Campaign> = {
     query: { textQuery: 'dentist in London UK' },
     niche: dentalNiche,
   },
+  // Phase 7A4C-PREP segment pivot: small independent general-dentistry, outer London (Croydon).
+  'dental-croydon-google': {
+    name: 'dental-croydon-google',
+    provider: 'google_places',
+    query: { textQuery: 'dentist in Croydon London UK' },
+    niche: dentalNiche,
+  },
   // Dedicated label for the Phase 6 Gate A single-lead live smoke test.
   'gate-a-zahnaerzte-berlin': {
     name: 'gate-a-zahnaerzte-berlin',

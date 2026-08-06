@@ -795,3 +795,39 @@ Operator (Adi) approved the three-prospect shortlist in this order:
 **Prospect 3 constraint:** approved as a **local independent two-site brand**; use the exact stored
 Google Places location; do **not** assume which branch a website feature belongs to; make location-specific
 claims only when evidence explicitly supports them, otherwise use **brand-level wording**.
+
+## 25. Pilot learning + segment pivot (2026-08-06)
+
+### 25.1 Learning from the first 3-prospect deterministic audit round
+
+All three shortlisted prospects were deterministically audited (real Playwright capture, ≤2 pages each; **no
+Terra/Sol/paid LLM**) and **formally REJECTED (`NO_MATERIAL_VERIFIED_ISSUE`)** via the `reject-lead` command:
+
+- **3 of 3** central-London private dental clinics had a **functional online-booking platform**
+  (three different providers).
+- **3 of 3** were **responsive** (no horizontal overflow, desktop and mobile).
+- **3 of 3** had a **clear contact path** (visible phone + booking, most with a published email/form).
+- **0 of 3** had a **material, evidence-backed website issue**. The only anomalies (a single slow desktop-load
+  sample; a booking styled as a calendar link; a `/#` capture artifact; multiple branch phone numbers) were
+  explicitly **not** treated as defects.
+
+**Conclusion:** the London central-private-dentist segment is **too digitally mature** for evidence-based
+outreach. **Stop collecting from this exact segment.** Rejection reason of record for all three:
+`NO_MATERIAL_VERIFIED_ISSUE`.
+
+### 25.2 Segment pivot (D-16) — planning + collection configuration only
+
+Operator approved a pivot to a weaker-site subsegment:
+
+- **Target:** small **independent general-dentistry** practices; **outer London / suburban high streets**;
+  **single-site preferred**; **exclude** premium cosmetic-focused clinics, obvious chains, and multi-location
+  groups; English-language active websites; **prioritize practices without a known online-booking platform**.
+- **First borough:** **Croydon**.
+- **Screening priority (material-issue signals):** (1) no online-booking platform; (2) phone/form-only
+  appointment path; (3) weak or hidden mobile CTA; (4) unclear contact path; (5) outdated/non-responsive
+  layout; (6) broken links or booking flow; (7) unclear branch/location info.
+- **NOT defects on their own:** missing structured data; a single slow-load sample; a booking link styled as
+  text; old visual design without proven friction.
+- **Constraints:** minimal Croydon campaign config only; existing `enrich-leads --lead` + `reject-lead`;
+  paid Google Places reads only via process-scoped flags; no Terra/Sol, email generation, competitor research,
+  Gmail/Sheets/drafts/sends/follow-ups; no global routing change; no operational prospect data committed.
