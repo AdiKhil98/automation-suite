@@ -72,7 +72,11 @@ const BASE_TRANSITIONS: Record<LeadStatus, LeadStatus[]> = {
   // Terminal states — no outgoing transitions.
   DUPLICATE: [],
   REJECTED_AUTOMATICALLY: [],
-  REJECTED: [],
+  // REJECTED is terminal, with ONE audited recovery edge: an operator may reopen a
+  // falsely-rejected lead back into manual review (see reopen-lead). It stays in
+  // TERMINAL so it never gets the automatic UNSUBSCRIBED append — reopen is the only
+  // way out, and re-rejecting requires going through NEEDS_MANUAL_REVIEW again.
+  REJECTED: ['NEEDS_MANUAL_REVIEW'],
   UNSUBSCRIBED: [],
   FAILED: [],
   REPLIED: [],

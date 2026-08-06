@@ -31,6 +31,7 @@ import { controlledExistingLeadCommand } from './commands/prospect-controlled-te
 import { createSampleLeads } from './commands/create-sample-leads.js';
 import { leadState } from './commands/lead-state.js';
 import { rejectLeadCommand } from './commands/reject-lead.js';
+import { reopenLeadCommand } from './commands/reopen-lead.js';
 import { listLeads } from './commands/list-leads.js';
 import { resetTestData } from './commands/reset-test-data.js';
 import { resumeAuditCommand } from './commands/resume-audit.js';
@@ -402,6 +403,16 @@ program
   .requiredOption('--by <operator>', 'operator identity recorded on the rejection event')
   .action((opts: { lead: string; reason: string; by: string }) =>
     withContext((ctx) => rejectLeadCommand(ctx, opts)),
+  );
+
+program
+  .command('reopen-lead')
+  .description('Reopen exactly one REJECTED lead back to NEEDS_MANUAL_REVIEW via the supported recovery transition, recording an immutable correction NOTE (reason + operator). Preserves the original rejection and all history (append-only). Fails closed for unknown/non-REJECTED leads. No suppression, outreach, email, Gmail, Sheet, competitor, provider, or LLM effect.')
+  .requiredOption('--lead <id>', 'exact lead id to reopen (single lead; no bulk fallback)')
+  .requiredOption('--reason <text>', 'audited correction reason (e.g. FALSE_REJECTION_...)')
+  .requiredOption('--by <operator>', 'operator identity recorded on the correction event')
+  .action((opts: { lead: string; reason: string; by: string }) =>
+    withContext((ctx) => reopenLeadCommand(ctx, opts)),
   );
 
 program

@@ -49,9 +49,20 @@ describe('lead state machine', () => {
   });
 
   it('treats terminal states as having no outgoing transitions', () => {
-    for (const terminal of ['REJECTED', 'UNSUBSCRIBED', 'FAILED', 'DUPLICATE'] as const) {
+    for (const terminal of ['UNSUBSCRIBED', 'FAILED', 'DUPLICATE', 'REJECTED_AUTOMATICALLY', 'REPLIED', 'BOUNCED'] as const) {
       expect(stateMachineInfo.isTerminal(terminal)).toBe(true);
       expect(allowedTransitions(terminal)).toHaveLength(0);
+    }
+  });
+
+  it('keeps REJECTED terminal but allows exactly one audited recovery edge to NEEDS_MANUAL_REVIEW', () => {
+    expect(stateMachineInfo.isTerminal('REJECTED')).toBe(true);
+    // The single recovery edge (reopen-lead) — and nothing else.
+    expect(allowedTransitions('REJECTED')).toEqual(['NEEDS_MANUAL_REVIEW']);
+    expect(canTransition('REJECTED', 'NEEDS_MANUAL_REVIEW')).toBe(true);
+    // No re-rejection shortcut, no suppression append, no jump back into the pipeline.
+    for (const to of ['REJECTED', 'UNSUBSCRIBED', 'READY_FOR_QUALIFICATION', 'SENT'] as const) {
+      expect(canTransition('REJECTED', to)).toBe(false);
     }
   });
 
