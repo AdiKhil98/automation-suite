@@ -30,6 +30,7 @@ import { prospectRunCommand } from './commands/prospect-run.js';
 import { controlledExistingLeadCommand } from './commands/prospect-controlled-test.js';
 import { createSampleLeads } from './commands/create-sample-leads.js';
 import { leadState } from './commands/lead-state.js';
+import { rejectLeadCommand } from './commands/reject-lead.js';
 import { listLeads } from './commands/list-leads.js';
 import { resetTestData } from './commands/reset-test-data.js';
 import { resumeAuditCommand } from './commands/resume-audit.js';
@@ -391,6 +392,16 @@ program
   .option('--lead <id>', 'enrich exactly one lead id (fail-closed, single-lead, no bulk fallback)')
   .action((opts: { campaign: string; limit?: string; lead?: string }) =>
     withContext((ctx) => enrichLeadsCommand(ctx, { campaign: opts.campaign, limit: opts.limit, lead: opts.lead })),
+  );
+
+program
+  .command('reject-lead')
+  .description('Formally reject exactly one pre-send lead (READY_FOR_AUDIT/NEEDS_MANUAL_REVIEW/etc.) via supported transitions to REJECTED, recording an immutable reason NOTE. No suppression, outreach, email, Gmail, provider, or LLM effect.')
+  .requiredOption('--lead <id>', 'exact lead id to reject (single lead; no bulk fallback)')
+  .requiredOption('--reason <text>', 'audited rejection reason (e.g. NO_MATERIAL_VERIFIED_ISSUE)')
+  .requiredOption('--by <operator>', 'operator identity recorded on the rejection event')
+  .action((opts: { lead: string; reason: string; by: string }) =>
+    withContext((ctx) => rejectLeadCommand(ctx, opts)),
   );
 
 program
