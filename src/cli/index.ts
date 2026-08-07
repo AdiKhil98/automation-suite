@@ -431,7 +431,8 @@ program
   .requiredOption('--campaign <name>', 'campaign name (see src/config/campaigns.ts)')
   .option('--purpose <p>', 'audit | verification', 'audit')
   .option('--limit <n>', 'max leads to capture this run')
-  .action((opts: { campaign: string; purpose?: string; limit?: string }) =>
+  .option('--lead <id>', 'capture exactly one lead id (scopes the run to a single lead)')
+  .action((opts: { campaign: string; purpose?: string; limit?: string; lead?: string }) =>
     withContext((ctx) => captureWebsitesCommand(ctx, opts)),
   );
 
