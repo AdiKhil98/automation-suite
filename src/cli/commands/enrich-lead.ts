@@ -60,7 +60,7 @@ export async function enrichLeadCommand(ctx: CliContext, cliOpts: EnrichLeadCliO
 
   const runs = new PipelineRunsRepository(ctx.db);
   const runId = await runs.start('enrich-lead:manual', ctx.config.DRY_RUN);
-  const { service, verify } = buildEnrichmentService(ctx, true); // forceManual
+  const { service, verify } = buildEnrichmentService(ctx, { forceManual: true });
 
   const summary = await enrichLeads({ service, logger: ctx.logger }, items, { runId, verify });
   await runs.finish(runId, 'COMPLETED', JSON.stringify(summary));

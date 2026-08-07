@@ -73,7 +73,7 @@ async function runProspect(ctx: CliContext, cli: ProspectRunCliOptions, controll
   try {
     const transport = new FetchPlacesTransport(c.GOOGLE_PLACES_API_KEY, c.PLACES_TIMEOUT_MS);
     const store = new ProspectRepository(ctx.db);
-    const builtEnrichment = buildEnrichmentService(ctx, true);
+    const builtEnrichment = buildEnrichmentService(ctx, { forceManual: true });
     const processor = new ProductionProspectCandidateProcessor({ db: ctx.db, details: new GooglePlacesDetailsClient(c.GOOGLE_PLACES_API_KEY, c.ENRICH_HTTP_TIMEOUT_MS, ctx.logger), enrichment: builtEnrichment.service, verify: builtEnrichment.verify, qualification: new QualificationService(new DrizzleQualificationUnitOfWork(ctx.db)), nearMeters: c.DEDUP_NEAR_ADDRESS_METERS, logger: ctx.logger });
     const continuation = input.continuePipeline
       ? (controlledRecipient ? new ControlledTestContinuation(ctx, controlledRecipient) : new ExistingPipelineContinuation(ctx))

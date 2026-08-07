@@ -96,6 +96,7 @@ function mergeContexts(a: EnrichmentContext | null, b: EnrichmentContext | null)
     formattedAddress: a?.formattedAddress ?? b?.formattedAddress ?? null,
     city: a?.city ?? b?.city ?? null,
     country: a?.country ?? b?.country ?? null,
+    category: a?.category ?? b?.category ?? null,
     candidateUrls: [...(a?.candidateUrls ?? []), ...(b?.candidateUrls ?? [])],
   };
 }

@@ -12,6 +12,9 @@ export interface EnrichmentContext {
   formattedAddress?: string | null;
   city?: string | null;
   country?: string | null;
+  /** Provider business category (e.g. Google Places `dental_clinic`); used only by the
+   *  places_website_identity_match fallback to check the candidate is in the campaign niche. */
+  category?: string | null;
   candidateUrls?: string[];
 }
 

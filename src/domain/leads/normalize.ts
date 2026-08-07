@@ -13,6 +13,20 @@ export function normalizeName(name: string | null): string | null {
   return cleaned.length > 0 ? cleaned : null;
 }
 
+/**
+ * Canonical category form for niche matching: lowercase, separators ('_','-') and runs of
+ * whitespace collapsed to a single space, trimmed. So 'dental_clinic', 'Dental-Clinic', and
+ * 'dental clinic' all normalize to 'dental clinic'. Single source of truth shared by the
+ * qualification niche gate and the enrichment website-identity fallback.
+ */
+export function normalizeCategory(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 export function normalizeDomain(domain: string | null): string | null {
   if (!domain) return null;
   const cleaned = domain

@@ -403,7 +403,7 @@ const ENRICHMENT_OUTCOMES =
 const DISCOVERY_SOURCES =
   "'website_hint','directory','search','social','google_hint','manual','mock'";
 const SIGNAL_TYPES =
-  "'exact_phone','name_address','branch_location','structured_data','legal_footer','name_tokens','category_text','city_mention','mailto','plaintext_email','contact_form'";
+  "'exact_phone','name_address','branch_location','structured_data','legal_footer','name_tokens','category_text','city_mention','mailto','plaintext_email','contact_form','places_website_identity_match'";
 
 export const enrichmentAttempts = pgTable(
   'enrichment_attempts',

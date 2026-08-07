@@ -29,11 +29,21 @@ export interface BuiltEnrichment {
   budget: GoogleReadBudget;
 }
 
+export interface BuildEnrichmentOptions {
+  /** Manual `enrich-lead` path: operator-supplied candidate URLs, real HTTP fetch. */
+  forceManual?: boolean;
+  /** Campaign niche allowed categories — enables the places_website_identity_match fallback. */
+  nicheAllowedCategories?: readonly string[];
+}
+
 /**
  * Assemble the enrichment service from configuration. `forceManual` is used by the
  * manual `enrich-lead` path (operator-supplied candidate URLs, real HTTP fetch).
+ * `nicheAllowedCategories`, when provided by a campaign-scoped caller, enables the
+ * deterministic places_website_identity_match fallback (otherwise it fails closed).
  */
-export function buildEnrichmentService(ctx: CliContext, forceManual = false): BuiltEnrichment {
+export function buildEnrichmentService(ctx: CliContext, opts: BuildEnrichmentOptions = {}): BuiltEnrichment {
+  const { forceManual = false, nicheAllowedCategories } = opts;
   const c = ctx.config;
   const factsProvider = new FactsContextProvider();
 
@@ -84,6 +94,7 @@ export function buildEnrichmentService(ctx: CliContext, forceManual = false): Bu
   const verify: VerifyOptions = {
     minConfidence: c.ENRICHMENT_MIN_CONFIDENCE,
     ambiguousMargin: c.ENRICHMENT_AMBIGUOUS_MARGIN,
+    nicheAllowedCategories,
   };
 
   const service = new EnrichmentService({

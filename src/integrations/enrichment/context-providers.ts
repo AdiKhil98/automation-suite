@@ -16,8 +16,8 @@ function factValue(facts: LeadFact[], type: string): string | null {
 export class FactsContextProvider implements EnrichmentContextProvider {
   readonly name = 'facts';
   readonly capabilities: ProviderCapabilities = {
-    returnsFields: ['business_name', 'phone', 'formatted_address', 'city', 'country'],
-    persistableFields: ['business_name', 'phone', 'formatted_address', 'city', 'country'],
+    returnsFields: ['business_name', 'phone', 'formatted_address', 'city', 'country', 'category'],
+    persistableFields: ['business_name', 'phone', 'formatted_address', 'city', 'country', 'category'],
     ephemeralFields: [],
     canIncurCost: false,
   };
@@ -37,7 +37,15 @@ export class FactsContextProvider implements EnrichmentContextProvider {
     else if (official) hints.push(`https://${official}`);
     else if (domain) hints.push(`https://${domain}`);
     if (!businessName && !phone && !formattedAddress && hints.length === 0) return null;
-    return { businessName, phone, formattedAddress, city: f('city'), country: f('country'), candidateUrls: hints };
+    return {
+      businessName,
+      phone,
+      formattedAddress,
+      city: f('city'),
+      country: f('country'),
+      category: f('category'),
+      candidateUrls: hints,
+    };
   }
 }
 
@@ -165,6 +173,7 @@ export class GoogleContextProvider implements EnrichmentContextProvider {
       formattedAddress: details.formattedAddress ?? null,
       city: details.locality ?? null,
       country: details.country ?? null,
+      category: null, // Place Details context does not carry a niche category; use the stored fact instead
       candidateUrls: hints,
     };
   }

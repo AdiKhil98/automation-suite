@@ -1,5 +1,6 @@
 import { type QualificationRules, rulesConfigHash } from '../../config/qualification-rules.js';
 import { hashCanonical } from '../../utils/hash.js';
+import { normalizeCategory } from '../leads/normalize.js';
 import { type FactType, type LeadFact } from '../lead-facts/lead-fact.js';
 import {
   type QualificationDecision,
@@ -22,20 +23,9 @@ export interface QualificationContext {
   now: Date;
 }
 
-/**
- * Canonical form for niche-category comparison ONLY. Reconciles harmless
- * representation differences between provider category values and the campaign
- * allowlist (e.g. Google's `dental_clinic` vs the configured `dental clinic`):
- * lowercase, trim, `_`/`-` → space, collapse repeated whitespace. Exact normalized
- * equality only — no fuzzy/substring/synonym/stemming/inference.
- */
-export function normalizeCategory(value: string): string {
-  return value
-    .toLowerCase()
-    .replace(/[_-]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
+// Category niche-matching normalization is shared with the enrichment website-identity fallback;
+// re-exported here so existing importers (and the niche gate below) keep the same import surface.
+export { normalizeCategory };
 
 const REQUIRED_FACTS: FactType[] = ['business_name', 'business_status', 'category'];
 const CONTACT_OR_AUDIT_FACTS: FactType[] = [

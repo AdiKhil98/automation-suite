@@ -41,6 +41,10 @@ export const SIGNAL_TYPES = [
   'mailto',
   'plaintext_email',
   'contact_form',
+  // Narrow deterministic fallback: the candidate URL was supplied by Google Places AND several
+  // exact identity checks (same registrable domain, on-page name + city, niche category, and a
+  // deterministic domain↔name match) all agree. See scoreCandidate for the fail-closed conditions.
+  'places_website_identity_match',
 ] as const;
 export type SignalType = (typeof SIGNAL_TYPES)[number];
 
@@ -51,6 +55,7 @@ export const STRONG_SIGNALS: readonly SignalType[] = [
   'branch_location',
   'structured_data',
   'legal_footer',
+  'places_website_identity_match',
 ];
 
 /**

@@ -1,6 +1,8 @@
+import { getDomain, parse } from 'tldts';
 import { isDirectoryHost } from '../../integrations/enrichment/directory-denylist.js';
 import {
   normalizeAddress,
+  normalizeCategory,
   normalizeCity,
   normalizeName,
   normalizePhone,
@@ -18,6 +20,91 @@ import {
 export interface VerifyOptions {
   minConfidence: number;
   ambiguousMargin: number;
+  /**
+   * Campaign niche allowed categories (raw form). Enables the places_website_identity_match
+   * category-match condition; when absent the fallback fails closed (never fires).
+   */
+  nicheAllowedCategories?: readonly string[];
+}
+
+// --- places_website_identity_match: deterministic domain↔name identity helpers ---
+
+/**
+ * Generic business tokens ignored ONLY when measuring domain-identity token coverage. Explicit
+ * and closed — never silently expanded. Distinct from nameTokens()'s dedup stopword set.
+ */
+const DOMAIN_GENERIC_TOKENS = new Set(['the', 'ltd', 'limited', 'clinic', 'practice']);
+
+/** Article/conjunction noise dropped before deriving an acronym (deterministic; not the generic set). */
+const ACRONYM_NOISE_TOKENS = new Set(['the', 'and', 'of']);
+
+/** Meaningful business-name tokens for domain-coverage matching (alnum, minus the generic set). */
+export function businessNameTokens(name: string | null | undefined): string[] {
+  const n = normalizeName(name ?? null);
+  if (!n) return [];
+  return n.split(/[^a-z0-9]+/).filter((t) => t.length > 0 && !DOMAIN_GENERIC_TOKENS.has(t));
+}
+
+/**
+ * The domain's identity string: registrable label without its public suffix (via tldts, so
+ * `co.uk` etc. are handled), lowercased, all separators/punctuation removed. Returns null when
+ * no registrable label exists. e.g. `www.shirleydentalpractice.co.uk` → `shirleydentalpractice`,
+ * `wc-dp.co.uk` → `wcdp`.
+ */
+export function domainIdentity(host: string | null | undefined): string | null {
+  if (!host) return null;
+  const withoutSuffix = parse(host).domainWithoutSuffix;
+  if (!withoutSuffix) return null;
+  const id = withoutSuffix.toLowerCase().replace(/[^a-z0-9]/g, '');
+  return id.length > 0 ? id : null;
+}
+
+/** Deterministic acronym from ordered name tokens (alnum, minus article/conjunction noise). */
+function nameAcronym(name: string | null | undefined): string | null {
+  const n = normalizeName(name ?? null);
+  if (!n) return null;
+  const tokens = n.split(/[^a-z0-9]+/).filter((t) => t.length > 0 && !ACRONYM_NOISE_TOKENS.has(t));
+  if (tokens.length < 2) return null; // a single token is a name, not an acronym
+  return tokens.map((t) => t[0]).join('');
+}
+
+/**
+ * Deterministic domain-identity match between a business name and a host. True when EITHER:
+ *  - ≥60% of meaningful name tokens appear contiguously (exact substring) in the domain identity, OR
+ *  - the exact acronym of the ordered name tokens equals the domain identity.
+ * No fuzzy edit-distance, embeddings, phonetics, synonyms, or semantic similarity.
+ */
+export function domainMatchesBusinessName(
+  name: string | null | undefined,
+  host: string | null | undefined,
+): boolean {
+  const id = domainIdentity(host);
+  if (!id) return false;
+  const tokens = businessNameTokens(name);
+  if (tokens.length > 0) {
+    const hits = tokens.filter((t) => id.includes(t)).length;
+    if (hits / tokens.length >= 0.6) return true;
+  }
+  const acr = nameAcronym(name);
+  return acr !== null && acr.length >= 2 && acr === id;
+}
+
+/** True only when both hosts share the same registrable domain (allows http↔https and www changes). */
+export function sameRegistrableDomain(a: string | null | undefined, b: string | null | undefined): boolean {
+  if (!a || !b) return false;
+  const da = getDomain(a);
+  const db = getDomain(b);
+  return da !== null && db !== null && da === db;
+}
+
+/** Exact normalized niche-category membership (no category or no niche → false, fail-closed). */
+function categoryMatchesNiche(
+  category: string | null | undefined,
+  allowed: readonly string[] | undefined,
+): boolean {
+  if (!category || !allowed || allowed.length === 0) return false;
+  const set = new Set(allowed.map(normalizeCategory));
+  return set.has(normalizeCategory(category));
 }
 
 // One strong signal clears the default threshold (0.6); weak signals never do alone.
@@ -145,6 +232,34 @@ export function scoreCandidate(
     if (city && page.visibleTextSample.includes(city)) {
       signals.push(sig('city_mention', page.finalUrl, 'city', context.city ?? '', city, 'body', 0.2));
     }
+  }
+
+  // --- Approved narrow deterministic fallback: places_website_identity_match (STRONG) ---
+  // Fires ONLY when Google Places itself supplied the URL AND several exact deterministic identity
+  // checks all agree. Fail-closed: any one missing condition → no signal. It NEVER verifies on the
+  // domain match alone — on-page name AND city corroboration are mandatory. Existing stronger
+  // signals (structured data, exact phone, name+address, legal footer, branch) are untouched.
+  const nameOnHome = tokensPresent(tokens, home.visibleTextSample);
+  const cityOnHome = !!(city && home.visibleTextSample.includes(city));
+  if (
+    candidate.discoverySource === 'website_hint' && // 1. Google Places website-field provenance
+    sameRegistrableDomain(candidate.url, home.finalUrl) && // 2. stayed on the supplied registrable domain
+    categoryMatchesNiche(context.category, opts.nicheAllowedCategories) && // 3. category ∈ campaign niche
+    nameOnHome && // 4. on-page business-name evidence
+    cityOnHome && // 5. on-page city/location evidence
+    domainMatchesBusinessName(context.businessName, home.host) // 6. deterministic domain↔name match
+  ) {
+    signals.push(
+      sig(
+        'places_website_identity_match',
+        home.finalUrl,
+        'official_domain',
+        home.host ?? '',
+        domainIdentity(home.host),
+        'host',
+        0.85,
+      ),
+    );
   }
 
   const strongCount = signals.filter((s) => isStrong(s.signalType)).length;
