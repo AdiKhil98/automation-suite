@@ -27,10 +27,13 @@ const SCANNED = new Set(BOOKING_SCANNED_EVIDENCE_TYPES);
 
 /**
  * Booking keywords (English set required by the operator: book/booking/appointment/consultation/
- * reserve) plus the multilingual/scheduling terms already recognized elsewhere. Exact tokens only.
+ * reserve) plus the multilingual/scheduling terms already recognized elsewhere. Exact tokens only,
+ * word-boundary anchored so a keyword is never matched inside an unrelated word — e.g. `book` must
+ * not fire on "faceBOOK", which would otherwise mask a genuine booking-friction absence on any site
+ * that merely links to Facebook.
  */
 const BOOKING_KEYWORD_RE =
-  /(book(?:ing)?|appointment|consultation|reserv(?:e|ation)|termin|buchen|rendez-?vous|online[- ]?scheduling|schedule (?:an? )?(?:appointment|visit)|jetzt buchen|book online)/i;
+  /\b(book(?:ing)?|appointment|consultation|reserv(?:e|ation)|termin|buchen|rendez-?vous|online[- ]?scheduling|schedule (?:an? )?(?:appointment|visit)|jetzt buchen|book online)\b/i;
 
 /** Recognized third-party booking provider hosts (exact, boundary-anchored — never fuzzy). */
 const BOOKING_PROVIDER_HOST_RE = /\b(hsone|carestack|dentalhub|dentally|zesty)\b/i;

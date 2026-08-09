@@ -74,6 +74,20 @@ describe('bounded booking discovery — keywords', () => {
   });
 });
 
+describe('bounded booking discovery — keyword must be word-boundary anchored', () => {
+  it('a Facebook link is NOT a booking signal ("book" must not match inside "facebook")', () => {
+    const fb = linkRow('e-fb', 'https://www.facebook.com/MayfieldDentalSouthCroydon', 'www.facebook.com');
+    const r = discoverBooking([TEL, TITLE, fb], AWARE);
+    expect(r.status).toBe('NO_ONLINE_BOOKING');
+    expect(r.signals).toEqual([]);
+  });
+
+  it('a real /book route link is still detected', () => {
+    const link = linkRow('e-book', 'https://clinic.example/book-online/', 'clinic.example');
+    expect(discoverBooking([TEL, link], AWARE).status).toBe('ONLINE_BOOKING_FOUND');
+  });
+});
+
 describe('bounded booking discovery — external link detected but never crawled', () => {
   it('records the external provider link as a signal (Layer 1) without listing it as a page to fetch', () => {
     // A cross-origin provider link appears as ordinary `link` evidence — it is DETECTED here.
