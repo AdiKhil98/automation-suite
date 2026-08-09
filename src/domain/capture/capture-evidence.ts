@@ -2,7 +2,7 @@ import * as cheerio from 'cheerio';
 import { hashCanonical, sha256Hex } from '../../utils/hash.js';
 import { type RenderedPage } from './capture-types.js';
 
-export const CAPTURE_EXTRACTOR_VERSION = 'cap-extract-1';
+export const CAPTURE_EXTRACTOR_VERSION = 'cap-extract-2';
 
 export const CAPTURE_EVIDENCE_TYPES = [
   'title',
@@ -64,7 +64,37 @@ export function extractCaptureEvidence(page: RenderedPage): CaptureEvidenceItem[
 
   $('h1, h2, h3').slice(0, 20).each((_, el) => add('heading', $(el).text(), el.tagName));
   $('nav a').slice(0, 30).each((_, el) => add('nav_label', $(el).text(), 'nav a'));
-  $('button, a.button, .btn, [role="button"]').slice(0, 20).each((_, el) => add('cta', $(el).text(), 'cta'));
+
+  // Interactive controls: preserve visible text WITH its destination (href/form action) and element
+  // type, so a booking/contact CTA can be identified by BOTH what it says and where it goes. Plain
+  // links still get their own bare-href `link` evidence below (unchanged) for existing consumers;
+  // this adds the previously-lost text↔target pairing. Encoding mirrors `form` ("k=v" segments);
+  // normalizedValue stays the visible text so text-based dedup/prompts remain backward compatible.
+  const ctaSeen = new Set<string>();
+  const addCta = (rawText: string, dest: string, tag: string): void => {
+    if (ctaSeen.size >= 40) return;
+    const text = norm(rawText);
+    if (!text) return;
+    const d = norm(dest);
+    const key = `${text.toLowerCase()}|${d.toLowerCase()}`;
+    if (ctaSeen.has(key)) return;
+    ctaSeen.add(key);
+    add('cta', `text=${text} href=${d} tag=${tag}`, 'cta', text.toLowerCase());
+  };
+  $('a[href], button, [role="button"], input[type="submit"]').each((_, el) => {
+    const $el = $(el);
+    const tag = (el.tagName ?? '').toLowerCase();
+    if (tag === 'a') {
+      const href = $el.attr('href') ?? '';
+      if (/^(mailto:|tel:)/i.test(href)) return; // captured as tel/mailto; keep CTA budget for controls
+      addCta($el.text(), href, 'a');
+    } else if (tag === 'input') {
+      addCta($el.attr('value') ?? '', $el.closest('form').attr('action') ?? '', 'submit');
+    } else {
+      const isSubmit = ($el.attr('type') ?? '').toLowerCase() === 'submit';
+      addCta($el.text(), $el.closest('form').attr('action') ?? '', isSubmit ? 'submit' : 'button');
+    }
+  });
 
   const links = new Set<string>();
   $('a[href]').each((_, el) => {

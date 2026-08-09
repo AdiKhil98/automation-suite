@@ -40,16 +40,25 @@ const BOOKING_PROVIDER_HOST_RE = /\b(hsone|carestack|dentalhub|dentally|zesty)\b
 
 export type BookingDiscoveryStatus = 'ONLINE_BOOKING_FOUND' | 'NO_ONLINE_BOOKING' | 'UNKNOWN';
 
+/**
+ * A DIRECT signal (provider_host / booking_route / keyword) proves an online-booking route and drives
+ * ONLINE_BOOKING_FOUND. A booking_intent signal is a booking-labelled control (e.g. "Book appointment")
+ * whose destination is a NON-booking page (e.g. /contact): it records intent for auditability but is
+ * NOT proof of online booking, so it never asserts presence.
+ */
 export interface BookingSignal {
   evidenceId: string;
   evidenceType: string;
-  reason: 'keyword' | 'provider_host';
+  reason: 'keyword' | 'provider_host' | 'booking_route' | 'booking_intent';
   matched: string;
 }
 
 export interface BookingDiscoveryResult {
   status: BookingDiscoveryStatus;
+  /** Direct online-booking signals (provider_host / booking_route / keyword). Drives the status. */
   signals: BookingSignal[];
+  /** Booking-labelled controls whose destination is a non-booking page. Never proves booking. */
+  intentSignals: BookingSignal[];
   searchedScope: {
     capturePolicyVersion: string | null;
     bookingAware: boolean;
@@ -61,17 +70,57 @@ export interface BookingDiscoveryResult {
   incompleteReason: 'capture_not_booking_aware' | 'no_captured_pages' | null;
 }
 
-function haystack(row: DeterministicEvidenceRow): string {
-  return `${row.normalizedValue ?? ''} ${row.extractedValue ?? ''} ${row.sourceUrl ?? ''}`;
+/**
+ * Split a captured evidence row into what a control SAYS (visible text) and where it GOES
+ * (destination: href / form action / link host). CTA evidence is encoded `text=<t> href=<d> tag=<x>`
+ * by the capture extractor; older/other rows degrade safely (text only, no destination).
+ */
+function parts(row: DeterministicEvidenceRow): { text: string; dest: string } {
+  const ev = row.extractedValue ?? '';
+  const nv = row.normalizedValue ?? '';
+  switch (row.evidenceType) {
+    case 'cta': {
+      const m = /^text=([\s\S]*?) href=([\s\S]*?)(?: tag=[a-z-]+)?$/i.exec(ev);
+      if (m) return { text: m[1] ?? '', dest: m[2] ?? '' };
+      return { text: ev, dest: '' }; // legacy CTA: visible text only, no destination captured
+    }
+    case 'link':
+      return { text: '', dest: `${ev} ${nv}` }; // bare href + host; anchor text lives in a paired cta
+    case 'form': {
+      const m = /action=(\S*)/i.exec(ev);
+      return { text: ev, dest: m ? (m[1] ?? '') : '' };
+    }
+    default:
+      return { text: ev, dest: '' }; // nav_label et al.: text only
+  }
 }
 
-function signalFor(row: DeterministicEvidenceRow): BookingSignal | null {
-  const hay = haystack(row);
-  const provider = BOOKING_PROVIDER_HOST_RE.exec(hay);
-  if (provider) return { evidenceId: row.id, evidenceType: row.evidenceType, reason: 'provider_host', matched: provider[0].toLowerCase() };
-  const keyword = BOOKING_KEYWORD_RE.exec(hay);
-  if (keyword) return { evidenceId: row.id, evidenceType: row.evidenceType, reason: 'keyword', matched: keyword[0].toLowerCase() };
-  return null;
+/**
+ * Classify one row. A recognized provider host or a booking keyword in the DESTINATION is a direct
+ * booking route. A booking keyword only in the visible TEXT is a direct signal ONLY when no
+ * destination was captured to contradict it; when the destination is a captured non-booking page it
+ * is downgraded to booking_intent. A CTA is never treated as online booking merely because its text
+ * says "book".
+ */
+function classify(row: DeterministicEvidenceRow): { direct?: BookingSignal; intent?: BookingSignal } {
+  const { text, dest } = parts(row);
+  const base = { evidenceId: row.id, evidenceType: row.evidenceType };
+  const d = dest.trim();
+
+  const provider = d ? BOOKING_PROVIDER_HOST_RE.exec(d) : null;
+  if (provider) return { direct: { ...base, reason: 'provider_host', matched: provider[0].toLowerCase() } };
+
+  const route = d ? BOOKING_KEYWORD_RE.exec(d) : null;
+  if (route) return { direct: { ...base, reason: 'booking_route', matched: route[0].toLowerCase() } };
+
+  const textKw = text ? BOOKING_KEYWORD_RE.exec(text) : null;
+  if (textKw) {
+    // Destination present but non-booking (provider/route checks failed) → intent, not proof.
+    if (d) return { intent: { ...base, reason: 'booking_intent', matched: textKw[0].toLowerCase() } };
+    // No destination captured to contradict the label → treat as a direct signal (fail-safe).
+    return { direct: { ...base, reason: 'keyword', matched: textKw[0].toLowerCase() } };
+  }
+  return {};
 }
 
 /**
@@ -91,9 +140,11 @@ export function discoverBooking(
 
   const scannable = runEvidence.filter((r) => SCANNED.has(r.evidenceType));
   const signals: BookingSignal[] = [];
+  const intentSignals: BookingSignal[] = [];
   for (const row of scannable) {
-    const s = signalFor(row);
-    if (s) signals.push(s);
+    const { direct, intent } = classify(row);
+    if (direct) signals.push(direct);
+    if (intent) intentSignals.push(intent);
   }
   const pageUrls = [...new Set(runEvidence.map((r) => r.sourceUrl).filter((u): u is string => u !== null))];
 
@@ -105,16 +156,17 @@ export function discoverBooking(
     rowsScanned: scannable.length,
   };
 
-  // A positive booking signal always wins — it disproves booking-friction regardless of policy.
+  // A direct booking signal always wins — it disproves booking-friction regardless of policy.
+  // Booking INTENT alone (a "book" control that routes to a non-booking page) never asserts presence.
   if (signals.length > 0) {
-    return { status: 'ONLINE_BOOKING_FOUND', signals, searchedScope, incompleteReason: null };
+    return { status: 'ONLINE_BOOKING_FOUND', signals, intentSignals, searchedScope, incompleteReason: null };
   }
   // Absence may be asserted ONLY over a booking-aware capture that actually captured pages.
   if (!bookingAware) {
-    return { status: 'UNKNOWN', signals, searchedScope, incompleteReason: 'capture_not_booking_aware' };
+    return { status: 'UNKNOWN', signals, intentSignals, searchedScope, incompleteReason: 'capture_not_booking_aware' };
   }
   if (pageUrls.length === 0) {
-    return { status: 'UNKNOWN', signals, searchedScope, incompleteReason: 'no_captured_pages' };
+    return { status: 'UNKNOWN', signals, intentSignals, searchedScope, incompleteReason: 'no_captured_pages' };
   }
-  return { status: 'NO_ONLINE_BOOKING', signals, searchedScope, incompleteReason: null };
+  return { status: 'NO_ONLINE_BOOKING', signals, intentSignals, searchedScope, incompleteReason: null };
 }

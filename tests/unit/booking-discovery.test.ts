@@ -74,6 +74,49 @@ describe('bounded booking discovery — keywords', () => {
   });
 });
 
+// A CTA row as produced by the capture extractor: `text=<t> href=<d> tag=<x>`, normalized to text.
+function ctaRow(id: string, text: string, href: string, tag = 'a'): DeterministicEvidenceRow {
+  return ev(id, 'cta', { extractedValue: `text=${text} href=${href} tag=${tag}`, normalizedValue: text.toLowerCase() });
+}
+
+describe('bounded booking discovery — destination decides direct vs intent', () => {
+  it('"Book appointment" → /contact/ is booking INTENT, not direct online booking', () => {
+    const cta = ctaRow('e-cta', 'Book appointment', '/contact/');
+    const r = discoverBooking([TEL, cta], AWARE);
+    expect(r.status).toBe('NO_ONLINE_BOOKING');
+    expect(r.signals).toEqual([]);
+    expect(r.intentSignals).toHaveLength(1);
+    expect(r.intentSignals[0]?.reason).toBe('booking_intent');
+  });
+
+  it('"Book online" → external provider (HSOE) is DIRECT online booking', () => {
+    const cta = ctaRow('e-cta', 'Book online', 'https://booking.uk.hsone.app/soe/new/X');
+    const r = discoverBooking([TEL, cta], AWARE);
+    expect(r.status).toBe('ONLINE_BOOKING_FOUND');
+    expect(r.signals[0]?.reason).toBe('provider_host');
+  });
+
+  it('"Book online" → CareStack is DIRECT online booking', () => {
+    const cta = ctaRow('e-cta', 'Book online', 'https://clinic.carestack.com/book');
+    expect(discoverBooking([TEL, cta], AWARE).signals[0]?.reason).toBe('provider_host');
+  });
+
+  it('a dedicated /book-online route (destination keyword) is DIRECT (booking_route)', () => {
+    const cta = ctaRow('e-cta', 'Book appointment', 'https://clinic.example/book-online/');
+    const r = discoverBooking([TEL, cta], AWARE);
+    expect(r.status).toBe('ONLINE_BOOKING_FOUND');
+    expect(r.signals[0]?.reason).toBe('booking_route');
+  });
+
+  it('a generic "Contact us" CTA to /contact/ is neither booking nor booking-intent', () => {
+    const cta = ctaRow('e-cta', 'Contact us', '/contact/');
+    const r = discoverBooking([TEL, cta], AWARE);
+    expect(r.status).toBe('NO_ONLINE_BOOKING');
+    expect(r.signals).toEqual([]);
+    expect(r.intentSignals).toEqual([]);
+  });
+});
+
 describe('bounded booking discovery — keyword must be word-boundary anchored', () => {
   it('a Facebook link is NOT a booking signal ("book" must not match inside "facebook")', () => {
     const fb = linkRow('e-fb', 'https://www.facebook.com/MayfieldDentalSouthCroydon', 'www.facebook.com');
