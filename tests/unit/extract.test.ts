@@ -37,10 +37,35 @@ describe('extractPage', () => {
     expect(page.sameOriginLinks.some((l) => l.href.endsWith('/contact'))).toBe(true);
     expect(page.contactFormUrls.some((u) => u.endsWith('/contact'))).toBe(true);
   });
+  it('does not treat a contact page as a booking route', () => {
+    // Existing contact/about harvesting is unchanged; no booking route on this page.
+    expect(page.bookingPathLinks).toHaveLength(0);
+  });
   it('parses JSON-LD business + legal footer', () => {
     expect(page.structured[0]?.telephone).toBe('+44 161 496 0000');
     expect(page.legalText).toContain('Acme Dental Ltd');
   });
+  it('harvests a same-origin booking route into bookingPathLinks (never sameOriginLinks)', () => {
+    const p = extractPage(
+      `<html><body>
+        <a href="/contact">Contact</a>
+        <a href="/book">Book online</a>
+        <a href="https://booking.uk.hsone.app/soe/new/X">Book with our system</a>
+       </body></html>`,
+      'https://acmedental.example',
+      'https://acmedental.example',
+      200,
+    );
+    // Same-origin /book is eligible for a bounded booking secondary page.
+    expect(p.bookingPathLinks.some((l) => l.href.endsWith('/book'))).toBe(true);
+    // The external provider link is NOT harvested for capture — it is never crawled.
+    expect(p.bookingPathLinks.some((l) => l.href.includes('hsone.app'))).toBe(false);
+    // Booking links never leak into the enrichment same-origin crawl set.
+    expect(p.sameOriginLinks.some((l) => l.href.endsWith('/book'))).toBe(false);
+    // Existing contact harvesting still works.
+    expect(p.sameOriginLinks.some((l) => l.href.endsWith('/contact'))).toBe(true);
+  });
+
   it('detects a client-rendered shell', () => {
     const shell = extractPage(
       '<html><body><div id="root"></div><script src="a.js"></script><script src="b.js"></script><script src="c.js"></script><script src="d.js"></script><script src="e.js"></script></body></html>',

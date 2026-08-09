@@ -25,6 +25,7 @@ function page(over: Partial<ExtractedPage>): ExtractedPage {
     contactFormUrls: [],
     structured: [],
     sameOriginLinks: [],
+    bookingPathLinks: [],
     legalText: null,
     ...over,
   };

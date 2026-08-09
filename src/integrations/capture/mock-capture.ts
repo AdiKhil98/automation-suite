@@ -7,7 +7,7 @@ import {
   type RenderedPage,
   type Screenshot,
 } from '../../domain/capture/capture-types.js';
-import { selectSecondaryTargets } from '../../domain/capture/page-selection.js';
+import { secondaryLinkCandidates, selectSecondaryTargets } from '../../domain/capture/page-selection.js';
 import { type BrowserCaptureProvider, type CaptureRequest } from './provider.js';
 
 // 1x1 transparent PNG.
@@ -49,9 +49,9 @@ export class MockCaptureProvider implements BrowserCaptureProvider {
     const secondary =
       primarySpec && primarySpec.ok !== false
         ? selectSecondaryTargets(
-            extractPage(primarySpec.html, req.primary.url, primarySpec.finalUrl ?? req.primary.url, 200).sameOriginLinks.filter(
-              (l) => req.originPolicy.isAllowedMainFrame(l.href).allowed,
-            ),
+            secondaryLinkCandidates(
+              extractPage(primarySpec.html, req.primary.url, primarySpec.finalUrl ?? req.primary.url, 200),
+            ).filter((l) => req.originPolicy.isAllowedMainFrame(l.href).allowed),
             req.maxPages,
           )
         : [];

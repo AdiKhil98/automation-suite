@@ -3,6 +3,10 @@ import { type ExtractedPage, type StructuredBusiness } from './types.js';
 
 const EMAIL_RE = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
 const CONTACT_PATH_RE = /(contact|about|location|find-us|branches|our-practice)/i;
+// Same-origin booking routes worth capturing as ONE bounded secondary page. Deliberately narrow
+// (path/anchor-text keywords only, no fuzzy matching). External provider links are NOT harvested
+// here — they are recorded as ordinary link evidence and detected downstream, never crawled.
+const BOOKING_PATH_RE = /(book|booking|appointment|appointments|consultation|reserve)/i;
 
 /**
  * Deterministic, non-browser HTML extraction with cheerio. Pulls only publicly
@@ -25,6 +29,7 @@ export function extractPage(
   const phones = new Set<string>();
   const contactFormUrls = new Set<string>();
   const sameOriginLinks: Array<{ href: string; text: string }> = [];
+  const bookingPathLinks: Array<{ href: string; text: string }> = [];
 
   const reloaded = cheerio.load(html); // second load retaining scripts for detection
   const scriptCount = reloaded('script').length;
@@ -51,6 +56,10 @@ export function extractPage(
     if (safeHost(abs) === host) {
       if (CONTACT_PATH_RE.test(abs) || CONTACT_PATH_RE.test(text)) {
         sameOriginLinks.push({ href: abs, text });
+      }
+      // Booking routes are tracked separately (same-origin only) for bounded booking-page discovery.
+      if (BOOKING_PATH_RE.test(pathOf(abs)) || BOOKING_PATH_RE.test(text)) {
+        bookingPathLinks.push({ href: abs, text });
       }
     }
   });
@@ -81,8 +90,19 @@ export function extractPage(
     contactFormUrls: [...contactFormUrls],
     structured,
     sameOriginLinks,
+    bookingPathLinks,
     legalText,
   };
+}
+
+/** Path + query of an absolute URL (booking-route matching ignores the host to avoid domain false-positives). */
+function pathOf(url: string): string {
+  try {
+    const u = new URL(url);
+    return `${u.pathname}${u.search}`;
+  } catch {
+    return url;
+  }
 }
 
 function extractJsonLd(reloaded: cheerio.CheerioAPI): StructuredBusiness[] {

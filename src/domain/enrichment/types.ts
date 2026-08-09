@@ -48,6 +48,13 @@ export interface ExtractedPage {
   contactFormUrls: string[];
   structured: StructuredBusiness[];
   sameOriginLinks: Array<{ href: string; text: string }>;
+  /**
+   * Same-origin links whose path/text matches a booking route (/book, /appointment, /consultation,
+   * /reserve …). Kept SEPARATE from `sameOriginLinks` so it feeds ONLY the capture layer's bounded
+   * secondary-page selection — the enrichment same-origin crawl (which consumes `sameOriginLinks`)
+   * is deliberately unchanged. Never includes cross-origin (external provider) links.
+   */
+  bookingPathLinks: Array<{ href: string; text: string }>;
   legalText: string | null; // footer/legal identity line
 }
 

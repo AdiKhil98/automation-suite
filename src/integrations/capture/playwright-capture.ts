@@ -10,7 +10,7 @@ import {
   type RenderedPage,
   type Screenshot,
 } from '../../domain/capture/capture-types.js';
-import { selectSecondaryTargets } from '../../domain/capture/page-selection.js';
+import { secondaryLinkCandidates, selectSecondaryTargets } from '../../domain/capture/page-selection.js';
 import { assertUrlSafe, dnsResolveAll, type Resolver } from '../../utils/safe-fetch.js';
 import { type BrowserCaptureProvider, type CaptureRequest } from './provider.js';
 import { guardRequest } from './request-guard.js';
@@ -78,7 +78,7 @@ export class PlaywrightCaptureProvider implements BrowserCaptureProvider {
       rendered.push(primaryDesktop);
       const secondary = primaryDesktop.ok
         ? selectSecondaryTargets(
-            extractPage(primaryDesktop.html, req.primary.url, primaryDesktop.finalUrl, 200).sameOriginLinks.filter(
+            secondaryLinkCandidates(extractPage(primaryDesktop.html, req.primary.url, primaryDesktop.finalUrl, 200)).filter(
               (l) => req.originPolicy.isAllowedMainFrame(l.href).allowed,
             ),
             req.maxPages,

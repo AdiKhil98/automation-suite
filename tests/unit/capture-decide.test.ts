@@ -82,4 +82,42 @@ describe('page selection', () => {
     );
     expect(targets.map((t) => t.role)).toEqual(['contact']);
   });
+
+  it('selects a same-origin /book page as a booking secondary target', () => {
+    const targets = selectSecondaryTargets([{ href: 'https://a.example/book', text: 'Book online' }], 5);
+    expect(targets.map((t) => t.role)).toEqual(['booking']);
+    expect(targets[0]?.url).toBe('https://a.example/book');
+  });
+
+  it('selects an /appointments page as a booking secondary target', () => {
+    const targets = selectSecondaryTargets([{ href: 'https://a.example/appointments', text: 'Appointments' }], 5);
+    expect(targets.map((t) => t.role)).toEqual(['booking']);
+  });
+
+  it('selects a /consultation page as a booking secondary target', () => {
+    const targets = selectSecondaryTargets([{ href: 'https://a.example/consultation', text: 'Consultation' }], 5);
+    expect(targets.map((t) => t.role)).toEqual(['booking']);
+  });
+
+  it('stays bounded: at most one page per role and never exceeds maxTotal-1', () => {
+    const targets = selectSecondaryTargets(
+      [
+        { href: 'https://a.example/contact', text: 'Contact' },
+        { href: 'https://a.example/book', text: 'Book' },
+        { href: 'https://a.example/appointment', text: 'Appointment' }, // second booking link → ignored
+        { href: 'https://a.example/about', text: 'About' },
+      ],
+      3, // primary + at most 2 secondary
+    );
+    expect(targets.length).toBeLessThanOrEqual(2);
+    expect(targets.filter((t) => t.role === 'booking').length).toBeLessThanOrEqual(1);
+  });
+
+  it('captures a URL once even when harvested under two roles', () => {
+    const targets = selectSecondaryTargets(
+      [{ href: 'https://a.example/book', text: 'Book' }, { href: 'https://a.example/book', text: 'Book' }],
+      5,
+    );
+    expect(targets).toHaveLength(1);
+  });
 });
