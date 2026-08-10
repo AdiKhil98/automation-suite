@@ -15,21 +15,24 @@ export interface EmailValidationResult {
   violations: string[];
 }
 
-const URL_RE = /\bhttps?:\/\/|\bwww\.|\b[a-z0-9-]+\.(?:com|de|net|org|io|co|uk|eu|example)\b/i;
-const METRIC_RE = /\b\d+\s?%|\b\d[\d,.]*\s+(?:visitors?|clicks?|leads?|customers?|patients?|sales|conversions?|rankings?|positions?)\b/i;
-const PERFORMANCE_RE = /\b(?:revenue|traffic|rankings?|conversion rate|roi|return on investment|double (?:your|the)|triple|boost (?:your )?sales|more (?:patients|customers|leads)|lose (?:customers|patients)|guaranteed?)\b/i;
-const FAKE_URGENCY_RE = /\b(?:act now|urgent(?:ly)?|immediately|last chance|don'?t miss|limited time|only available this week|hurry|expires soon|nur diese woche|letzte chance|sofort handeln)\b/i;
-const UNSUPPORTED_BEHAVIOR_RE = /\b(?:visitors?|patients?|customers?)\s+(?:are|will be|werden|würden)\s+(?:leaving|leave|abandon|lost|abspringen|verlassen)\b/i;
-const COMPETITOR_RE = /\b(?:competitors?|competition|other (?:clinics?|practices?|businesses)|market leaders?|mitbewerber|konkurrenz|andere (?:kliniken|praxen|unternehmen))\b/i;
-const DEMO_MENTION_RE = /\b(?:demo|mock-?up|redesign|concept|preview|prototype|mockup|konzept|entwurf|vorschau)\b/i;
+// These content predicates are exported (behavior unchanged) so the operator-authored-email validator
+// can apply the SAME prohibited-content / punctuation / language rules to a rendered human email without
+// duplicating regexes. `validateEmail` (the AI-writer gate) uses them exactly as before.
+export const URL_RE = /\bhttps?:\/\/|\bwww\.|\b[a-z0-9-]+\.(?:com|de|net|org|io|co|uk|eu|example)\b/i;
+export const METRIC_RE = /\b\d+\s?%|\b\d[\d,.]*\s+(?:visitors?|clicks?|leads?|customers?|patients?|sales|conversions?|rankings?|positions?)\b/i;
+export const PERFORMANCE_RE = /\b(?:revenue|traffic|rankings?|conversion rate|roi|return on investment|double (?:your|the)|triple|boost (?:your )?sales|more (?:patients|customers|leads)|lose (?:customers|patients)|guaranteed?)\b/i;
+export const FAKE_URGENCY_RE = /\b(?:act now|urgent(?:ly)?|immediately|last chance|don'?t miss|limited time|only available this week|hurry|expires soon|nur diese woche|letzte chance|sofort handeln)\b/i;
+export const UNSUPPORTED_BEHAVIOR_RE = /\b(?:visitors?|patients?|customers?)\s+(?:are|will be|werden|würden)\s+(?:leaving|leave|abandon|lost|abspringen|verlassen)\b/i;
+export const COMPETITOR_RE = /\b(?:competitors?|competition|other (?:clinics?|practices?|businesses)|market leaders?|mitbewerber|konkurrenz|andere (?:kliniken|praxen|unternehmen))\b/i;
+export const DEMO_MENTION_RE = /\b(?:demo|mock-?up|redesign|concept|preview|prototype|mockup|konzept|entwurf|vorschau)\b/i;
 const CTA_IN_BODY_RE = /\b(?:reply|respond|book a call|schedule a call|call me|take a look|view (?:the|this)|open (?:the|this)|click|visit|antworten sie|schreiben sie mir|termin vereinbaren|ansehen|öffnen sie|klicken sie)\b/i;
 const GENERIC_OPENING_RE = /^(?:i (?:just )?(?:wanted to|thought i(?:'d| would)|came across)|ich wollte mich kurz|ich dachte,? ich|in today'?s|in der heutigen|i hope|ich hoffe)/i;
-const MARKDOWN_RE = /(?:^|\n)\s{0,3}(?:#{1,6}\s|[-*+]\s|\d+\.\s|>\s)|\[[^\]]+\]\([^)]+\)|`{1,3}|\*\*|__/m;
-const EMOJI_RE = /\p{Extended_Pictographic}/u;
-const REPEATED_COMMA_RE = /,\s*,/;
-const CAUTIOUS_RE = /\b(?:perhaps|maybe|possibly|might|could potentially|should perhaps be reviewed|vielleicht|möglicherweise|eventuell|könnte möglicherweise|sollte vielleicht geprüft werden)\b/gi;
+export const MARKDOWN_RE = /(?:^|\n)\s{0,3}(?:#{1,6}\s|[-*+]\s|\d+\.\s|>\s)|\[[^\]]+\]\([^)]+\)|`{1,3}|\*\*|__/m;
+export const EMOJI_RE = /\p{Extended_Pictographic}/u;
+export const REPEATED_COMMA_RE = /,\s*,/;
+export const CAUTIOUS_RE = /\b(?:perhaps|maybe|possibly|might|could potentially|should perhaps be reviewed|vielleicht|möglicherweise|eventuell|könnte möglicherweise|sollte vielleicht geprüft werden)\b/gi;
 
-const FORBIDDEN_PHRASES = [
+export const FORBIDDEN_PHRASES = [
   'in der heutigen digitalen welt',
   'in der heutigen schnelllebigen zeit',
   'es ist wichtig zu beachten',
@@ -65,11 +68,11 @@ const GENERIC_SUBJECTS = [
   /^(?:website|webseite|homepage)\s*(?:idea|note|suggestion|idee|hinweis|vorschlag)?$/i,
 ] as const;
 
-function wordCount(value: string): number {
+export function wordCount(value: string): number {
   return value.trim().split(/\s+/).filter(Boolean).length;
 }
 
-function occurrences(value: string, expression: RegExp): number {
+export function occurrences(value: string, expression: RegExp): number {
   return [...value.matchAll(expression)].length;
 }
 

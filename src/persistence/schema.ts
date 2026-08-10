@@ -969,6 +969,10 @@ export const emailDrafts = pgTable(
     claimHonest: boolean('claim_honest'),
     reviewerProblems: jsonb('reviewer_problems'),
     totalCostUsd: doublePrecision('total_cost_usd').notNull(),
+    // Provenance (migration 0035): 'AI' (default, all pre-existing rows) vs 'OPERATOR' (human-authored,
+    // stored via the operator-email workflow). Disambiguates authorship so an operator email is never
+    // represented as AI-generated; the AI writer/reviewer columns carry explicit 'OPERATOR' sentinels then.
+    authorship: text('authorship').notNull().default('AI'),
     // Phase 10 human review (dashboard). Distinct from the automated reviewer verdict above.
     humanDecision: text('human_decision'),
     humanNotes: text('human_notes'),
@@ -979,6 +983,7 @@ export const emailDrafts = pgTable(
   (t) => ({
     leadIdx: index('email_drafts_lead_idx').on(t.leadId),
     statusCk: check('email_draft_status_ck', sql`${t.status} IN ('DRAFTED','APPROVED','REVIEW_FAILED')`),
+    authorshipCk: check('email_draft_authorship_ck', sql`${t.authorship} IN ('AI','OPERATOR')`),
     humanDecisionCk: check('email_draft_human_decision_ck', sql`${t.humanDecision} IS NULL OR ${t.humanDecision} IN ('APPROVED','REJECTED')`),
   }),
 );

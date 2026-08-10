@@ -33,6 +33,7 @@ import { leadState } from './commands/lead-state.js';
 import { rejectLeadCommand } from './commands/reject-lead.js';
 import { reopenLeadCommand } from './commands/reopen-lead.js';
 import { deterministicFindingApproveCommand } from './commands/deterministic-finding-approve.js';
+import { operatorEmailApproveCommand } from './commands/operator-email-approve.js';
 import { listLeads } from './commands/list-leads.js';
 import { resetTestData } from './commands/reset-test-data.js';
 import { resumeAuditCommand } from './commands/resume-audit.js';
@@ -426,6 +427,19 @@ program
   .option('--confirm', 'persist the finding + transition the lead (omit for a dry preview)', false)
   .action((opts: { lead: string; category: string; evidence: string; by: string; confirm?: boolean }) =>
     withContext((ctx) => deterministicFindingApproveCommand(ctx, opts)),
+  );
+
+program
+  .command('operator-email-approve')
+  .description('Persist ONE operator-authored (human-written) outreach email into the existing email_drafts workflow, bound to a lead ACTIVE deterministic finding. Requires the lead to be OUTREACH_READY_DETERMINISTIC. Runs the deterministic operator-email copy gate (reuses the AI-writer prohibited-content/punctuation/language predicates + the finding denylist), preserves the exact subject/body, records authorship=OPERATOR (never AI) with honest sentinels, computes a reproducible message hash, and transitions the lead into the EXISTING READY_FOR_HUMAN_APPROVAL queue. Dry preview unless --confirm. Zero LLM/network/Gmail/Sheet/send; never mutates the deterministic finding; never advances past human approval.')
+  .requiredOption('--lead <id>', 'exact lead id (single lead; no bulk fallback)')
+  .requiredOption('--finding <id>', 'the lead ACTIVE deterministic finding id this email is based on')
+  .requiredOption('--subject <text>', 'exact email subject')
+  .requiredOption('--body-file <path>', 'path to a file containing the exact email body')
+  .requiredOption('--by <operator>', 'operator identity recorded as author/approver')
+  .option('--confirm', 'persist the email + transition the lead (omit for a dry preview)', false)
+  .action((opts: { lead: string; finding: string; subject: string; bodyFile: string; by: string; confirm?: boolean }) =>
+    withContext((ctx) => operatorEmailApproveCommand(ctx, { lead: opts.lead, finding: opts.finding, subject: opts.subject, bodyFile: opts.bodyFile, by: opts.by, confirm: opts.confirm })),
   );
 
 program

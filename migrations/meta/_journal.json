@@ -246,6 +246,13 @@
       "when": 1786134000000,
       "tag": "0034_deterministic_findings",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1786220400000,
+      "tag": "0035_email_authorship",
+      "breakpoints": true
     }
   ]
 }

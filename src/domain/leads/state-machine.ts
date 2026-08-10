@@ -37,10 +37,12 @@ const BASE_TRANSITIONS: Record<LeadStatus, LeadStatus[]> = {
   CAPTURED: ['READY_FOR_AUDIT'],
   READY_FOR_AUDIT: ['AUDITED', 'NEEDS_MANUAL_REVIEW', 'FAILED'],
   AUDITED: ['OPPORTUNITY_READY', 'NEEDS_MANUAL_REVIEW'],
-  // Deterministic outreach bridge: terminal-ish holding state produced by an operator-approved
-  // deterministic finding. It only feeds outreach-compose-preview in this milestone, so it has no
-  // forward edge into the demo/email pipeline yet; it can still be parked for manual review.
-  OUTREACH_READY_DETERMINISTIC: ['NEEDS_MANUAL_REVIEW'],
+  // Deterministic outreach bridge: holding state produced by an operator-approved deterministic
+  // finding. It feeds outreach-compose-preview, and an operator-authored email (operator-email-approve)
+  // advances it into the EXISTING human-approval queue (READY_FOR_HUMAN_APPROVAL). No new send state and
+  // no forward send edge are added: reaching HUMAN_APPROVED later stays gated by the existing Gmail/send
+  // eligibility checks. It can still be parked for manual review.
+  OUTREACH_READY_DETERMINISTIC: ['NEEDS_MANUAL_REVIEW', 'READY_FOR_HUMAN_APPROVAL'],
   OPPORTUNITY_READY: ['COMPETITOR_RESEARCH_READY', 'DEMO_DECIDED'],
   COMPETITOR_RESEARCH_READY: ['DEMO_DECIDED'],
   // DEMO_READY only applies when the demo tier is not NONE; both edges are valid.

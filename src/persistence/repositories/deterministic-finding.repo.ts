@@ -118,6 +118,15 @@ export class DeterministicFindingRepository {
     }
   }
 
+  /** The capture_evidence ids cited by a deterministic finding (for operator-email evidence provenance). */
+  async listFindingEvidenceIds(deterministicFindingId: string): Promise<string[]> {
+    const rows = await this.db
+      .select({ captureEvidenceId: deterministicFindingEvidence.captureEvidenceId })
+      .from(deterministicFindingEvidence)
+      .where(eq(deterministicFindingEvidence.deterministicFindingId, deterministicFindingId));
+    return rows.map((r) => r.captureEvidenceId);
+  }
+
   /** Project the lead's ACTIVE deterministic findings into the composer's finding shape. */
   async listActiveComposerFindings(leadId: string): Promise<DeterministicComposerFinding[]> {
     const rows = await this.db

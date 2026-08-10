@@ -66,16 +66,19 @@ describe('lead state machine', () => {
     }
   });
 
-  it('adds the deterministic bridge status with exactly one intended entry and exit edge', () => {
+  it('adds the deterministic bridge status with exactly its intended entry and exit edges', () => {
     // The only way IN: from NEEDS_MANUAL_REVIEW.
     expect(canTransition('NEEDS_MANUAL_REVIEW', 'OUTREACH_READY_DETERMINISTIC')).toBe(true);
     // No other state can enter it — in particular it is never reached via the AI audit path.
     for (const from of ['READY_FOR_AUDIT', 'AUDITED', 'OPPORTUNITY_READY', 'CAPTURED', 'REJECTED'] as const) {
       expect(canTransition(from, 'OUTREACH_READY_DETERMINISTIC')).toBe(false);
     }
-    // The only non-suppression way OUT: back to manual review (this milestone wires no email edge).
-    expect(allowedTransitions('OUTREACH_READY_DETERMINISTIC')).toEqual(['NEEDS_MANUAL_REVIEW', 'UNSUBSCRIBED']);
-    for (const to of ['AUDITED', 'OPPORTUNITY_READY', 'DEMO_DECIDED', 'EMAIL_DRAFTED', 'EMAIL_APPROVED', 'SENT'] as const) {
+    // Ways OUT: park back to manual review, OR advance an operator-authored email into the EXISTING
+    // human-approval queue (operator-email-approve). No new send state and no forward send edge.
+    expect(allowedTransitions('OUTREACH_READY_DETERMINISTIC')).toEqual(['NEEDS_MANUAL_REVIEW', 'READY_FOR_HUMAN_APPROVAL', 'UNSUBSCRIBED']);
+    expect(canTransition('OUTREACH_READY_DETERMINISTIC', 'READY_FOR_HUMAN_APPROVAL')).toBe(true);
+    // It never jumps into the mid-email or send states directly.
+    for (const to of ['AUDITED', 'OPPORTUNITY_READY', 'DEMO_DECIDED', 'EMAIL_DRAFTED', 'EMAIL_APPROVED', 'HUMAN_APPROVED', 'DRAFT_CREATED', 'SENT'] as const) {
       expect(canTransition('OUTREACH_READY_DETERMINISTIC', to)).toBe(false);
     }
     // It is not terminal (it can be parked back for manual review).

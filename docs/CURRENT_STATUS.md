@@ -114,6 +114,37 @@ outreach-composable finding for a lead whose AI audit produced no outreach-safe 
 - NOT done pending review: the migration has NOT been applied to any database, and NO Whitgift finding has been
   created. No email generated. No LLM/network/Gmail/Sheet/send path touched.
 
+## Operator-authored email (MINIMAL REUSE; IMPLEMENTED IN CODE; migration NOT applied; nothing persisted)
+
+Lets an operator store a human-written outreach email for an `OUTREACH_READY_DETERMINISTIC` lead in the
+EXISTING `email_drafts` workflow, without a parallel subsystem and without representing it as AI-generated.
+No LLM is involved.
+
+- Migration `0035_email_authorship.sql` (additive) adds ONE column: `email_drafts.authorship` (`text NOT NULL
+  DEFAULT 'AI'`, CHECK `IN ('AI','OPERATOR')`). Existing rows stay `'AI'` (no backfill); operator rows set
+  `'OPERATOR'`. No other table is altered.
+- One state edge added: `OUTREACH_READY_DETERMINISTIC -> READY_FOR_HUMAN_APPROVAL` (code-only; `leads.status`
+  has no CHECK). No new send state, no forward send edge. Reaching `HUMAN_APPROVED`/Gmail/send later stays
+  gated by the existing `checkGmailEligibility` (still requires `HUMAN_APPROVED` + feature flags + verified
+  recipient + approved finalization — all off/absent).
+- Domain `src/domain/email/operator-email.ts` (rules `operator-email-1`): `validateOperatorEmail` reuses the
+  EXACT prohibited-content/punctuation/language predicates exported from `email-validation.ts` (AI-writer
+  behavior unchanged) plus the deterministic-finding denylist; `computeOperatorEmailHash` is a reproducible
+  message hash over lead + finding + exact subject/body + sorted evidence ids + rules version.
+- CLI `operator-email-approve --lead --finding --subject --body-file --by [--confirm]` — dry preview unless
+  `--confirm`; on confirm it atomically inserts one `email_drafts` row (status `APPROVED`, `authorship=OPERATOR`,
+  honest `OPERATOR` sentinels in the legacy AI columns, `totalCostUsd=0`, exact subject/body preserved),
+  transitions the lead to `READY_FOR_HUMAN_APPROVAL`, and appends an operator NOTE (deterministic finding id,
+  cited capture-evidence ids, authorship, message hash). Never mutates the finding; zero LLM/network/Gmail/Sheet/send.
+- Later human approval reuses the EXISTING `ReviewService.decideEmail` (READY_FOR_HUMAN_APPROVAL -> HUMAN_APPROVED,
+  records the approver on the same row) — no new approval code.
+- Tests: `tests/unit/operator-email.test.ts` (validation pass/fail, hash determinism, Gmail no-bypass),
+  `tests/unit/email-authorship-migration.test.ts`, state-machine edge, journal tail — green in the full unit
+  suite (1337 passed, 120 files). A PostgreSQL spec (`tests/integration/operator-email.pg.test.ts`) covers
+  provenance/exact-text/transition/duplicate/finding-untouched; typechecks, needs the gated test DB to run.
+- NOT done pending review: migration 0035 NOT applied to any DB; NO Mayfield email persisted; lead unchanged
+  (`OUTREACH_READY_DETERMINISTIC`); no human approval, Gmail, send, Sheets, or follow-up.
+
 ## Phase 7A1 — deterministic competitor candidate foundation (IMPLEMENTED; no capture/email/AI/live/sending)
 
 - Migration `0029_competitor_research.sql` adds two additive tables and changes no existing table:

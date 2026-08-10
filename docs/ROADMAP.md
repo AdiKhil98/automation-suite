@@ -16,6 +16,11 @@ uses Cold Email Copy Standard v2 with deterministic and independent-reviewer qua
 evidence-backed, template-constrained finding into outreach composition (outreach-compose-preview only) when
 an AI audit yielded no safe finding, without fabricating an AI audit. Migration NOT applied; no Whitgift
 finding created; `generate-emails` not wired.**
+**Operator-authored email (minimal reuse) — implemented in code (pending review): migration `0035` adds one
+`email_drafts.authorship` column (`AI` default / `OPERATOR`) + `operator-email-approve` CLI + one state edge
+`OUTREACH_READY_DETERMINISTIC -> READY_FOR_HUMAN_APPROVAL`, so a human-written email is stored in the EXISTING
+email_drafts workflow (no parallel subsystem, never marked AI) and reaches the existing human-approval path.
+No LLM. Migration NOT applied; no email persisted; Gmail/send stay gated off.**
 **Bounded online-booking discovery — Layer 2 committed (`fix(audit): discover bounded online booking
 paths`): same-origin booking routes are now eligible for one bounded secondary capture so the audit observes
 online booking before any booking-friction conclusion (no crawl; external provider links detected but never
