@@ -87,6 +87,28 @@ describe('extractCaptureEvidence — interactive control text + destination', ()
   });
 });
 
+describe('extractCaptureEvidence — a conversion CTA survives a link-heavy nav menu', () => {
+  // A big treatment mega-menu (like Mayfield) followed by the real "Book appointment" CTA far down
+  // the DOM. The menu links must not crowd the booking CTA out of the bounded CTA evidence.
+  const menu = Array.from({ length: 60 }, (_, i) => `<a href="/treatment/t${i}">Treatment ${i}</a>`).join('');
+  const HTML = `<html><head><title>Clinic</title></head><body>
+    <nav>${menu}</nav>
+    <main><div class="wp-block-button"><a class="wp-block-button__link" href="/contact/">Book appointment</a></div></main>
+  </body></html>`;
+  const items = extractCaptureEvidence(page(HTML));
+  const ctas = items.filter((i) => i.evidenceType === 'cta');
+
+  it('keeps the booking-intent CTA even though 60 nav links precede it', () => {
+    const book = ctas.find((c) => c.extractedValue.startsWith('text=Book appointment '));
+    expect(book).toBeDefined();
+    expect(book?.extractedValue).toContain('href=/contact/');
+  });
+  it('does not spend CTA budget on nav-menu anchors (already nav_label)', () => {
+    expect(ctas.some((c) => c.extractedValue.includes('Treatment 0'))).toBe(false);
+    expect(ctas.length).toBeLessThan(10); // only the real CTA(s), not 60 menu links
+  });
+});
+
 describe('fingerprints', () => {
   it('normalized fingerprint is stable and ignores volatile values', () => {
     const a = normalizedEvidenceFingerprint(extractCaptureEvidence(page(HTML)));
