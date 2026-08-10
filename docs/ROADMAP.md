@@ -11,6 +11,21 @@ review, deployment, or outreach use of the render is authorized. Demo Engine V2
 Milestones 1 and 2 are implemented as an isolated, disabled-by-default, mock-only intelligence/content/asset/
 design foundation. No V2 render, approval, deployment, or live-provider path exists. Phase 9 email generation
 uses Cold Email Copy Standard v2 with deterministic and independent-reviewer quality gates.
+**Deterministic outreach-finding bridge — implemented in code (pending review): migration `0034` +
+`deterministic-finding-approve` CLI + `OUTREACH_READY_DETERMINISTIC` status let an operator promote an
+evidence-backed, template-constrained finding into outreach composition (outreach-compose-preview only) when
+an AI audit yielded no safe finding, without fabricating an AI audit. Migration NOT applied; no Whitgift
+finding created; `generate-emails` not wired.**
+**Bounded online-booking discovery — Layer 2 committed (`fix(audit): discover bounded online booking
+paths`): same-origin booking routes are now eligible for one bounded secondary capture so the audit observes
+online booking before any booking-friction conclusion (no crawl; external provider links detected but never
+crawled). Layer 1 (provider-host/keyword detection + the "assert absence only on a booking-aware capture,
+else UNKNOWN" rule) is implemented but preserved uncommitted with the deterministic-finding bridge.**
+**Confirmed decisions (2026-08-09): Whitgift BOOKING_FRICTION is DISPROVEN (functional HSOE online booking
+exists) — no email from it, no Whitgift finding; presence-only competitor claim rule (state verified patterns,
+never claim they cause more patients/revenue/conversions/rankings/performance without data); reusable market
+benchmark is the preferred Phase 7 direction but DEFERRED until the first real outreach email is prepared.
+Priority milestone: REAL LEAD -> TRUSTWORTHY AUDIT -> REAL EMAIL -> HUMAN APPROVAL.**
 **Phase 17A — outreach tracking & follow-up operations — is implemented (tracking/synchronization
 infrastructure only; it sends nothing and modifies no Gmail draft). Phase 17A2 — guarded live read-only
 Gmail reply sync — is implemented (a real, doubly-gated, strictly read-only reply reader that modifies

@@ -239,6 +239,13 @@
       "when": 1786047600000,
       "tag": "0033_places_website_identity_signal",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1786134000000,
+      "tag": "0034_deterministic_findings",
+      "breakpoints": true
     }
   ]
 }

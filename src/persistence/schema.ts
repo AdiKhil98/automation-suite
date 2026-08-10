@@ -2712,3 +2712,51 @@ export const emailClaimLedger = pgTable(
     claimTypeCk: check('email_claim_ledger_claim_type_ck', sql.raw(`claim_type IN (${EMAIL_CLAIM_TYPES_SQL})`)),
   }),
 );
+
+// --- Deterministic outreach-finding bridge (migration 0034) ---
+//
+// An operator-approved, evidence-backed, template-constrained finding for a lead whose AI audit did
+// not yield an outreach-safe finding. This is deliberately SEPARATE from audit_runs/audit_findings so
+// the AI audit history stays pristine and provenance is never mislabelled: every row here is
+// DETERMINISTIC_OPERATOR_APPROVED, never AI-generated and never reviewer-approved. Additive only.
+
+export const deterministicFindings = pgTable(
+  'deterministic_findings',
+  {
+    id: text('id').primaryKey(),
+    leadId: text('lead_id').notNull().references(() => leads.id, { onDelete: 'cascade' }),
+    captureRunId: text('capture_run_id').notNull().references(() => websiteCaptureRuns.id, { onDelete: 'cascade' }),
+    category: text('category').notNull(),
+    findingRef: text('finding_ref').notNull(),
+    observation: text('observation').notNull(),
+    recommendation: text('recommendation').notNull(),
+    safeForOutreach: boolean('safe_for_outreach').notNull(),
+    status: text('status').notNull().default('ACTIVE'),
+    // Explicit, non-AI provenance. The CHECK pins the only permitted value.
+    provenance: text('provenance').notNull(),
+    approvedBy: text('approved_by').notNull(),
+    approvedAt: timestamp('approved_at', { withTimezone: true }).notNull(),
+    templateVersion: text('template_version').notNull(),
+    rulesVersion: text('rules_version').notNull(),
+    evidenceHash: text('evidence_hash').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    leadIdx: index('deterministic_findings_lead_idx').on(t.leadId),
+    // At most one ACTIVE finding per (lead, category) — enforces duplicate-active prevention in the DB.
+    activeUk: uniqueIndex('deterministic_findings_active_uk').on(t.leadId, t.category).where(sql`${t.status} = 'ACTIVE'`),
+    categoryCk: check('deterministic_finding_category_ck', sql.raw(`category IN (${AUDIT_CATEGORIES_SQL})`)),
+    statusCk: check('deterministic_finding_status_ck', sql`${t.status} IN ('ACTIVE','SUPERSEDED')`),
+    provenanceCk: check('deterministic_finding_provenance_ck', sql`${t.provenance} = 'DETERMINISTIC_OPERATOR_APPROVED'`),
+    safeCk: check('deterministic_finding_safe_ck', sql`${t.safeForOutreach} = true`),
+  }),
+);
+
+export const deterministicFindingEvidence = pgTable(
+  'deterministic_finding_evidence',
+  {
+    deterministicFindingId: text('deterministic_finding_id').notNull().references(() => deterministicFindings.id, { onDelete: 'cascade' }),
+    captureEvidenceId: text('capture_evidence_id').notNull().references(() => captureEvidence.id, { onDelete: 'cascade' }),
+  },
+  (t) => ({ pk: primaryKey({ columns: [t.deterministicFindingId, t.captureEvidenceId] }) }),
+);

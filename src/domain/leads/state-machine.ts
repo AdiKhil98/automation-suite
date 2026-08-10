@@ -37,6 +37,10 @@ const BASE_TRANSITIONS: Record<LeadStatus, LeadStatus[]> = {
   CAPTURED: ['READY_FOR_AUDIT'],
   READY_FOR_AUDIT: ['AUDITED', 'NEEDS_MANUAL_REVIEW', 'FAILED'],
   AUDITED: ['OPPORTUNITY_READY', 'NEEDS_MANUAL_REVIEW'],
+  // Deterministic outreach bridge: terminal-ish holding state produced by an operator-approved
+  // deterministic finding. It only feeds outreach-compose-preview in this milestone, so it has no
+  // forward edge into the demo/email pipeline yet; it can still be parked for manual review.
+  OUTREACH_READY_DETERMINISTIC: ['NEEDS_MANUAL_REVIEW'],
   OPPORTUNITY_READY: ['COMPETITOR_RESEARCH_READY', 'DEMO_DECIDED'],
   COMPETITOR_RESEARCH_READY: ['DEMO_DECIDED'],
   // DEMO_READY only applies when the demo tier is not NONE; both edges are valid.
@@ -66,6 +70,7 @@ const BASE_TRANSITIONS: Record<LeadStatus, LeadStatus[]> = {
     'READY_FOR_ENRICHMENT',
     'READY_FOR_CAPTURE',
     'READY_FOR_AUDIT',
+    'OUTREACH_READY_DETERMINISTIC',
     'REJECTED',
   ],
 

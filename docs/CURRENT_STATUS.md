@@ -33,6 +33,87 @@ and local render/preview/screenshot/review-package tooling. V1 remains authorita
 paid call, deployment, screenshot-review model, email, Gmail, or scheduling path was added; the lifecycle
 still cannot reach a real AUTO_REVIEW_PASSED, HUMAN_APPROVED, or deployment-eligible state.
 
+## Confirmed operating decisions (2026-08-09)
+
+These are standing decisions; treat them as authoritative until explicitly changed.
+
+1. **Whitgift BOOKING_FRICTION is DISPROVEN.** Whitgift Dental has a functional HSOE online booking path
+   (`booking.uk.hsone.app/soe/new/Whitgift Dental`). No email may be generated from the old booking-friction
+   finding, and the deterministic Whitgift finding must NOT be created. Do not return to Whitgift.
+2. **Presence-only competitor claim rule.** We may state verified website patterns we directly observed (e.g.
+   "three strong local clinic websites we reviewed allow patients to start booking online"). We may NOT claim
+   those patterns cause more patients, revenue, conversions, rankings, or superior business performance without
+   actual supporting acquisition/performance data. No unsupported causal/comparative claims.
+3. **Phase 7 direction — reusable market benchmark (DEFERRED).** Preferred future design is a reusable,
+   approved market benchmark (research a small representative competitor set once per market/niche and compare
+   many prospects against it) rather than researching a fresh competitor set per prospect. Implementation is
+   DEFERRED until after the first real outreach email is successfully prepared. No competitor work is in scope
+   now.
+
+**Current priority milestone:** REAL LEAD -> TRUSTWORTHY AUDIT -> REAL EMAIL -> HUMAN APPROVAL. Reach ONE real
+prospect with ONE real verified problem, presented for approval. No competitor work, no Gmail, no Sheets, no
+send, no follow-up until that is achieved.
+
+## Bounded online-booking discovery (Layer 2 committed; Layer 1 preserved with the bridge)
+
+Fix for the audit missing a real online-booking route before asserting booking-friction. Investigation:
+the deterministic booking disqualifier would have caught the exact HSOE URL had it been in the captured
+evidence, so the miss was upstream at capture. Root cause A (proven from code): booking links were filtered
+out by the contact-path harvest before secondary-page selection, so the `booking` role never received
+candidates and a `/book`-style page (or an external provider link only reachable from it) was never captured.
+Causes B (dynamic injection after DOMContentLoaded) and C (evidence slice caps) could NOT be proven — no
+stored Whitgift capture evidence exists in this environment and the production DB is not authorized for read
+— so Layer 3 (network-idle/widget waiting) was deliberately NOT implemented.
+
+- **Layer 2 — bounded booking-page discovery: COMMITTED** (`fix(audit): discover bounded online booking
+  paths`, on main). `extract` now harvests same-origin booking-route links into a separate `bookingPathLinks`
+  field (enrichment same-origin crawl unchanged; external provider links never harvested/crawled); the
+  page-selection `booking` role is widened and the policy is bumped to the booking-aware `cap-pages-2`; both
+  capture providers feed booking candidates into the existing bounded secondary selection. At most one
+  booking/contact secondary page beyond the primary; no crawl; existing contact/about behavior intact.
+- **Layer 1 — stronger deterministic booking detection + absence rule: IMPLEMENTED, NOT COMMITTED.** It lives
+  inside the still-uncommitted deterministic-finding bridge (which carries migration 0034), so it was left in
+  the working tree, preserved for later review with the bridge — NOT bundled into the Layer 2 commit. It adds
+  `booking-discovery.ts` (keyword + recognized provider-host detection: hsone/carestack/dentalhub/dentally/
+  zesty over cta/link/nav_label/form evidence) and the critical absence rule: booking-friction may assert
+  "no online booking" ONLY when the reviewed capture was booking-aware (`cap-pages-2`); otherwise the result
+  is UNKNOWN, not ABSENT, and the searched scope is returned for auditability. Full validation (lint,
+  typecheck, 1301 unit tests, build) is green with both layers in the working tree.
+
+## Deterministic outreach-finding bridge (IMPLEMENTED IN CODE; migration NOT applied; no finding created)
+
+Lets an operator turn an evidence-backed, template-constrained deterministic conclusion into an
+outreach-composable finding for a lead whose AI audit produced no outreach-safe finding (the Whitgift
+`VALIDATION_FAILED` situation) — WITHOUT fabricating an AI audit run and WITHOUT touching AI audit history.
+
+- Migration `0034_deterministic_findings.sql` (additive only) adds two tables: `deterministic_findings`
+  (provenance pinned by CHECK to `DETERMINISTIC_OPERATOR_APPROVED`; `safe_for_outreach` forced true;
+  `status IN (ACTIVE,SUPERSEDED)`; partial unique index — at most one ACTIVE finding per `(lead,category)`)
+  and `deterministic_finding_evidence` (FK to real `capture_evidence` rows). No existing table is altered.
+- New lead status `OUTREACH_READY_DETERMINISTIC` with a single edge in (`NEEDS_MANUAL_REVIEW →`) and a single
+  non-suppression edge out (`→ NEEDS_MANUAL_REVIEW`). `AUDITED` stays AI-only. Status is a bare `text`
+  column (no DB CHECK), so this is code-only — no migration.
+- Domain `src/domain/deterministic-finding/` (rules `det-find-2`, template `det-tmpl-2`): fixed bounded-page
+  BOOKING_FRICTION template ("On the pages reviewed, the site's booking controls lead to a contact page …"),
+  category evidence-support rule whose positive anchor is a cited booking-INTENT control (a "book"-labelled
+  control routing to a non-booking page) — phone/email is NOT required for eligibility — and which fails on any
+  direct online-booking signal in the reviewed capture, prohibited-wording denylist, deterministic provenance
+  hash, pure validator (fails closed on foreign/missing/wrong-run/stale evidence, unsupported category, absent
+  booking-intent, cited evidence that is not a booking-intent control, prohibited wording, duplicate active
+  finding, or non-reproducible hash), and a composer projection resolver (AI audit always wins; deterministic
+  is fallback-only).
+- CLI `deterministic-finding-approve --lead --category --evidence --by [--confirm]` — single-lead, dry preview
+  unless `--confirm`. `outreach-compose-preview` now composes from the projected deterministic finding when no
+  AI safe finding exists and prints `finding provenance`. `generate-emails` is intentionally NOT wired.
+- Tests: focused unit tests (validation rules incl. booking-intent anchor, bounded-page wording, hash
+  determinism, denylist, resolver provenance, state machine, migration metadata/safety) — green as part of the
+  full unit suite (1317 passed, 118 files).
+  A PostgreSQL integration spec (`tests/integration/deterministic-finding.pg.test.ts`) covers persistence,
+  transition, prior-`VALIDATION_FAILED`-untouched, duplicate prevention, booking-signal fail-closed, and the
+  composer projection; it is written and typechecks but requires the gated destructive test DB to execute.
+- NOT done pending review: the migration has NOT been applied to any database, and NO Whitgift finding has been
+  created. No email generated. No LLM/network/Gmail/Sheet/send path touched.
+
 ## Phase 7A1 — deterministic competitor candidate foundation (IMPLEMENTED; no capture/email/AI/live/sending)
 
 - Migration `0029_competitor_research.sql` adds two additive tables and changes no existing table:

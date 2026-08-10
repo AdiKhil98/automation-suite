@@ -19,6 +19,12 @@ export const LEAD_STATUSES = [
   'CAPTURED',
   'READY_FOR_AUDIT',
   'AUDITED',
+  // Deterministic outreach bridge: an operator-approved, evidence-backed deterministic finding
+  // (never an AI audit) makes a NEEDS_MANUAL_REVIEW lead outreach-composable. This status is
+  // distinct from AUDITED so provenance is never mislabelled as AI. Reachable only from
+  // NEEDS_MANUAL_REVIEW via `deterministic-finding-approve`. This milestone wires it into
+  // outreach-compose-preview only (not generate-emails).
+  'OUTREACH_READY_DETERMINISTIC',
   'OPPORTUNITY_READY',
   'COMPETITOR_RESEARCH_READY',
   'DEMO_DECIDED',

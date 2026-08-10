@@ -19,6 +19,8 @@ import { CompetitorPatternRepository } from '../../persistence/repositories/comp
 import { CompetitorResearchRepository } from '../../persistence/repositories/competitor-research.repo.js';
 import { CompetitorEnrichmentRepository } from '../../persistence/repositories/competitor-enrichment.repo.js';
 import { DemoInputRepository } from '../../persistence/repositories/demo-input.repo.js';
+import { DeterministicFindingRepository } from '../../persistence/repositories/deterministic-finding.repo.js';
+import { resolveComposerFindings } from '../../domain/deterministic-finding/composer-projection.js';
 import { EmailInputRepository } from '../../persistence/repositories/email-input.repo.js';
 import { LeadFactsRepository } from '../../persistence/repositories/lead-facts.repo.js';
 import { buildEmailProvider } from './email-build.js';
@@ -64,16 +66,22 @@ export async function outreachComposePreviewCommand(ctx: CliContext, opts: Compo
     return;
   }
 
+  // Findings come from the Phase-6 AI audit when it has an outreach-safe finding; otherwise fall back
+  // to an operator-approved deterministic finding. AI always takes precedence — the deterministic
+  // bridge never overrides a real audit — and the resolved provenance is printed for traceability.
   const auditRepo = new DemoInputRepository(ctx.db);
   const audit = await auditRepo.latestAuditForComposer(leadId);
-  if (!audit) {
-    console.error(`No audit available for lead ${leadId}; cannot compose.`);
+  const deterministicFindings = await new DeterministicFindingRepository(ctx.db).listActiveComposerFindings(leadId);
+  const composerFindings = resolveComposerFindings(audit, deterministicFindings);
+  if (composerFindings.source === null) {
+    console.error(`No audit or deterministic finding available for lead ${leadId}; cannot compose.`);
     process.exitCode = 1;
     return;
   }
+  console.log(`  finding provenance:        ${composerFindings.source}`);
   const facts = await new LeadFactsRepository(ctx.db).listCurrentFacts(leadId);
   const demo = await new EmailInputRepository(ctx.db).latestDemo(leadId);
-  const safeFindings: EmailFinding[] = audit.findings.filter((f) => f.safeForOutreach);
+  const safeFindings: EmailFinding[] = composerFindings.findings.filter((f) => f.safeForOutreach);
   const emailInputs: EmailInputs = { facts, findings: safeFindings, demo };
   const validationCtx = buildEmailContext(emailInputs);
 

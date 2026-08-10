@@ -32,6 +32,7 @@ import { createSampleLeads } from './commands/create-sample-leads.js';
 import { leadState } from './commands/lead-state.js';
 import { rejectLeadCommand } from './commands/reject-lead.js';
 import { reopenLeadCommand } from './commands/reopen-lead.js';
+import { deterministicFindingApproveCommand } from './commands/deterministic-finding-approve.js';
 import { listLeads } from './commands/list-leads.js';
 import { resetTestData } from './commands/reset-test-data.js';
 import { resumeAuditCommand } from './commands/resume-audit.js';
@@ -413,6 +414,18 @@ program
   .requiredOption('--by <operator>', 'operator identity recorded on the correction event')
   .action((opts: { lead: string; reason: string; by: string }) =>
     withContext((ctx) => reopenLeadCommand(ctx, opts)),
+  );
+
+program
+  .command('deterministic-finding-approve')
+  .description('Approve exactly one deterministic, evidence-backed, template-constrained outreach finding for a NEEDS_MANUAL_REVIEW lead whose AI audit produced no outreach-safe finding. Validates evidence ownership/freshness/category-support, blocks prohibited wording and direct-booking signals, prevents duplicate active findings, records DETERMINISTIC_OPERATOR_APPROVED provenance + hash, and transitions the lead to OUTREACH_READY_DETERMINISTIC. Dry preview unless --confirm. Never fabricates an AI audit, never touches audit history, never marks anything AI/reviewer-approved. No LLM/network/Gmail/Sheet/send; does not generate an email.')
+  .requiredOption('--lead <id>', 'exact lead id (single lead; no bulk fallback)')
+  .requiredOption('--category <CATEGORY>', 'finding category (currently only BOOKING_FRICTION)')
+  .requiredOption('--evidence <ids>', 'comma-separated capture_evidence ids that support the finding')
+  .requiredOption('--by <operator>', 'operator identity recorded on the approval')
+  .option('--confirm', 'persist the finding + transition the lead (omit for a dry preview)', false)
+  .action((opts: { lead: string; category: string; evidence: string; by: string; confirm?: boolean }) =>
+    withContext((ctx) => deterministicFindingApproveCommand(ctx, opts)),
   );
 
 program
