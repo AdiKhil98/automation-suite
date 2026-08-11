@@ -32,7 +32,7 @@ export interface LeadReviewDetail {
   /** Phase 11: latest deployment run outcome + verified URL, if any. */
   deployment: { outcome: string; verifiedUrl: string | null } | null;
   /** Phase 11: URL-resolved finalized email awaiting a SECOND human approval, if any. */
-  finalizedEmail: { id: string; resolvedBody: string; verifiedUrl: string; finalDecision: string | null; finalNotes: string | null } | null;
+  finalizedEmail: { id: string; resolvedBody: string; verifiedUrl: string | null; finalDecision: string | null; finalNotes: string | null } | null;
 }
 
 /** Reads (outside the write transaction). */

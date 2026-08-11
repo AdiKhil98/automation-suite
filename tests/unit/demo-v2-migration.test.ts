@@ -22,10 +22,11 @@ describe('migration 0023 Demo Engine V2 foundation', () => {
     // 0027 (delivery events), 0028 (delivery corrections), 0029 (competitor research),
     // 0030 (competitor evidence capture), 0031 (competitor pattern packages),
     // 0032 (email competitor enrichment), 0033 (places_website_identity signal),
-    // 0034 (deterministic outreach-finding bridge), and 0035 (email authorship) as the tail.
+    // 0034 (deterministic outreach-finding bridge), 0035 (email authorship), and
+    // 0036 (reply email finalization) as the tail.
     const demoV2Entries = journal.entries.filter((entry) => entry.tag.startsWith('00') && entry.tag.includes('demo_v2'));
     expect(demoV2Entries.at(-1)?.tag).toBe('0025_demo_v2_visual_reviews');
-    expect(journal.entries.at(-1)?.tag).toBe('0035_email_authorship');
+    expect(journal.entries.at(-1)?.tag).toBe('0036_reply_email_finalization');
   });
 
   it('creates exactly the 21 isolated approved V2 tables and changes no V1 table', () => {

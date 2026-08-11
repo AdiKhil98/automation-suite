@@ -145,6 +145,37 @@ No LLM is involved.
 - NOT done pending review: migration 0035 NOT applied to any DB; NO Mayfield email persisted; lead unchanged
   (`OUTREACH_READY_DETERMINISTIC`); no human approval, Gmail, send, Sheets, or follow-up.
 
+## Reply-email finalization (MINIMAL REUSE; IMPLEMENTED IN CODE; migration NOT applied; nothing persisted)
+
+Lets an already `HUMAN_APPROVED` reply email carry the `email_draft_finalizations` record the Gmail
+eligibility gate requires, WITHOUT a demo/Netlify/`{{DEMO_URL}}`. A SECOND producer for the same table —
+not a parallel system — reusing the unchanged `GmailInputRepository` / `checkGmailEligibility` semantics.
+
+- Migration `0036_reply_email_finalization.sql` (loosening + additive): `deployment_run_id` and
+  `verified_deployment_url` become nullable; adds `kind` (`text NOT NULL DEFAULT 'DEMO_URL_RESOLVED'`, CHECK
+  `IN ('DEMO_URL_RESOLVED','REPLY_DIRECT')`) so every existing row stays a demo finalization; adds a partial
+  unique index `(original_draft_id) WHERE kind='REPLY_DIRECT'` (one reply finalization per draft). No column
+  or table removed; the demo deploy/finalize path and the Gmail eligibility logic are unchanged.
+- Domain `src/domain/email/reply-finalization.ts`: `validateReplyFinalization` (fail-closed; lead
+  HUMAN_APPROVED, draft belongs to lead + status APPROVED + humanDecision APPROVED + ctaKind reply, no
+  `{{DEMO_URL}}`, no unresolved token except `{{SENDER_NAME}}`; authorship-agnostic) and
+  `computeReplyFinalization` (no substitution → `resolvedBody === body`, `originalBodyHash ===
+  resolvedBodyHash === sha256(body)`).
+- Repo `reply-finalization.repo.ts` (a dedicated second producer; the demo `deploy.repo.ts` is untouched)
+  and CLI `reply-email-finalize --lead --draft --by [--confirm]` — dry preview unless `--confirm`; idempotent
+  (pre-check + partial unique index); records a `REPLY_DIRECT` row with `finalHumanDecision='APPROVED'` and an
+  operator NOTE. Does NOT transition the lead (stays HUMAN_APPROVED). Zero LLM/network/Gmail/send.
+- Recipient: `src/domain/lead-facts/contact-email.ts` (`normalizeContactEmail` strips `mailto:`/`?query`/
+  `#fragment` → bare address, validates) + CLI `set-contact-email --lead --email --source-type --source-url
+  [--confirm]` (reuses `LeadFactsRepository.writeCurrentFact`; dry preview unless `--confirm`; zero external
+  calls; no person/title inference).
+- Tests: `reply-finalization.test.ts`, `contact-email.test.ts`, `reply-finalization-migration.test.ts` +
+  journal-tail update — green in the full unit suite (1357 passed, 123 files). Existing `deploy.test.ts` and
+  `gmail.test.ts` unchanged/green (demo finalization + Gmail eligibility behaviorally unchanged). PostgreSQL
+  specs (`reply-finalization.pg.test.ts`, `set-contact-email.pg.test.ts`) typecheck; need the gated test DB.
+- NOT done pending review: migration 0036 NOT applied; NO Mayfield `contact_email` fact written; NO Mayfield
+  finalization created; Gmail flags unchanged; no Gmail draft, no send.
+
 ## Phase 7A1 — deterministic competitor candidate foundation (IMPLEMENTED; no capture/email/AI/live/sending)
 
 - Migration `0029_competitor_research.sql` adds two additive tables and changes no existing table:

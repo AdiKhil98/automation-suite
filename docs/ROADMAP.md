@@ -21,6 +21,12 @@ finding created; `generate-emails` not wired.**
 `OUTREACH_READY_DETERMINISTIC -> READY_FOR_HUMAN_APPROVAL`, so a human-written email is stored in the EXISTING
 email_drafts workflow (no parallel subsystem, never marked AI) and reaches the existing human-approval path.
 No LLM. Migration NOT applied; no email persisted; Gmail/send stay gated off.**
+**Reply-email finalization (minimal reuse) — implemented in code (pending review): migration `0036` makes the
+demo-only finalization columns nullable + adds a `kind` discriminator (`DEMO_URL_RESOLVED`/`REPLY_DIRECT`), so
+an already HUMAN_APPROVED reply email gets the `email_draft_finalizations` record the Gmail gate requires
+WITHOUT a demo/Netlify/{{DEMO_URL}} (second producer for the same table; gate + demo path unchanged).
+`reply-email-finalize` + `set-contact-email` CLIs. No LLM. Migration NOT applied; nothing persisted; Gmail
+flags unchanged; no draft/send.**
 **Bounded online-booking discovery — Layer 2 committed (`fix(audit): discover bounded online booking
 paths`): same-origin booking routes are now eligible for one bounded secondary capture so the audit observes
 online booking before any booking-friction conclusion (no crawl; external provider links detected but never

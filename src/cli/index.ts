@@ -34,6 +34,8 @@ import { rejectLeadCommand } from './commands/reject-lead.js';
 import { reopenLeadCommand } from './commands/reopen-lead.js';
 import { deterministicFindingApproveCommand } from './commands/deterministic-finding-approve.js';
 import { operatorEmailApproveCommand } from './commands/operator-email-approve.js';
+import { replyEmailFinalizeCommand } from './commands/reply-email-finalize.js';
+import { setContactEmailCommand } from './commands/set-contact-email.js';
 import { listLeads } from './commands/list-leads.js';
 import { resetTestData } from './commands/reset-test-data.js';
 import { resumeAuditCommand } from './commands/resume-audit.js';
@@ -440,6 +442,29 @@ program
   .option('--confirm', 'persist the email + transition the lead (omit for a dry preview)', false)
   .action((opts: { lead: string; finding: string; subject: string; bodyFile: string; by: string; confirm?: boolean }) =>
     withContext((ctx) => operatorEmailApproveCommand(ctx, { lead: opts.lead, finding: opts.finding, subject: opts.subject, bodyFile: opts.bodyFile, by: opts.by, confirm: opts.confirm })),
+  );
+
+program
+  .command('set-contact-email')
+  .description('Set the current contact_email fact for a lead from an operator-supplied address, reusing the existing fact/provenance system. Normalizes to a BARE address (strips mailto: and any ?query/#fragment) and validates it before writing. Records only what is supplied (no guessing, no person/title inference). Dry preview unless --confirm. Zero external calls; no Gmail/send.')
+  .requiredOption('--lead <id>', 'exact lead id')
+  .requiredOption('--email <address>', 'contact email (mailto:/query is stripped to the bare address)')
+  .requiredOption('--source-type <type>', 'provenance: mock | manual | website | google_places')
+  .requiredOption('--source-url <url>', 'provenance URL where the address was found')
+  .option('--confirm', 'persist the fact (omit for a dry preview)', false)
+  .action((opts: { lead: string; email: string; sourceType: string; sourceUrl: string; confirm?: boolean }) =>
+    withContext((ctx) => setContactEmailCommand(ctx, { lead: opts.lead, email: opts.email, sourceType: opts.sourceType, sourceUrl: opts.sourceUrl, confirm: opts.confirm })),
+  );
+
+program
+  .command('reply-email-finalize')
+  .description('Create the REPLY_DIRECT email_draft_finalizations record for an already-approved reply email (no demo/Netlify/{{DEMO_URL}}), so it carries the finalization the Gmail eligibility gate requires. Finalized body is byte-identical to the approved draft. Fail-closed preconditions (lead HUMAN_APPROVED; draft belongs to lead, status APPROVED, humanDecision APPROVED, ctaKind reply, no {{DEMO_URL}}/unresolved tokens). Idempotent, deterministic. Dry preview unless --confirm. Zero LLM/network/Gmail/send; enables no flags; does not transition the lead.')
+  .requiredOption('--lead <id>', 'exact lead id (must be HUMAN_APPROVED)')
+  .requiredOption('--draft <id>', 'the approved email_draft id to finalize')
+  .requiredOption('--by <operator>', 'operator recorded as the final human approver')
+  .option('--confirm', 'persist the finalization (omit for a dry preview)', false)
+  .action((opts: { lead: string; draft: string; by: string; confirm?: boolean }) =>
+    withContext((ctx) => replyEmailFinalizeCommand(ctx, opts)),
   );
 
 program

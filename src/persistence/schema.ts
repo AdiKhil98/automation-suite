@@ -1048,11 +1048,14 @@ export const emailDraftFinalizations = pgTable(
   {
     id: text('id').primaryKey(),
     originalDraftId: text('original_draft_id').notNull().references(() => emailDrafts.id, { onDelete: 'cascade' }),
-    deploymentRunId: text('deployment_run_id').notNull().references(() => demoDeploymentRuns.id, { onDelete: 'cascade' }),
-    verifiedDeploymentUrl: text('verified_deployment_url').notNull(),
+    // Nullable since migration 0036: a REPLY_DIRECT finalization has no demo deployment / verified URL.
+    deploymentRunId: text('deployment_run_id').references(() => demoDeploymentRuns.id, { onDelete: 'cascade' }),
+    verifiedDeploymentUrl: text('verified_deployment_url'),
     originalBodyHash: text('original_body_hash').notNull(),
     resolvedBody: text('resolved_body').notNull(),
     resolvedBodyHash: text('resolved_body_hash').notNull(),
+    // Discriminator (0036): 'DEMO_URL_RESOLVED' (default, all pre-existing rows) vs 'REPLY_DIRECT'.
+    kind: text('kind').notNull().default('DEMO_URL_RESOLVED'),
     finalizedAt: timestamp('finalized_at', { withTimezone: true }).notNull().defaultNow(),
     // Second human approval of the URL-resolved email (distinct from the tokenized-draft approval).
     finalHumanDecision: text('final_human_decision'),
@@ -1065,7 +1068,10 @@ export const emailDraftFinalizations = pgTable(
   (t) => ({
     draftIdx: index('email_draft_finalizations_draft_idx').on(t.originalDraftId),
     draftDeployUk: uniqueIndex('email_draft_finalizations_draft_deploy_uk').on(t.originalDraftId, t.deploymentRunId),
+    // At most one reply-direct finalization per draft (demo rows are excluded by the partial predicate).
+    replyUk: uniqueIndex('email_draft_finalizations_reply_uk').on(t.originalDraftId).where(sql`${t.kind} = 'REPLY_DIRECT'`),
     finalDecisionCk: check('email_finalization_decision_ck', sql`${t.finalHumanDecision} IS NULL OR ${t.finalHumanDecision} IN ('APPROVED','REJECTED')`),
+    kindCk: check('email_finalization_kind_ck', sql`${t.kind} IN ('DEMO_URL_RESOLVED','REPLY_DIRECT')`),
   }),
 );
 
