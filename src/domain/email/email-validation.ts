@@ -68,6 +68,22 @@ const GENERIC_SUBJECTS = [
   /^(?:website|webseite|homepage)\s*(?:idea|note|suggestion|idee|hinweis|vorschlag)?$/i,
 ] as const;
 
+// High-precision denylist for subjects that summarize the body — i.e. give away the finding,
+// recommendation, or pitch before the email is opened. Intentionally narrow: it catches only the
+// obvious "improvement/pitch verb + feature" and "feature + suggestion/opportunity/path" shapes
+// (EN + DE). Subtle curiosity failures are NOT regex-detectable and are left to the reviewer's
+// `subjectCuriosityGap` judgment. Prefer false negatives over false positives here.
+const REVEALING_SUBJECTS = [
+  // improvement/pitch verb + feature noun: "Improve your online booking"
+  /\b(?:improve|improving|boost|boosting|optimi[sz]e|optimising|optimizing|fix|fixing|increase|increasing|upgrade|upgrading|enhance|enhancing|streamline|streamlining)\b[^.!?]*\b(?:booking|bookings|website|web\s?site|site|appointment|appointments|conversion|conversions|enquir(?:y|ies)|contact form|seo|checkout|funnel)\b/i,
+  // feature noun + pitch suffix: "Website booking suggestion", "Direct booking opportunity", "appointment booking path"
+  /\b(?:booking|bookings|website|web\s?site|homepage|appointment|appointments|conversion|conversions|enquir(?:y|ies)|checkout|seo)\b[^.!?]*\b(?:suggestion|suggestions|idea|ideas|opportunity|opportunities|improvement|improvements|tip|tips|fix|fixes|path)\b/i,
+  // German verb + feature noun
+  /\b(?:verbessern|verbessere|optimieren|optimiere|steigern|steigere|erhöhen|erhöhe|beheben)\b[^.!?]*\b(?:buchung|buchungen|website|webseite|homepage|termin(?:e|buchung)?|conversion|kontaktformular|anfrage)\b/i,
+  // German feature noun + pitch suffix
+  /\b(?:buchung|buchungen|website|webseite|homepage|termin(?:e)?|conversion|kontaktformular)\b[^.!?]*\b(?:vorschlag|idee|chance|möglichkeit|verbesserung|tipp|hinweis)\b/i,
+] as const;
+
 export function wordCount(value: string): number {
   return value.trim().split(/\s+/).filter(Boolean).length;
 }
@@ -79,6 +95,11 @@ export function occurrences(value: string, expression: RegExp): number {
 function isGenericSubject(subject: string): boolean {
   const normalized = subject.trim();
   return normalized.length < 8 || GENERIC_SUBJECTS.some((pattern) => pattern.test(normalized));
+}
+
+function isRevealingSubject(subject: string): boolean {
+  const normalized = subject.trim();
+  return REVEALING_SUBJECTS.some((pattern) => pattern.test(normalized));
 }
 
 /**
@@ -102,6 +123,7 @@ export function validateEmail(out: EmailWriterOutput, ctx: EmailValidationContex
   if (!subjects.includes(out.selected_subject.trim())) violations.push('selected_subject_not_in_options');
   subjects.forEach((subject, index) => {
     if (isGenericSubject(subject)) violations.push(`generic_subject:${String(index + 1)}`);
+    if (isRevealingSubject(subject)) violations.push(`subject_reveals_finding:${String(index + 1)}`);
   });
   if (out.genericity_score > 40) violations.push(`genericity_score_too_high:${String(out.genericity_score)}`);
 

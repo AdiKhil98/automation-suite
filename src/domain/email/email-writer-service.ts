@@ -272,6 +272,7 @@ export class EmailWriterService {
     const approvable = review.decision === 'APPROVE'
       && !review.fabricationRisk
       && review.subjectSpecific
+      && review.subjectCuriosityGap
       && review.openingSpecific
       && review.businessRelevanceClear
       && review.urgencySupported

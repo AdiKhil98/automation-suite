@@ -1,9 +1,9 @@
 import { MAX_EMAIL_WORDS, PRIMARY_CTAS } from '../../domain/email/email-types.js';
 import { type EmailWriterParsed } from '../../domain/email/email-schema.js';
 
-export const EMAIL_RUBRIC_VERSION = 'cold-email-copy-standard-2';
-export const EMAIL_WRITER_PROMPT_VERSION = 'email-writer-2';
-export const EMAIL_REVIEWER_PROMPT_VERSION = 'email-reviewer-2';
+export const EMAIL_RUBRIC_VERSION = 'cold-email-copy-standard-3';
+export const EMAIL_WRITER_PROMPT_VERSION = 'email-writer-3';
+export const EMAIL_REVIEWER_PROMPT_VERSION = 'email-reviewer-3';
 
 export interface EmailBrief {
   businessName: string | null;
@@ -33,10 +33,31 @@ const SAFETY = `SECURITY AND EVIDENCE RULES:
 - There is no competitor package in this workflow. competitor_evidence_used must be NONE and
   competitor or regional-market comparisons are forbidden.`;
 
+const SUBJECT_STANDARD = `SUBJECT = CURIOSITY GAP, NOT BODY SUMMARY:
+- The subject creates a genuine information gap. It makes the recipient wonder what was noticed,
+  without revealing the finding, diagnosis, recommendation, or pitch before they open the email.
+- Before selecting, evaluate every option against: (1) does it create curiosity, (2) would the
+  recipient naturally wonder what was noticed, (3) does it avoid revealing the actual finding or
+  pitch, (4) does it read like a normal human email rather than marketing or sales copy, (5) is it
+  relevant enough to this specific prospect that it does not feel like generic spam, (6) is it concise.
+- Generate the three subject options, then select on curiosity, naturalness, relevance, and
+  body-reveal risk. Reject any option that gives away the finding or recommendation before the open.
+- Prefer patterns such as "Something I noticed on [Company]'s website", "One thing I noticed on your
+  site", "Quick question about [Company]", "This caught my eye on [Company]'s site", "Small
+  observation about [Company]".
+- Avoid subjects that summarize the body such as "[Company]'s appointment booking path", "Improve
+  your online booking", "Website booking suggestion", "Direct booking opportunity".
+- The subject must stay truthfully connected to the email. Never use clickbait, fake urgency,
+  deception, fake-reply framing, or misleading hooks.`;
+
 const COPY_STANDARD = `COLD EMAIL COPY STANDARD:
-- Produce exactly three distinct, specific subject options. Select one and explain why.
+- Produce exactly three distinct, specific subject options. Select one on curiosity, naturalness,
+  relevance, and body-reveal risk.
+- selected_subject_reason must explain why the chosen subject preserves the information gap.
 - Reject generic subjects such as "Website idea", "Quick question", "Improve your website",
   "New website concept", and "A suggestion for your website".
+
+${SUBJECT_STANDARD}
 - Start email_body with a verified observation. No introduction, fake compliment, fake customer
   pose, or "I hope this email finds you well".
 - Explain why the issue matters in the customer or patient journey using clear business language.
@@ -96,6 +117,12 @@ Reject or require revisions when the subject or opening is generic, business rel
 urgency is fabricated, competitor language is unsupported, AI-style language or punctuation fails,
 there is more than one CTA, the email could be sent unchanged to almost any business, evidence does
 not support every claim, or the email promises more than the approved demo visibly delivers.
+
+Set subjectCuriosityGap to false when the selected subject summarizes or reveals the core finding,
+gives away the recommendation or pitch before the open, is banal or generic, lacks a meaningful
+information gap, or reads as obvious marketing copy. Set it to true only when the subject creates
+natural curiosity, stays truthfully connected to the email, remains relevant to the prospect, sounds
+human, and uses no clickbait, fake urgency, deception, or fake-reply tactics.
 
 Decisions are APPROVE, APPROVE_WITH_REVISIONS, or REJECT. APPROVE requires every boolean quality
 dimension to be true and fabricationRisk false. APPROVE_WITH_REVISIONS means the current copy is not

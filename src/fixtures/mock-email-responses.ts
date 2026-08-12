@@ -82,6 +82,7 @@ export const defaultMockEmailResponder: MockResponder = (request) => {
       decision: 'APPROVE',
       fabricationRisk: false,
       subjectSpecific: true,
+      subjectCuriosityGap: true,
       openingSpecific: true,
       businessRelevanceClear: true,
       urgencySupported: true,

@@ -13,12 +13,12 @@ export interface EmailCopyFixture {
 
 const english = (overrides: Partial<EmailWriterOutput> = {}): EmailWriterOutput => ({
   subject_options: [
-    'A clearer booking path for Linden Dental',
-    'The hidden appointment step at Linden Dental',
-    'Less friction before a Linden Dental booking',
+    "Something I noticed on Linden Dental's website",
+    'One thing on your site caught my eye',
+    "Quick question about Linden Dental's site",
   ],
-  selected_subject: 'A clearer booking path for Linden Dental',
-  selected_subject_reason: 'It ties the verified booking-path issue to the specific practice.',
+  selected_subject: "Something I noticed on Linden Dental's website",
+  selected_subject_reason: 'It signals a specific site observation without revealing the booking-path finding, so the reader has a reason to open.',
   email_body: [
     "Linden Dental's appointment action is difficult to find on the main page.",
     'That creates avoidable friction when a patient is ready to move from researching care to booking.',

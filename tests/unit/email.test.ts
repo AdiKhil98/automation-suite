@@ -82,6 +82,7 @@ const reviewJson = (overrides: Record<string, unknown> = {}) => ({
   decision: 'APPROVE',
   fabricationRisk: false,
   subjectSpecific: true,
+  subjectCuriosityGap: true,
   openingSpecific: true,
   businessRelevanceClear: true,
   urgencySupported: true,
@@ -103,6 +104,9 @@ describe('Cold Email Copy Standard schemas', () => {
     expect(emailWriterSchema.safeParse(strongEnglish()).success).toBe(true);
     expect(emailReviewSchema.safeParse(reviewJson()).success).toBe(true);
     expect(emailWriterSchema.safeParse({ ...strongEnglish(), subject_options: ['one', 'two'] }).success).toBe(false);
+    const withoutCuriosity: Record<string, unknown> = { ...reviewJson() };
+    delete withoutCuriosity.subjectCuriosityGap;
+    expect(emailReviewSchema.safeParse(withoutCuriosity).success).toBe(false);
   });
 });
 
@@ -134,6 +138,39 @@ describe('Cold Email Copy Standard fixtures', () => {
     for (const [overrides, violation] of cases) {
       const result = validateEmail({ ...strongEnglish(), ...overrides }, validationContext());
       expect(result.violations, violation).toContain(violation);
+    }
+  });
+});
+
+describe('revealing-subject denylist (high precision)', () => {
+  const withSubjects = (options: [string, string, string], selected: string): EmailWriterOutput =>
+    ({ ...strongEnglish(), subject_options: options, selected_subject: selected });
+  const filler: [string, string] = ['Neutral filler subject alpha', 'Neutral filler subject beta'];
+
+  it('flags subjects that summarize the finding or pitch', () => {
+    const revealing = [
+      'Improve your online booking',
+      'Website booking suggestion',
+      'Direct booking opportunity',
+      "Fresh Dental's appointment booking path",
+    ];
+    for (const subject of revealing) {
+      const result = validateEmail(withSubjects([subject, ...filler], filler[0]), validationContext());
+      expect(result.violations, subject).toContain('subject_reveals_finding:1');
+    }
+  });
+
+  it('does not flag curiosity-gap subjects (prefers false negatives)', () => {
+    const safe = [
+      "Something I noticed on Fresh Dental's website",
+      'One thing I noticed on your site',
+      'Quick question about Fresh Dental',
+      "This caught my eye on Fresh Dental's site",
+      'Small observation about Fresh Dental',
+    ];
+    for (const subject of safe) {
+      const result = validateEmail(withSubjects([subject, ...filler], subject), validationContext());
+      expect(result.violations.some((v) => v.startsWith('subject_reveals_finding')), subject).toBe(false);
     }
   });
 });
@@ -270,6 +307,20 @@ describe('EmailWriterService quality gates', () => {
           persuasive: false,
           requiredRevisions: ['Make the business consequence clearer.'],
         }) };
+    const service = new EmailWriterService({
+      provider: new MockLlmProvider(responder),
+      uow: fakeUow([]),
+      logger,
+      config: config(),
+    });
+    expect((await service.write(serviceInput(), 'run-1')).outcome).toBe('REVIEW_REJECTED');
+  });
+
+  it('does not approve when the reviewer flags a missing subject curiosity gap', async () => {
+    const responder = (request: LlmRequest, index: number) =>
+      request.task === 'email_write'
+        ? defaultMockEmailResponder(request, index)
+        : { rawJson: reviewJson({ subjectCuriosityGap: false }) };
     const service = new EmailWriterService({
       provider: new MockLlmProvider(responder),
       uow: fakeUow([]),
