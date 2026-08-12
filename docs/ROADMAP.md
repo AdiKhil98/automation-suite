@@ -10,7 +10,13 @@ adapter + tests + docs committed; the KU64 render is git-ignored and never commi
 review, deployment, or outreach use of the render is authorized. Demo Engine V2
 Milestones 1 and 2 are implemented as an isolated, disabled-by-default, mock-only intelligence/content/asset/
 design foundation. No V2 render, approval, deployment, or live-provider path exists. Phase 9 email generation
-uses Cold Email Copy Standard v2 with deterministic and independent-reviewer quality gates.
+uses Cold Email Copy Standard v2 with deterministic and independent-reviewer quality gates. **A committed
+refinement (`feat(outreach): make email subjects curiosity-driven`, `1c6e04a`) makes subjects curiosity-gap
+based rather than body summaries: a shared `SUBJECT_STANDARD` in the writer/reviewer prompt, a new fail-closed
+reviewer `subjectCuriosityGap` dimension in the approvable gate, and a high-precision deterministic
+revealing-subject denylist (`subject_reveals_finding`). The writer output schema and `EMAIL_SCHEMA_VERSION`
+(`email-copy-schema-3`) and the operator-authored validator are unchanged; only reviewer/rules/prompt versions
+bumped (`email-reviewer-3` / `email-writer-3` / `email-copy-standard-3` / `cold-email-copy-standard-3`).**
 **Deterministic outreach-finding bridge — implemented in code (pending review): migration `0034` +
 `deterministic-finding-approve` CLI + `OUTREACH_READY_DETERMINISTIC` status let an operator promote an
 evidence-backed, template-constrained finding into outreach composition (outreach-compose-preview only) when
@@ -52,7 +58,7 @@ write, or follow-up occurred during implementation). Phase 17C1 — Harden DSN C
 priority-ranked, fail-closed on ambiguity; DSN parsing handles multipart/report + nested message/rfc822 +
 text/plain; a narrowly-scoped correction command invalidates — never deletes — mis-correlated delivery events;
 migration 0028 adds additive supersede columns; no Gmail read, email, Sheet write, or follow-up occurred).**
-**Last updated:** 2026-07-31
+**Last updated:** 2026-08-12
 
 One phase at a time. Each phase ends with tests, a commit, an annotated tag, and an explicit approval gate.
 No phase begins before the previous one is approved with `APPROVE PHASE X`.

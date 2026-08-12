@@ -176,6 +176,40 @@ not a parallel system — reusing the unchanged `GmailInputRepository` / `checkG
 - NOT done pending review: migration 0036 NOT applied; NO Mayfield `contact_email` fact written; NO Mayfield
   finalization created; Gmail flags unchanged; no Gmail draft, no send.
 
+## Email subject curiosity-gap standard (COMMITTED — `feat(outreach): make email subjects curiosity-driven`, `1c6e04a`)
+
+Refines subject generation/review so a subject is a CURIOSITY GAP, not a body summary: it should make the
+recipient wonder what was noticed WITHOUT revealing the finding, recommendation, or pitch before they open,
+while staying truthfully connected to the email (no clickbait, fake urgency, deception, or fake-reply framing).
+
+- **Shared prompt rules (`src/prompts/email/index.ts`).** A new `SUBJECT_STANDARD` block inside the shared
+  `COPY_STANDARD` (seen by BOTH writer and reviewer): the "curiosity gap, not body summary" principle, a
+  six-question evaluation checklist, prefer/avoid pattern lists, and the anti-clickbait guardrail. The writer
+  still emits exactly three `subject_options` and now selects on curiosity, naturalness, relevance, and
+  body-reveal risk; `selected_subject_reason` must explain why the choice preserves the information gap.
+- **New reviewer dimension.** `subjectCuriosityGap: boolean` is added to the reviewer Zod schema, the strict
+  `EMAIL_REVIEW_JSON_SCHEMA` (properties + required), `EmailReviewOutput`, and the fail-closed `approvable`
+  gate in `email-writer-service.ts`. The reviewer sets it false when the selected subject summarizes/reveals
+  the finding, gives away the recommendation/pitch, is banal/generic, lacks a meaningful information gap, or
+  reads as obvious marketing copy; true only for a genuine, truthful, human-sounding curiosity gap. A false
+  value routes the run to `REVIEW_REJECTED` (`EMAIL_REVIEW_FAILED`).
+- **High-precision deterministic denylist (`email-validation.ts`).** A narrow bilingual (EN/DE)
+  `REVEALING_SUBJECTS` set flags only the obvious body-summary/pitch shapes (improvement/pitch verb + feature
+  noun; feature noun + suggestion/opportunity/path), emitting `subject_reveals_finding:<n>`. It deliberately
+  prefers false negatives — subtle curiosity failures are the reviewer's `subjectCuriosityGap` judgment, not
+  regex. The "strong English" copy fixture was updated to a curiosity-gap subject (its old
+  `A clearer booking path…` exemplar encoded the now-discouraged body-summary shape).
+- **Unchanged by design.** The writer output schema and `EMAIL_SCHEMA_VERSION` (`email-copy-schema-3`) are
+  untouched (no writer field added; no `subject_curiosity_scan`); the persisted email-artifact shape is
+  unchanged; the operator-authored email validator (`operator-email.ts`) is untouched (human subjects stay
+  manually controlled). Version bumps are reviewer/rules/prompt only: `EMAIL_REVIEWER_PROMPT_VERSION`→
+  `email-reviewer-3`, `EMAIL_WRITER_PROMPT_VERSION`→`email-writer-3`, `EMAIL_WRITER_RULES_VERSION`→
+  `email-copy-standard-3`, `EMAIL_RUBRIC_VERSION`→`cold-email-copy-standard-3`.
+- Status: committed and pushed to `main` (`1c6e04a`); lint/typecheck/build green; full unit suite 1360 passed
+  (incl. denylist flag / no-flag cases, the reviewer-required-field schema check, and the `subjectCuriosityGap`
+  gate rejection). No LLM/network/Gmail/Sheet/send path touched; no Mayfield email regenerated; no Gmail draft
+  modified.
+
 ## Phase 7A1 — deterministic competitor candidate foundation (IMPLEMENTED; no capture/email/AI/live/sending)
 
 - Migration `0029_competitor_research.sql` adds two additive tables and changes no existing table:
@@ -751,7 +785,9 @@ not a parallel system — reusing the unchanged `GmailInputRepository` / `checkG
 - The Phase 9 email writer and reviewer now enforce Cold Email Copy Standard v2. Writer output carries exactly
   three subjects, explicit evidence IDs, business relevance, urgency basis, one CTA, style scans, and demo
   alignment. Deterministic validation and an independent reviewer both fail closed; unchanged revision requests
-  are never approved. Human approval remains mandatory.
+  are never approved. Human approval remains mandatory. Subjects are now curiosity-gap based rather than body
+  summaries — see "Email subject curiosity-gap standard" above (committed `1c6e04a`; reviewer/rules/prompt
+  versions bumped to `email-reviewer-3` / `email-copy-standard-3` / `cold-email-copy-standard-3` / `email-writer-3`).
 - Phases 0-16 are committed and tagged through `phase-16-production-safety-hardening` (`9092606`).
 - Database test isolation is committed (`68a6ab3`), and website-verification observability plus independent
   Place Details persistence is committed (`6e3b591`).
