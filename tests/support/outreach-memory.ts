@@ -73,6 +73,10 @@ export class InMemoryOutreachStore implements OutreachUnitOfWork, OutreachTxRepo
     this.messages.push({ ...msg });
   }
 
+  async findMessageByGmailMessageId(gmailMessageId: string): Promise<OutreachMessage | null> {
+    return this.messages.find((m) => m.gmailMessageId === gmailMessageId) ?? null;
+  }
+
   async insertReply(reply: {
     id: string;
     outreachRecordId: string;

@@ -2192,6 +2192,10 @@ export const outreachMessages = pgTable(
     recordIdx: index('outreach_messages_record_idx').on(t.outreachRecordId),
     threadIdx: index('outreach_messages_thread_idx').on(t.gmailThreadId),
     typeCk: check('outreach_message_type_ck', sql`${t.messageType} IN ('INITIAL','FOLLOW_UP')`),
+    // Migration 0037: DB-level idempotency for the production-send -> outreach enrollment bridge.
+    // A given Gmail message id maps to exactly one outreach message; re-running enrollment can never
+    // create a duplicate outbound-message row around a real send.
+    gmailMessageUk: uniqueIndex('outreach_messages_gmail_message_uk').on(t.gmailMessageId).where(sql`${t.gmailMessageId} IS NOT NULL`),
   }),
 );
 

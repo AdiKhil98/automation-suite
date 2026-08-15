@@ -90,6 +90,7 @@ import {
   outreachTrackCommand,
   outreachTransitionCommand,
 } from './commands/outreach.js';
+import { outreachEnrollSentCommand } from './commands/outreach-enroll-sent.js';
 import {
   outreachSmokeApproveCommand,
   outreachSmokeInitCommand,
@@ -739,6 +740,17 @@ program
   .option('--sent', 'mark this message as already sent (records sent timestamp)')
   .action((opts: { record: string; type: string; step: string; subject: string; body: string; gmailMessageId?: string; gmailThreadId?: string; sent?: boolean }) =>
     withContext((ctx) => outreachRecordMessageCommand(ctx, opts)));
+
+program
+  .command('outreach-enroll-sent')
+  .description('Bridge a CONFIRMED Phase 14/15 production send into outreach tracking (INITIAL_SENT + follow-up 1). Idempotent; reads content/Gmail ids from the confirmed send records; NEVER sends.')
+  .requiredOption('--lead <id>', 'lead id the confirmed send belongs to')
+  .requiredOption('--from-attempt <id>', 'confirmed send_attempt id (must be SENT_CONFIRMED or reconciled CONFIRMED_SENT)')
+  .option('--campaign <name>', 'campaign name (default: "Production Outreach"; created if missing)')
+  .option('--by <name>', 'operator/owner recorded on the record')
+  .option('--timezone <iana>', 'timezone used only when creating a new campaign (default: UTC)')
+  .action((opts: { lead: string; fromAttempt: string; campaign?: string; by?: string; timezone?: string }) =>
+    withContext((ctx) => outreachEnrollSentCommand(ctx, opts)));
 
 program
   .command('outreach-transition')

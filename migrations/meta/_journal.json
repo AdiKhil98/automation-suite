@@ -260,6 +260,13 @@
       "when": 1786306800000,
       "tag": "0036_reply_email_finalization",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1786393200000,
+      "tag": "0037_outreach_message_gmail_idempotency",
+      "breakpoints": true
     }
   ]
 }

@@ -54,6 +54,8 @@ export interface OutreachTxRepos {
     preview: string;
   }): Promise<void>;
   insertFollowup(f: OutreachFollowup): Promise<void>;
+  /** Find a stored message by its Gmail message id (enrollment idempotency; null if none). */
+  findMessageByGmailMessageId(gmailMessageId: string): Promise<OutreachMessage | null>;
   updateFollowupStatus(
     id: string,
     status: OutreachFollowup['status'],
@@ -122,6 +124,48 @@ export interface ApplyReplyInput {
   preview: string;
   classification: ReplyClassification;
 }
+
+/**
+ * Input for {@link OutreachService.enrollConfirmedSend} — the production-send -> outreach bridge.
+ * The subject/body/Gmail ids are read from the CONFIRMED send records by the caller (never CLI args),
+ * so the enrolled message is byte-identical to what was actually sent.
+ */
+export interface EnrollConfirmedSendInput {
+  outreachRecordId: string;
+  /** Exact sent subject (from the finalized draft). */
+  subject: string;
+  /** Exact sent body (from email_draft_finalizations.resolvedBody). */
+  body: string;
+  /** Gmail identifiers from the confirmed send_attempt. */
+  gmailMessageId: string;
+  gmailThreadId: string;
+  sentAt: Date;
+  /** Provenance links back to the email pipeline (optional). */
+  emailDraftId?: string | null;
+  finalizedEmailId?: string | null;
+  /** The confirmed send_attempt id (recorded on the events for provenance). */
+  sendAttemptId: string;
+  /** Follow-up sequence policy (from config); step 1 is scheduled on enrollment. */
+  policy: SequencePolicy;
+}
+
+export type EnrollConfirmedSendOutcome =
+  /** A new INITIAL step-0 message + INITIAL_SENT transition + follow-up 1 were created. */
+  | 'ENROLLED'
+  /** This exact Gmail message id is already enrolled; nothing changed (idempotent). */
+  | 'ALREADY_ENROLLED'
+  /** The record cannot reach INITIAL_SENT (already sent/replied/bounced/terminal); nothing changed. */
+  | 'RECORD_NOT_ENROLLABLE';
+
+export interface EnrollConfirmedSendResult {
+  outcome: EnrollConfirmedSendOutcome;
+  record: OutreachRecord;
+  message: OutreachMessage | null;
+  followup: OutreachFollowup | null;
+}
+
+/** The legal approval path an enrolled record is walked through to reach INITIAL_SENT. */
+const ENROLL_PATH: readonly OutreachStatus[] = ['DRAFT_READY', 'AWAITING_APPROVAL', 'APPROVED_TO_SEND', 'INITIAL_SENT'];
 
 /** Input for {@link OutreachService.applyDeliveryFailure} (Phase 17C). */
 export interface ApplyDeliveryFailureInput {
@@ -332,6 +376,114 @@ export class OutreachService {
         data: { contentHash: msg.contentHash, gmailMessageId: msg.gmailMessageId },
       });
       return msg;
+    });
+  }
+
+  /**
+   * Bridge a CONFIRMED production send (Phase 14/15 `SendService`) into outreach tracking so reply
+   * sync, bounce reconciliation, and follow-up scheduling can see it — WITHOUT a second send path.
+   * This method NEVER sends: the caller has already dispatched via `SendService` and reads the exact
+   * subject/body/Gmail ids from the confirmed `send_attempt`/finalized draft. Everything below is a
+   * single atomic transaction:
+   *
+   *  - Idempotent by the Gmail message id: an already-enrolled send makes no change (`ALREADY_ENROLLED`);
+   *    the migration-0037 partial-unique index is the ultimate guarantee, this is the friendly check.
+   *  - The record is walked DRAFT_READY -> AWAITING_APPROVAL -> APPROVED_TO_SEND -> INITIAL_SENT through
+   *    the state machine (each hop asserted legal); a record already past APPROVED_TO_SEND (or replied/
+   *    bounced/terminal) is `RECORD_NOT_ENROLLABLE` and nothing is written.
+   *  - One immutable INITIAL step-0 message carries the exact subject/body/hash + Gmail message/thread id
+   *    + sent timestamp, `lastSentAt`/`sequenceStep` advance, and follow-up step 1 is scheduled with the
+   *    same rules as everywhere else.
+   */
+  async enrollConfirmedSend(input: EnrollConfirmedSendInput): Promise<EnrollConfirmedSendResult> {
+    return this.uow.transaction(async (repos) => {
+      const rec = await this.require(repos, input.outreachRecordId);
+
+      // Idempotency: this exact Gmail message id is already enrolled — change nothing.
+      const existing = await repos.findMessageByGmailMessageId(input.gmailMessageId);
+      if (existing) return { outcome: 'ALREADY_ENROLLED', record: rec, message: existing, followup: null };
+
+      // The record must be able to reach INITIAL_SENT via the approval path. Anything at/after
+      // INITIAL_SENT (or replied/bounced/terminal) is not enrollable — never force an illegal jump.
+      const startIdx = ENROLL_PATH.indexOf(rec.status);
+      if (startIdx < 0 || rec.status === 'INITIAL_SENT') {
+        return { outcome: 'RECORD_NOT_ENROLLABLE', record: rec, message: null, followup: null };
+      }
+
+      const nowD = new Date(this.now());
+
+      // 1. Immutable INITIAL step-0 message carrying the confirmed send's exact content + Gmail ids.
+      const message: OutreachMessage = {
+        id: randomUUID(),
+        outreachRecordId: rec.id,
+        messageType: 'INITIAL',
+        sequenceStep: 0,
+        subject: input.subject,
+        body: input.body,
+        contentHash: messageContentHash(input.subject, input.body),
+        emailDraftId: input.emailDraftId ?? null,
+        finalizedEmailId: input.finalizedEmailId ?? null,
+        gmailMessageId: input.gmailMessageId,
+        gmailThreadId: input.gmailThreadId,
+        approvedAt: nowD,
+        sentAt: input.sentAt,
+        createdAt: nowD,
+      };
+      await repos.insertMessage(message);
+      await repos.appendEvent({
+        outreachRecordId: rec.id,
+        type: 'MESSAGE_RECORDED',
+        fromStatus: null,
+        toStatus: null,
+        message: 'INITIAL step 0 enrolled from confirmed production send',
+        data: { contentHash: message.contentHash, gmailMessageId: input.gmailMessageId, gmailThreadId: input.gmailThreadId, sendAttemptId: input.sendAttemptId },
+      });
+
+      // 2. Walk the record to INITIAL_SENT through the legal approval path (each hop asserted + evented).
+      let from: OutreachStatus = rec.status;
+      for (let i = startIdx + 1; i < ENROLL_PATH.length; i += 1) {
+        const to = ENROLL_PATH[i]!;
+        assertOutreachTransition(from, to);
+        await repos.appendEvent({
+          outreachRecordId: rec.id,
+          type: 'STATE_TRANSITION',
+          fromStatus: from,
+          toStatus: to,
+          message: `${from} -> ${to} (enroll confirmed send)`,
+          data: { sendAttemptId: input.sendAttemptId },
+        });
+        from = to;
+      }
+
+      // 3. Follow-up step 1, using the existing sequence rules.
+      const dueAt = computeFollowupDueUtc({ previousSentAtMs: input.sentAt.getTime(), step: 1, timezone: rec.timezone, policy: input.policy });
+      const followup: OutreachFollowup = {
+        id: randomUUID(),
+        outreachRecordId: rec.id,
+        step: 1,
+        dueAt,
+        timezone: rec.timezone,
+        status: 'DUE',
+        blockedReason: null,
+        cancelledReason: null,
+        createdAt: nowD,
+        updatedAt: nowD,
+      };
+      await repos.insertFollowup(followup);
+
+      // Single record update: final status + sent tracking + next follow-up.
+      await repos.updateRecord(rec.id, { status: 'INITIAL_SENT', lastSentAt: input.sentAt, sequenceStep: 0, nextFollowupAt: dueAt }, nowD);
+      await repos.appendEvent({
+        outreachRecordId: rec.id,
+        type: 'FOLLOWUP_SCHEDULED',
+        fromStatus: null,
+        toStatus: null,
+        message: `Follow-up 1 due ${dueAt.toISOString()}`,
+        data: { step: 1, dueAt: dueAt.toISOString() },
+      });
+
+      const record: OutreachRecord = { ...rec, status: 'INITIAL_SENT', lastSentAt: input.sentAt, sequenceStep: 0, nextFollowupAt: dueAt, updatedAt: nowD };
+      return { outcome: 'ENROLLED', record, message, followup };
     });
   }
 

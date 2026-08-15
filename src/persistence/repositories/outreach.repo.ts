@@ -38,6 +38,26 @@ import {
 
 type RecordRow = typeof outreachRecords.$inferSelect;
 type FollowupRow = typeof outreachFollowups.$inferSelect;
+type MessageRow = typeof outreachMessages.$inferSelect;
+
+function toMessage(r: MessageRow): OutreachMessage {
+  return {
+    id: r.id,
+    outreachRecordId: r.outreachRecordId,
+    messageType: r.messageType as OutreachMessage['messageType'],
+    sequenceStep: r.sequenceStep,
+    subject: r.subject,
+    body: r.body,
+    contentHash: r.contentHash,
+    emailDraftId: r.emailDraftId,
+    finalizedEmailId: r.finalizedEmailId,
+    gmailMessageId: r.gmailMessageId,
+    gmailThreadId: r.gmailThreadId,
+    approvedAt: r.approvedAt,
+    sentAt: r.sentAt,
+    createdAt: r.createdAt,
+  };
+}
 
 function toRecord(r: RecordRow): OutreachRecord {
   return {
@@ -175,6 +195,15 @@ export class OutreachTxRepository implements OutreachTxRepos {
       sentAt: msg.sentAt,
       createdAt: msg.createdAt,
     });
+  }
+
+  async findMessageByGmailMessageId(gmailMessageId: string): Promise<OutreachMessage | null> {
+    const rows = await this.db
+      .select()
+      .from(outreachMessages)
+      .where(eq(outreachMessages.gmailMessageId, gmailMessageId))
+      .limit(1);
+    return rows[0] ? toMessage(rows[0]) : null;
   }
 
   async insertReply(reply: {
@@ -373,22 +402,7 @@ export class OutreachReadRepository {
       .from(outreachMessages)
       .where(eq(outreachMessages.outreachRecordId, recordId))
       .orderBy(asc(outreachMessages.createdAt));
-    return rows.map((r) => ({
-      id: r.id,
-      outreachRecordId: r.outreachRecordId,
-      messageType: r.messageType as OutreachMessage['messageType'],
-      sequenceStep: r.sequenceStep,
-      subject: r.subject,
-      body: r.body,
-      contentHash: r.contentHash,
-      emailDraftId: r.emailDraftId,
-      finalizedEmailId: r.finalizedEmailId,
-      gmailMessageId: r.gmailMessageId,
-      gmailThreadId: r.gmailThreadId,
-      approvedAt: r.approvedAt,
-      sentAt: r.sentAt,
-      createdAt: r.createdAt,
-    }));
+    return rows.map(toMessage);
   }
 
   /**
