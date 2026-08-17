@@ -38,6 +38,7 @@ import { deterministicFindingApproveCommand } from './commands/deterministic-fin
 import { operatorEmailApproveCommand } from './commands/operator-email-approve.js';
 import { replyEmailFinalizeCommand } from './commands/reply-email-finalize.js';
 import { setContactEmailCommand } from './commands/set-contact-email.js';
+import { setContactTimezoneCommand } from './commands/set-contact-timezone.js';
 import { listLeads } from './commands/list-leads.js';
 import { resetTestData } from './commands/reset-test-data.js';
 import { resumeAuditCommand } from './commands/resume-audit.js';
@@ -457,6 +458,18 @@ program
   .option('--confirm', 'persist the fact (omit for a dry preview)', false)
   .action((opts: { lead: string; email: string; sourceType: string; sourceUrl: string; confirm?: boolean }) =>
     withContext((ctx) => setContactEmailCommand(ctx, { lead: opts.lead, email: opts.email, sourceType: opts.sourceType, sourceUrl: opts.sourceUrl, confirm: opts.confirm })),
+  );
+
+program
+  .command('set-contact-timezone')
+  .description('Set the current contact_timezone fact for a lead from an operator-supplied IANA timezone, reusing the existing fact/provenance system. Validates the zone with isValidTimeZone before writing. Records only what is supplied. Dry preview unless --confirm. Zero external calls; no scheduling/Gmail/send.')
+  .requiredOption('--lead <id>', 'exact lead id')
+  .requiredOption('--timezone <iana>', 'IANA timezone, e.g. Europe/London')
+  .requiredOption('--source-type <type>', 'provenance: mock | manual | website | google_places')
+  .requiredOption('--source-url <url>', 'provenance for where the timezone was determined')
+  .option('--confirm', 'persist the fact (omit for a dry preview)', false)
+  .action((opts: { lead: string; timezone: string; sourceType: string; sourceUrl: string; confirm?: boolean }) =>
+    withContext((ctx) => setContactTimezoneCommand(ctx, { lead: opts.lead, timezone: opts.timezone, sourceType: opts.sourceType, sourceUrl: opts.sourceUrl, confirm: opts.confirm })),
   );
 
 program
