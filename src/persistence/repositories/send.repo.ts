@@ -14,13 +14,24 @@ function isUniqueViolation(err: unknown): boolean {
 
 /** Read + reserve side of the send store (outside the completion transaction). */
 export class SendRepository implements SendStore {
-  constructor(private readonly db: Database) {}
+  constructor(protected readonly db: Database) {}
+
+  /**
+   * Which readiness lineage this store reads. The manual send path uses only INTERACTIVE readiness
+   * (unchanged); the automated runner uses a subclass that reads only SCHEDULED session readiness, so
+   * a scheduler-minted readiness can never satisfy a manual send and vice versa.
+   */
+  protected readonly readinessSource: 'INTERACTIVE' | 'SCHEDULED' = 'INTERACTIVE';
 
   async readiness(gmailAccount: string, policyVersion: string): Promise<SendingReadinessRecord | null> {
     const rows = await this.db
       .select()
       .from(sendingReadinessApprovals)
-      .where(and(eq(sendingReadinessApprovals.gmailAccount, gmailAccount), eq(sendingReadinessApprovals.policyVersion, policyVersion)))
+      .where(and(
+        eq(sendingReadinessApprovals.gmailAccount, gmailAccount),
+        eq(sendingReadinessApprovals.policyVersion, policyVersion),
+        eq(sendingReadinessApprovals.source, this.readinessSource),
+      ))
       .orderBy(desc(sendingReadinessApprovals.approvedAt))
       .limit(1);
     const r = rows[0];

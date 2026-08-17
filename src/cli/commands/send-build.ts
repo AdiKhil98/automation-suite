@@ -8,6 +8,7 @@ import { MockSendProvider, type MockSendScript } from '../../integrations/send/m
 import { type ReadOnlyGmailVerifier, type SendProvider } from '../../integrations/send/provider.js';
 import { DrizzleSendUnitOfWork } from '../../persistence/send-unit-of-work.js';
 import { SendRepository } from '../../persistence/repositories/send.repo.js';
+import { ScheduledSendRepository } from '../../persistence/repositories/scheduled-send.repo.js';
 import { type CliContext } from '../context.js';
 
 /**
@@ -60,6 +61,21 @@ export function buildSendService(ctx: CliContext, provider = buildSendProvider(c
   return new SendService({
     provider,
     store: new SendRepository(ctx.db),
+    uow: new DrizzleSendUnitOfWork(ctx.db),
+    logger: ctx.logger,
+    config: buildSendConfig(ctx.config),
+  });
+}
+
+/**
+ * Build the AUTOMATED scheduled-send service. Identical to {@link buildSendService} except the store
+ * reads only the SCHEDULED readiness lineage (derived from a durable authorization). `SendService`
+ * itself is unchanged, and the manual path (INTERACTIVE readiness + TTY) is never affected.
+ */
+export function buildScheduledSendService(ctx: CliContext, provider = buildSendProvider(ctx)): SendService {
+  return new SendService({
+    provider,
+    store: new ScheduledSendRepository(ctx.db),
     uow: new DrizzleSendUnitOfWork(ctx.db),
     logger: ctx.logger,
     config: buildSendConfig(ctx.config),

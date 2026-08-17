@@ -330,6 +330,16 @@ const envSchema = z.object({
   // Phase 15 send-time account cap. Confirmed sends only; default intentionally conservative.
   SENDING_DAILY_CAP: z.coerce.number().int().positive().default(1),
 
+  // --- Scheduled-send automation (migration 0038) ---
+  // Master switch for the AUTOMATED, non-interactive scheduled sender. Default off. An automated send
+  // ALSO requires the global sending gates (SENDING_ENABLED/OUTBOUND_ACTIONS_ENABLED=true, DRY_RUN=false),
+  // SENDING_PROVIDER=http, OUTREACH_TRACKING_ENABLED=true, and a VALID durable scheduled authorization.
+  // The manual send-scheduled path ignores this flag and keeps its readiness/TTY safeguards.
+  SCHEDULED_SEND_ENABLED: boolString(false),
+  // Lifetime of the short-lived SCHEDULED session readiness the runner mints from a durable
+  // authorization (minutes). Kept short (send-window sized), like manual readiness.
+  SCHEDULED_SEND_SESSION_READINESS_MINUTES: z.coerce.number().int().positive().max(60).default(30),
+
   // --- Phase 3C-A: guarded read-only KU64 evidence export ---
   // Off by default. The export CLI ALSO requires --confirm-production-read and an
   // exact ku64.de domain binding. It performs SELECT-only reads and never writes,

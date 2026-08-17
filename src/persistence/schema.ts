@@ -1145,6 +1145,35 @@ export const sendSchedules = pgTable(
 
 // --- Phase 14: controlled sending (one known draft, explicit confirmation, durable outcome) ---
 
+// Migration 0038: the durable, bounded, revocable, capped, policy-version-bound human pre-authorization
+// that replaces the interactive per-send readiness/TTY for AUTOMATED scheduled sends ONLY. The manual
+// send path never reads this table.
+export const scheduledSendAuthorizations = pgTable(
+  'scheduled_send_authorizations',
+  {
+    id: text('id').primaryKey(),
+    gmailAccount: text('gmail_account').notNull(),
+    policyVersion: text('policy_version').notNull(),
+    createdBy: text('created_by').notNull(),
+    startsAt: timestamp('starts_at', { withTimezone: true }).notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    maxPerDay: integer('max_per_day').notNull(),
+    note: text('note'),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    revokedBy: text('revoked_by'),
+    revokeReason: text('revoke_reason'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    accountIdx: index('scheduled_send_auth_account_idx').on(t.gmailAccount, t.policyVersion),
+    activeUk: uniqueIndex('scheduled_send_auth_active_uk').on(t.gmailAccount, t.policyVersion).where(sql`${t.revokedAt} IS NULL`),
+    capCk: check('scheduled_send_auth_cap_ck', sql`${t.maxPerDay} >= 1`),
+    // Bounded lifetime is enforced at the DB level (defense-in-depth alongside the domain check).
+    windowCk: check('scheduled_send_auth_window_ck', sql`${t.expiresAt} > ${t.startsAt} AND ${t.expiresAt} <= ${t.startsAt} + interval '14 days'`),
+    revocationCk: check('scheduled_send_auth_revocation_ck', sql`(${t.revokedAt} IS NULL AND ${t.revokedBy} IS NULL AND ${t.revokeReason} IS NULL) OR (${t.revokedAt} IS NOT NULL AND ${t.revokedBy} IS NOT NULL AND ${t.revokeReason} IS NOT NULL)`),
+  }),
+);
+
 export const sendingReadinessApprovals = pgTable(
   'sending_readiness_approvals',
   {
@@ -1157,12 +1186,20 @@ export const sendingReadinessApprovals = pgTable(
     revokedAt: timestamp('revoked_at', { withTimezone: true }),
     revokedBy: text('revoked_by'),
     revokeReason: text('revoke_reason'),
+    // Migration 0038: provenance. INTERACTIVE = the manual human/TTY path (default, unchanged);
+    // SCHEDULED = a session readiness minted by the automated runner from a durable authorization.
+    source: text('source').notNull().default('INTERACTIVE'),
+    scheduledAuthorizationId: text('scheduled_authorization_id').references(() => scheduledSendAuthorizations.id, { onDelete: 'restrict' }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
     accountIdx: index('sending_readiness_account_idx').on(t.gmailAccount, t.policyVersion),
-    activeUk: uniqueIndex('sending_readiness_active_uk').on(t.gmailAccount, t.policyVersion).where(sql`${t.revokedAt} IS NULL`),
+    // Active uniqueness is now scoped by source, so one INTERACTIVE and one SCHEDULED readiness can be
+    // active at once without interfering — the manual and automated lineages stay independent.
+    activeUk: uniqueIndex('sending_readiness_active_uk').on(t.gmailAccount, t.policyVersion, t.source).where(sql`${t.revokedAt} IS NULL`),
     revocationCk: check('sending_readiness_revocation_ck', sql`(${t.revokedAt} IS NULL AND ${t.revokedBy} IS NULL AND ${t.revokeReason} IS NULL) OR (${t.revokedAt} IS NOT NULL AND ${t.revokedBy} IS NOT NULL AND ${t.revokeReason} IS NOT NULL)`),
+    // A SCHEDULED row MUST link to a durable authorization; an INTERACTIVE row MUST NOT.
+    sourceCk: check('sending_readiness_source_ck', sql`(${t.source} = 'INTERACTIVE' AND ${t.scheduledAuthorizationId} IS NULL) OR (${t.source} = 'SCHEDULED' AND ${t.scheduledAuthorizationId} IS NOT NULL)`),
   }),
 );
 

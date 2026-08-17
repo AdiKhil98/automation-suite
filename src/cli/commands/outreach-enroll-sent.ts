@@ -15,81 +15,62 @@ function sequencePolicy(ctx: CliContext): SequencePolicy {
   };
 }
 
+export type EnrollFromAttemptOutcome =
+  | 'ENROLLED'
+  | 'ALREADY_ENROLLED'
+  | 'RECORD_NOT_ENROLLABLE'
+  | 'REFUSED';
+
+export interface EnrollFromAttemptResult {
+  outcome: EnrollFromAttemptOutcome;
+  reason?: string;
+  recordId?: string;
+  campaignId?: string;
+  campaignName?: string;
+  contact?: string;
+  messageId?: string;
+  contentHash?: string;
+  gmailMessageId?: string;
+  gmailThreadId?: string;
+  followupDueAt?: string;
+}
+
 /**
- * Production-send -> outreach tracking bridge (reconciliation command; NEVER sends).
- *
- * AFTER a Phase 14/15 `SendService` send reaches SENT_CONFIRMED (or an OUTCOME_UNKNOWN attempt that
- * was manually reconciled to CONFIRMED_SENT), this enrolls that exact confirmed send into the
- * `outreach_*` tracking system so reply sync, bounce reconciliation, and follow-ups can see it.
- *
- * It calls no provider and reads the subject/body/recipient from the finalized send records and the
- * Gmail ids from the confirmed `send_attempt` — nothing is re-entered on the CLI. Idempotent: a
- * re-run returns ALREADY_ENROLLED and creates no duplicate message/transition/follow-up (backed by
- * the migration-0037 partial-unique index on the Gmail message id).
+ * Reusable core of the confirmed-send -> outreach bridge (NEVER sends; makes no provider call). It
+ * reads the subject/body/recipient from the finalized send records and the Gmail ids from the
+ * CONFIRMED send_attempt, then tracks + enrolls idempotently. The caller is responsible for the
+ * `OUTREACH_TRACKING_ENABLED` gate. Used by both the CLI command and the automated runner.
  */
-export async function outreachEnrollSentCommand(
+export async function enrollConfirmedSendFromAttempt(
   ctx: CliContext,
-  opts: { lead: string; fromAttempt: string; campaign?: string; by?: string; timezone?: string },
-): Promise<void> {
-  if (!ctx.config.OUTREACH_TRACKING_ENABLED) {
-    console.log('Outreach tracking is disabled (OUTREACH_TRACKING_ENABLED=false). No action taken.');
-    return;
-  }
+  opts: { lead: string; fromAttempt: string; campaign?: string; by?: string },
+): Promise<EnrollFromAttemptResult> {
+  const refused = (reason: string): EnrollFromAttemptResult => ({ outcome: 'REFUSED', reason });
 
-  const refuse = (reason: string): void => console.log(`Refusing to enroll: ${reason}. No outreach record was changed.`);
-
-  // 1. Read the confirmed send inputs (subject/body/recipient from finalized records; Gmail ids from the attempt).
   const input = await new EnrollInputRepository(ctx.db).load(opts.fromAttempt);
-  if (!input) {
-    refuse(`send attempt ${opts.fromAttempt} not found, or it has no finalized draft`);
-    return;
-  }
-
-  // 2. Fail-closed eligibility — only a genuinely confirmed send may be enrolled.
-  if (input.leadId !== opts.lead) {
-    refuse(`attempt belongs to lead ${input.leadId}, not ${opts.lead}`);
-    return;
-  }
+  if (!input) return refused(`send attempt ${opts.fromAttempt} not found, or it has no finalized draft`);
+  if (input.leadId !== opts.lead) return refused(`attempt belongs to lead ${input.leadId}, not ${opts.lead}`);
   const confirmed = input.status === 'SENT_CONFIRMED' || input.reconciledOutcome === 'CONFIRMED_SENT';
-  if (!confirmed) {
-    refuse(`attempt is not confirmed (status=${input.status}, reconciled=${input.reconciledOutcome ?? '-'})`);
-    return;
-  }
-  if (!input.providerMessageId || !input.providerThreadId) {
-    refuse('confirmed attempt is missing a Gmail message/thread id');
-    return;
-  }
-  if (!input.sentAt) {
-    refuse('confirmed attempt is missing a sent timestamp');
-    return;
-  }
-  if (input.attemptFinalizedContentHash !== input.resolvedBodyHash) {
-    refuse('finalized content hash does not match the attempt — content may have diverged');
-    return;
-  }
+  if (!confirmed) return refused(`attempt is not confirmed (status=${input.status}, reconciled=${input.reconciledOutcome ?? '-'})`);
+  if (!input.providerMessageId || !input.providerThreadId) return refused('confirmed attempt is missing a Gmail message/thread id');
+  if (!input.sentAt) return refused('confirmed attempt is missing a sent timestamp');
+  if (input.attemptFinalizedContentHash !== input.resolvedBodyHash) return refused('finalized content hash does not match the attempt — content may have diverged');
 
-  // 3. Resolve (or create) the campaign, then find-or-create the tracked record for the real lead.
   const read = new OutreachReadRepository(ctx.db);
   const service = new OutreachService(new DrizzleOutreachUnitOfWork(ctx.db));
   const campaignName = opts.campaign ?? DEFAULT_CAMPAIGN;
-  const timezone = opts.timezone ?? 'UTC';
   let campaign = await read.getCampaignByName(campaignName);
-  campaign ??= await read.insertCampaign({ name: campaignName, sequencePolicy: sequencePolicy(ctx), timezone });
+  campaign ??= await read.insertCampaign({ name: campaignName, sequencePolicy: sequencePolicy(ctx), timezone: 'UTC' });
 
   const tracked = await service.track({
-    campaignId: campaign.id,
-    leadId: opts.lead,
-    contactEmail: input.recipientEmail,
-    timezone: campaign.timezone,
-    owner: opts.by ?? null,
+    campaignId: campaign.id, leadId: opts.lead, contactEmail: input.recipientEmail,
+    timezone: campaign.timezone, owner: opts.by ?? null,
   });
   if (tracked.outcome === 'BLOCKED_DO_NOT_CONTACT' || !tracked.record) {
-    refuse(`contact ${input.recipientEmail} is on do-not-contact`);
-    return;
+    return refused(`contact ${input.recipientEmail} is on do-not-contact`);
   }
   const record = tracked.record;
 
-  // 4. Atomic enrollment: INITIAL step-0 message + INITIAL_SENT + follow-up step 1 (idempotent).
   const result = await service.enrollConfirmedSend({
     outreachRecordId: record.id,
     subject: input.subject,
@@ -103,24 +84,58 @@ export async function outreachEnrollSentCommand(
     policy: sequencePolicy(ctx),
   });
 
-  if (result.outcome === 'ENROLLED') {
+  return {
+    outcome: result.outcome,
+    recordId: result.record.id,
+    campaignId: campaign.id,
+    campaignName: campaign.name,
+    contact: input.recipientEmail,
+    messageId: result.message?.id,
+    contentHash: result.message?.contentHash,
+    gmailMessageId: input.providerMessageId,
+    gmailThreadId: input.providerThreadId,
+    followupDueAt: result.followup?.dueAt.toISOString(),
+  };
+}
+
+/**
+ * Production-send -> outreach tracking bridge (reconciliation command; NEVER sends). Idempotent: a
+ * re-run returns ALREADY_ENROLLED and creates no duplicate message/transition/follow-up (backed by
+ * the migration-0037 partial-unique index on the Gmail message id).
+ */
+export async function outreachEnrollSentCommand(
+  ctx: CliContext,
+  opts: { lead: string; fromAttempt: string; campaign?: string; by?: string; timezone?: string },
+): Promise<void> {
+  if (!ctx.config.OUTREACH_TRACKING_ENABLED) {
+    console.log('Outreach tracking is disabled (OUTREACH_TRACKING_ENABLED=false). No action taken.');
+    return;
+  }
+
+  const r = await enrollConfirmedSendFromAttempt(ctx, opts);
+
+  if (r.outcome === 'REFUSED') {
+    console.log(`Refusing to enroll: ${r.reason}. No outreach record was changed.`);
+    return;
+  }
+  if (r.outcome === 'ENROLLED') {
     console.log('\n✅ ENROLLED — confirmed production send is now tracked in outreach.');
-    console.log(`  record:            ${result.record.id}  (lead ${opts.lead})`);
-    console.log(`  campaign:          ${campaign.name} (${campaign.id})`);
-    console.log(`  contact:           ${input.recipientEmail}`);
-    console.log(`  message:           ${result.message?.id ?? '-'}  sha256=${result.message?.contentHash.slice(0, 12) ?? '-'}…`);
-    console.log(`  gmail message id:  ${input.providerMessageId}`);
-    console.log(`  gmail thread id:   ${input.providerThreadId}`);
+    console.log(`  record:            ${r.recordId}  (lead ${opts.lead})`);
+    console.log(`  campaign:          ${r.campaignName} (${r.campaignId})`);
+    console.log(`  contact:           ${r.contact}`);
+    console.log(`  message:           ${r.messageId ?? '-'}  sha256=${r.contentHash?.slice(0, 12) ?? '-'}…`);
+    console.log(`  gmail message id:  ${r.gmailMessageId}`);
+    console.log(`  gmail thread id:   ${r.gmailThreadId}`);
     console.log('  record status:     INITIAL_SENT');
-    console.log(`  follow-up 1 due:   ${result.followup?.dueAt.toISOString() ?? '-'} (TRACKING ONLY; never auto-sent)`);
+    console.log(`  follow-up 1 due:   ${r.followupDueAt ?? '-'} (TRACKING ONLY; never auto-sent)`);
     console.log('\nReply sync and bounce reconciliation now see this thread:');
     console.log('  pnpm cli outreach-sync-replies --confirm-gmail-read');
     console.log('  pnpm cli outreach-reconcile-delivery --confirm-gmail-read');
     return;
   }
-  if (result.outcome === 'ALREADY_ENROLLED') {
-    console.log(`\n↩️  ALREADY_ENROLLED — Gmail message ${input.providerMessageId} is already tracked (record ${result.record.id}). Nothing changed.`);
+  if (r.outcome === 'ALREADY_ENROLLED') {
+    console.log(`\n↩️  ALREADY_ENROLLED — Gmail message ${r.gmailMessageId} is already tracked (record ${r.recordId}). Nothing changed.`);
     return;
   }
-  console.log(`\n❌ RECORD_NOT_ENROLLABLE — outreach record ${result.record.id} is in status ${result.record.status} and cannot enroll this send. Nothing changed.`);
+  console.log(`\n❌ RECORD_NOT_ENROLLABLE — outreach record ${r.recordId} cannot enroll this send. Nothing changed.`);
 }

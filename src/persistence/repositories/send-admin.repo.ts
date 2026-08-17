@@ -13,11 +13,14 @@ export class SendAdminRepository implements SendAdminStore {
 
   createReadiness(input: { gmailAccount: string; policyVersion: string; approvedBy: string; approvedAt: Date; expiresAt: Date }): Promise<ReadinessStatus> {
     return this.db.transaction(async (tx) => {
+      // Manual readiness is INTERACTIVE-only: supersede prior INTERACTIVE rows, never the automated
+      // SCHEDULED lineage. This keeps the manual send path's readiness behavior exactly as before.
       await tx.update(sendingReadinessApprovals).set({ revokedAt: input.approvedAt,
         revokedBy: input.approvedBy, revokeReason: 'superseded_by_fresh_readiness' }).where(and(
         eq(sendingReadinessApprovals.gmailAccount, input.gmailAccount),
-        eq(sendingReadinessApprovals.policyVersion, input.policyVersion), isNull(sendingReadinessApprovals.revokedAt)));
-      const row = (await tx.insert(sendingReadinessApprovals).values({ id: randomUUID(), ...input }).returning())[0];
+        eq(sendingReadinessApprovals.policyVersion, input.policyVersion),
+        eq(sendingReadinessApprovals.source, 'INTERACTIVE'), isNull(sendingReadinessApprovals.revokedAt)));
+      const row = (await tx.insert(sendingReadinessApprovals).values({ id: randomUUID(), ...input, source: 'INTERACTIVE' }).returning())[0];
       if (!row) throw new Error('readiness_insert_failed');
       await new PipelineRepository(tx).record({ leadId: null, runId: null, type: 'NOTE',
         fromStatus: null, toStatus: null, message: 'Expiring sending readiness created',
@@ -40,7 +43,8 @@ export class SendAdminRepository implements SendAdminStore {
 
   async latestReadiness(gmailAccount: string, policyVersion: string): Promise<ReadinessStatus | null> {
     const row = (await this.db.select().from(sendingReadinessApprovals).where(and(
-      eq(sendingReadinessApprovals.gmailAccount, gmailAccount), eq(sendingReadinessApprovals.policyVersion, policyVersion)))
+      eq(sendingReadinessApprovals.gmailAccount, gmailAccount), eq(sendingReadinessApprovals.policyVersion, policyVersion),
+      eq(sendingReadinessApprovals.source, 'INTERACTIVE')))
       .orderBy(desc(sendingReadinessApprovals.approvedAt)).limit(1))[0];
     return row ? toReadiness(row) : null;
   }

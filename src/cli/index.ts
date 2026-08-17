@@ -24,6 +24,8 @@ import { addSuppressionCommand, revokeSuppressionCommand, suppressionStatusComma
 import { gmailCredentialAclCommand } from './commands/gmail-credential-acl.js';
 import { approveSendingReadinessCommand, reconcileSendAttemptCommand, recoverStartedSendCommand, revokeSendingReadinessCommand,
   sendAttemptStatusCommand, sendingReadinessStatusCommand } from './commands/send-admin.js';
+import { approveScheduledSendCommand, revokeScheduledSendCommand, scheduledSendStatusCommand } from './commands/scheduled-send-admin.js';
+import { runScheduledSendsCommand } from './commands/run-scheduled-sends.js';
 import { previewDemoCommand } from './commands/preview-demo.js';
 import { qualifyLeadsCommand } from './commands/qualify-leads.js';
 import { prospectRunCommand } from './commands/prospect-run.js';
@@ -672,6 +674,33 @@ program
   .command('sending-readiness-status')
   .description('Phase 15: show redacted readiness status for the configured account/policy')
   .action(() => withContext(sendingReadinessStatusCommand));
+
+program
+  .command('approve-scheduled-send')
+  .description('Create the durable scheduled-send authorization (bounded ≤14 days, capped, policy-bound) for AUTOMATED sends. Human pre-authorization; never sends. Manual send path unaffected.')
+  .requiredOption('--by <operator>', 'operator creating the authorization')
+  .option('--days <n>', 'authorization lifetime in days (1..14; default 14)')
+  .option('--max-per-day <n>', 'per-day send cap (default = SENDING_DAILY_CAP)')
+  .option('--note <text>', 'audited note')
+  .action((opts: { by: string; days?: string; maxPerDay?: string; note?: string }) => withContext((ctx) => approveScheduledSendCommand(ctx, opts)));
+
+program
+  .command('revoke-scheduled-send')
+  .description('Revoke the durable scheduled-send authorization — instantly blocks all automated sending. Never sends.')
+  .requiredOption('--id <id>', 'authorization id')
+  .requiredOption('--by <operator>', 'operator revoking')
+  .requiredOption('--reason <text>', 'audited revocation reason')
+  .action((opts: { id: string; by: string; reason: string }) => withContext((ctx) => revokeScheduledSendCommand(ctx, opts)));
+
+program
+  .command('scheduled-send-status')
+  .description('Show the durable scheduled-send authorization + gate state (read-only; never sends)')
+  .action(() => withContext(scheduledSendStatusCommand));
+
+program
+  .command('run-scheduled-sends')
+  .description('AUTOMATED non-interactive scheduled sender: reuses the Phase 14/15 SendService under a valid durable authorization, sends up to the daily cap, auto-enrolls confirmed sends, and STOPS on OUTCOME_UNKNOWN (never retried). Fail-closed on every gate.')
+  .action(() => withContext(runScheduledSendsCommand));
 
 program
   .command('send-attempt-status')

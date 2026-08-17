@@ -267,6 +267,13 @@
       "when": 1786393200000,
       "tag": "0037_outreach_message_gmail_idempotency",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1786479600000,
+      "tag": "0038_scheduled_send_automation",
+      "breakpoints": true
     }
   ]
 }
