@@ -69,7 +69,10 @@ export function buildEnrichmentService(ctx: CliContext, opts: BuildEnrichmentOpt
       budget,
       logger: ctx.logger,
       detailsStore: new DrizzleGooglePlaceDetailsStore(ctx.db),
-      persistApprovedPhone: false,
+      // Google Places business phone (nationalPhoneNumber) persistence is explicitly approved.
+      // It is an already-paid Enterprise-SKU field, reuses the existing phone mapping/persistence
+      // path, and strengthens deterministic website verification (exact-phone is a strong signal).
+      persistApprovedPhone: true,
     });
   }
 

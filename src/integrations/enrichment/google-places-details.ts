@@ -15,6 +15,10 @@ export interface PlaceDetails {
   businessStatus?: string | null;
   nationalPhoneNumber?: string | null;
   websiteUri?: string | null;
+  /** Average star rating (1.0–5.0). Enterprise-SKU field. Absent when the place has no ratings. */
+  rating?: number | null;
+  /** Total number of ratings (Google `userRatingCount`). Enterprise-SKU field. Maps to review_count. */
+  userRatingCount?: number | null;
 }
 
 export interface PlacesDetailsClient {
@@ -24,8 +28,10 @@ export interface PlacesDetailsClient {
 
 // Endpoint + field mask verified against Places API (New) Place Details docs (2026-07).
 const PLACE_DETAILS_URL = 'https://places.googleapis.com/v1/places';
+// `rating` and `userRatingCount` are Enterprise-SKU fields, the same SKU already triggered by
+// `websiteUri`, so adding them causes no SKU escalation and no additional request.
 export const PLACE_DETAILS_FIELD_MASK =
-  'displayName,formattedAddress,addressComponents,primaryType,types,businessStatus,websiteUri';
+  'displayName,formattedAddress,addressComponents,primaryType,types,businessStatus,websiteUri,rating,userRatingCount';
 export const PLACE_DETAILS_APPROVED_PHONE_FIELD_MASK = `${PLACE_DETAILS_FIELD_MASK},nationalPhoneNumber`;
 /** The selected website and identity fields are conservatively budgeted at the Enterprise tier. */
 export const PLACE_DETAILS_TIER = 'Enterprise' as const;
@@ -70,6 +76,8 @@ export class GooglePlacesDetailsClient implements PlacesDetailsClient {
         businessStatus?: string;
         nationalPhoneNumber?: string;
         websiteUri?: string;
+        rating?: number;
+        userRatingCount?: number;
       };
       const component = (wanted: string[]): string | null => {
         const found = data.addressComponents?.find((item) => item.types?.some((type) => wanted.includes(type)));
@@ -85,6 +93,8 @@ export class GooglePlacesDetailsClient implements PlacesDetailsClient {
         businessStatus: data.businessStatus ?? null,
         nationalPhoneNumber: data.nationalPhoneNumber ?? null,
         websiteUri: data.websiteUri ?? null,
+        rating: typeof data.rating === 'number' ? data.rating : null,
+        userRatingCount: typeof data.userRatingCount === 'number' ? data.userRatingCount : null,
       };
     } finally {
       clearTimeout(timer);

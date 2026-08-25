@@ -38,6 +38,10 @@ export function buildGooglePlaceFacts(
     ['country', details.country],
     ['category', details.primaryType ?? details.types?.[0]],
     ['business_status', details.businessStatus],
+    // Quantitative demand signals, stored as text like every other fact. `userRatingCount`
+    // maps to review_count. An explicit 0 rating count is preserved (a genuine "no ratings").
+    ['rating', details.rating != null ? String(details.rating) : null],
+    ['review_count', details.userRatingCount != null ? String(details.userRatingCount) : null],
     ['phone', persistApprovedPhone ? details.nationalPhoneNumber : null],
   ];
   return values.flatMap(([factType, raw]) => {

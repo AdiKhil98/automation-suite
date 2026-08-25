@@ -42,6 +42,57 @@ describe('Place Details persistence boundary', () => {
     expect(facts.some((fact) => fact.factType === 'phone')).toBe(false);
   });
 
+  it('maps rating and userRatingCount to rating/review_count facts with google_places provenance', () => {
+    const facts = buildGooglePlaceFacts(
+      'lead-example',
+      'place-example',
+      { displayName: 'Example Dental', rating: 4.6, userRatingCount: 231 },
+      new Date('2026-07-21T10:00:00.000Z'),
+      false,
+    );
+    const rating = facts.find((f) => f.factType === 'rating');
+    const reviews = facts.find((f) => f.factType === 'review_count');
+    expect(rating).toMatchObject({ value: '4.6', normalizedValue: '4.6', sourceType: 'google_places' });
+    expect(reviews).toMatchObject({ value: '231', normalizedValue: '231', sourceType: 'google_places' });
+  });
+
+  it('persists the Google business phone only when phone persistence is approved', () => {
+    const details = { displayName: 'Example Dental', nationalPhoneNumber: '+44 20 7946 0000' };
+    const off = buildGooglePlaceFacts('lead', 'place', details, new Date(), false);
+    expect(off.some((f) => f.factType === 'phone')).toBe(false);
+
+    const on = buildGooglePlaceFacts('lead', 'place', details, new Date(), true);
+    const phone = on.find((f) => f.factType === 'phone');
+    expect(phone).toMatchObject({ value: '+44 20 7946 0000', sourceType: 'google_places' });
+    expect(phone?.normalizedValue).toBeTruthy();
+  });
+
+  it('omits rating, review_count and phone when the Google values are missing', () => {
+    const facts = buildGooglePlaceFacts(
+      'lead',
+      'place',
+      { displayName: 'Example Dental', rating: null, userRatingCount: null, nationalPhoneNumber: null },
+      new Date(),
+      true, // phone approved, but no phone value present
+    );
+    const types = facts.map((f) => f.factType);
+    expect(types).not.toContain('rating');
+    expect(types).not.toContain('review_count');
+    expect(types).not.toContain('phone');
+  });
+
+  it('preserves an explicit zero rating count as review_count "0"', () => {
+    const facts = buildGooglePlaceFacts(
+      'lead',
+      'place',
+      { displayName: 'New Practice', userRatingCount: 0 },
+      new Date(),
+      false,
+    );
+    expect(facts.find((f) => f.factType === 'review_count')).toMatchObject({ value: '0' });
+    expect(facts.some((f) => f.factType === 'rating')).toBe(false);
+  });
+
   it('persists successful Place Details before a later website verification failure', async () => {
     const persisted: unknown[] = [];
     const budget: GoogleReadBudget = { requests: 0, estimatedCostUsd: 0, maxRequests: 1, maxCostUsd: 1 };
