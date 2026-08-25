@@ -5,6 +5,7 @@ import { cleanAuditDebugCommand } from './commands/clean-audit-debug.js';
 import { collectLeadsCommand } from './commands/collect-leads.js';
 import { enrichLeadCommand } from './commands/enrich-lead.js';
 import { enrichLeadsCommand } from './commands/enrich-leads.js';
+import { placesBackfillCommand } from './commands/places-backfill.js';
 import { evalAuditCommand } from './commands/eval-audit.js';
 import { gateACheckCommand } from './commands/gate-a-check.js';
 import { generateDemosCommand } from './commands/generate-demos.js';
@@ -401,6 +402,18 @@ program
   .option('--lead <id>', 'enrich exactly one lead id (fail-closed, single-lead, no bulk fallback)')
   .action((opts: { campaign: string; limit?: string; lead?: string }) =>
     withContext((ctx) => enrichLeadsCommand(ctx, { campaign: opts.campaign, limit: opts.limit, lead: opts.lead })),
+  );
+
+program
+  .command('places-backfill')
+  .description('State-neutral, missing-only backfill of rating/review_count/phone from Place Details. PLAN by default (no API call); --confirm + paid-read env for a bounded live run. Never changes lead state or runs qualification/verification/audit/email/send.')
+  .option('--lead <id>', 'backfill exactly one lead id (fail-closed, single-lead)')
+  .option('--limit <n>', 'max leads to backfill this run (bounded batch)')
+  .option('--plan', 'read-only projection; make no API call (default when --confirm is absent)')
+  .option('--confirm', 'perform the bounded LIVE paid backfill (requires ALLOW_PAID_READS + GOOGLE_PLACES_API_KEY)')
+  .option('--include-active', 'explicitly include outreach-active/terminal leads (excluded by default)')
+  .action((opts: { lead?: string; limit?: string; plan?: boolean; confirm?: boolean; includeActive?: boolean }) =>
+    withContext((ctx) => placesBackfillCommand(ctx, opts)),
   );
 
 program

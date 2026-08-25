@@ -60,9 +60,92 @@ export function buildGooglePlaceFacts(
   });
 }
 
+/**
+ * The EXACT and ONLY fact types the state-neutral backfill path may ever write. This is the
+ * construction-level guarantee for `places-backfill`: no other Place Details fact (business
+ * name, address, website, category, coordinates, status, place id, …) can be touched, refreshed,
+ * or superseded through this path, regardless of what Google returns.
+ */
+export const BACKFILL_FACT_TYPES = ['rating', 'review_count', 'phone'] as const;
+export type BackfillFactType = (typeof BACKFILL_FACT_TYPES)[number];
+
+/**
+ * Build ONLY the three backfill facts from a Place Details response. By construction the value
+ * list contains exactly rating/review_count/phone and nothing else; every other Place Details
+ * field on `details` is ignored. A missing/absent value yields no fact.
+ */
+export function buildBackfillFacts(
+  leadId: string,
+  placeId: string,
+  details: PlaceDetails,
+  retrievedAt: Date,
+): NewLeadFact[] {
+  const sourceUrl = `https://places.googleapis.com/v1/places/${encodeURIComponent(placeId)}`;
+  const values: Array<[BackfillFactType, string | null | undefined]> = [
+    ['rating', details.rating != null ? String(details.rating) : null],
+    ['review_count', details.userRatingCount != null ? String(details.userRatingCount) : null],
+    ['phone', details.nationalPhoneNumber],
+  ];
+  return values.flatMap(([factType, raw]) => {
+    const value = raw?.trim();
+    if (!value) return [];
+    return [{
+      leadId,
+      factType,
+      value,
+      normalizedValue: normalized(factType, value),
+      sourceType: 'google_places' as const,
+      sourceUrl,
+      capturedAt: retrievedAt,
+      confidence: 1,
+    }];
+  });
+}
+
+export interface BackfillResult {
+  /** Fact types newly written (were missing). */
+  writtenTypes: BackfillFactType[];
+  /** Fact types skipped because a current fact already existed (any provenance). */
+  skippedExistingTypes: BackfillFactType[];
+}
+
 /** Persists successful Place Details independently of later website verification. */
 export class DrizzleGooglePlaceDetailsStore implements PlaceDetailsStore {
   constructor(private readonly db: Database) {}
+
+  /**
+   * State-neutral, missing-only backfill of rating/review_count/phone. Writes a fact ONLY when
+   * no current fact of that type exists (any provenance) — so a manual fact is never overwritten
+   * and an existing google_places value is never superseded or refreshed. Never changes
+   * `leads.status` and never touches any other fact type (enforced by `buildBackfillFacts`).
+   */
+  async backfillMissing(input: {
+    leadId: string;
+    placeId: string;
+    retrievedAt: Date;
+    details: PlaceDetails;
+  }): Promise<BackfillResult> {
+    return this.db.transaction(async (tx) => {
+      const lead = await new LeadsRepository(tx).getById(input.leadId);
+      if (!lead || lead.placeId !== input.placeId) {
+        throw new AppError('PLACE_BINDING_MISMATCH', 'Place Details lead binding mismatch');
+      }
+      const repo = new LeadFactsRepository(tx);
+      const writtenTypes: BackfillFactType[] = [];
+      const skippedExistingTypes: BackfillFactType[] = [];
+      for (const fact of buildBackfillFacts(input.leadId, input.placeId, input.details, input.retrievedAt)) {
+        const factType = fact.factType as BackfillFactType;
+        const existing = await repo.getCurrentFact(input.leadId, factType);
+        if (existing) {
+          skippedExistingTypes.push(factType);
+          continue;
+        }
+        await repo.writeCurrentFact(fact);
+        writtenTypes.push(factType);
+      }
+      return { writtenTypes, skippedExistingTypes };
+    });
+  }
 
   async persist(input: Parameters<PlaceDetailsStore['persist']>[0]): Promise<number> {
     return this.db.transaction(async (tx) => {
