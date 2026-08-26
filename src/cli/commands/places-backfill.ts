@@ -13,6 +13,7 @@ import {
   type BackfillFactType,
   DrizzleGooglePlaceDetailsStore,
 } from '../../persistence/google-place-details-store.js';
+import { EnrichmentRepository } from '../../persistence/repositories/enrichment.repo.js';
 import { LeadFactsRepository } from '../../persistence/repositories/lead-facts.repo.js';
 import { AppError } from '../../utils/errors.js';
 import { type CliContext } from '../context.js';
@@ -22,7 +23,6 @@ export interface PlacesBackfillOptions {
   limit?: string;
   plan?: boolean;
   confirm?: boolean;
-  includeActive?: boolean;
 }
 
 /** Test seam: inject a details client so unit/integration tests make no real API call. */
@@ -31,8 +31,10 @@ export interface PlacesBackfillDeps {
 }
 
 const SKIP_LABEL: Record<SkipReason, string> = {
-  no_place_id: 'no google_place_id',
-  excluded_outreach_status: 'excluded outreach state (use --lead … --include-active)',
+  no_place_id: 'no placeId',
+  not_enriched: 'no enrichment evidence (not yet enriched)',
+  excluded_outreach_status: 'excluded outreach state',
+  terminal_status: 'terminal/dead state (e.g. REJECTED)',
   lead_not_found: 'lead not found',
 };
 
@@ -57,14 +59,14 @@ export async function placesBackfillCommand(
 ): Promise<void> {
   const c = ctx.config;
   const live = opts.confirm === true;
-  const includeActive = opts.includeActive === true;
   const limit = opts.limit ? Number.parseInt(opts.limit, 10) : undefined;
   if (limit !== undefined && (!Number.isInteger(limit) || limit <= 0)) {
     throw new AppError('INVALID_LIMIT', '--limit must be a positive integer.');
   }
 
   const all = await ctx.leads.list(1000);
-  const { selected, skipped } = selectBackfillTargets(all, { lead: opts.lead, limit, includeActive });
+  const enrichedLeadIds = await new EnrichmentRepository(ctx.db).listEnrichmentEvidenceLeadIds();
+  const { selected, skipped } = selectBackfillTargets(all, { lead: opts.lead, limit, enrichedLeadIds });
 
   // Determine per-lead missing facts (read-only).
   const factsRepo = new LeadFactsRepository(ctx.db);

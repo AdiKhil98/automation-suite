@@ -7,8 +7,11 @@ import { type CliContext } from '../../src/cli/context.js';
 import { buildCandidateLead } from '../../src/domain/leads/lead-factory.js';
 import { type PlaceDetails, type PlacesDetailsClient } from '../../src/integrations/enrichment/google-places-details.js';
 import { type DbHandle } from '../../src/persistence/db.js';
+import { EnrichmentRepository } from '../../src/persistence/repositories/enrichment.repo.js';
 import { LeadFactsRepository } from '../../src/persistence/repositories/lead-facts.repo.js';
 import { LeadsRepository } from '../../src/persistence/repositories/leads.repo.js';
+import { PipelineRunsRepository } from '../../src/persistence/repositories/runs.repo.js';
+import { type LeadStatus } from '../../src/domain/leads/status.js';
 
 const testDatabase = requireIntegrationTestDatabase();
 const logger = pino({ level: 'silent' });
@@ -61,6 +64,27 @@ describe('places-backfill (PostgreSQL)', () => {
     await g('candidate_website_url', 'https://original.example/', 'https://original.example/');
     await g('category', 'dentist', 'dentist');
     return lead.id;
+  }
+
+  /** A lead with a placeId but NO enrichment evidence (no attempt, no google_places facts). */
+  async function seedBareLead(status: LeadStatus): Promise<string> {
+    const placeId = `place-${randomUUID()}`;
+    const lead = buildCandidateLead({ sourcePlaceId: placeId, source: 'mock' });
+    await new LeadsRepository(handle.db).create(lead);
+    await new LeadsRepository(handle.db).updateStatus(lead.id, status, new Date());
+    return lead.id;
+  }
+
+  /** A lead whose ONLY enrichment evidence is an enrichment_attempts row (no google_places facts). */
+  async function seedAttemptOnlyLead(status: LeadStatus): Promise<string> {
+    const leadId = await seedBareLead(status);
+    const runId = await new PipelineRunsRepository(handle.db).start('enrich:test', true);
+    await new EnrichmentRepository(handle.db).recordAttempt({
+      leadId, runId, outcome: 'TRANSIENT_ERROR', chosenDomain: null, chosenWebsiteUrl: null,
+      chosenLocationPageUrl: null, confidence: null, candidateCount: 0, contextProvider: 'google',
+      candidateProvider: 'mock', notes: null, startedAt: new Date(), completedAt: new Date(),
+    });
+    return leadId;
   }
 
   const differentDetails: PlaceDetails = {
@@ -124,5 +148,30 @@ describe('places-backfill (PostgreSQL)', () => {
     await placesBackfillCommand(ctx(), { confirm: true }, { detailsClient: spyClient });
     expect(called).toBe(0);
     expect(await new LeadFactsRepository(handle.db).getCurrentFact(leadId, 'rating')).toBeNull();
+  });
+
+  it('excludes a NEW lead with no enrichment evidence (placeId only)', async () => {
+    const leadId = await seedBareLead('NEW');
+    let called = 0;
+    const spyClient: PlacesDetailsClient = { details: async () => { called += 1; return differentDetails; } };
+    await placesBackfillCommand(ctx(), { confirm: true }, { detailsClient: spyClient });
+    expect(called).toBe(0);
+    expect(await new LeadFactsRepository(handle.db).getCurrentFact(leadId, 'rating')).toBeNull();
+  });
+
+  it('excludes a REJECTED lead even when it has enrichment evidence', async () => {
+    const leadId = await seedEnrichedLead(); // has google_places identity facts
+    await new LeadsRepository(handle.db).updateStatus(leadId, 'REJECTED', new Date());
+    let called = 0;
+    const spyClient: PlacesDetailsClient = { details: async () => { called += 1; return differentDetails; } };
+    await placesBackfillCommand(ctx(), { confirm: true }, { detailsClient: spyClient });
+    expect(called).toBe(0);
+    expect(await new LeadFactsRepository(handle.db).getCurrentFact(leadId, 'rating')).toBeNull();
+  });
+
+  it('includes a lead whose only evidence is an enrichment_attempts row (OR-branch)', async () => {
+    const leadId = await seedAttemptOnlyLead('READY_FOR_ENRICHMENT');
+    await placesBackfillCommand(ctx(), { confirm: true }, { detailsClient: mockClient(differentDetails) });
+    expect((await new LeadFactsRepository(handle.db).getCurrentFact(leadId, 'rating'))?.value).toBe('4.8');
   });
 });

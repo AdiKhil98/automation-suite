@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   computeMissingBackfillFacts,
   isExcludedOutreachStatus,
+  isTerminalStatus,
   selectBackfillTargets,
 } from '../../src/domain/lead-facts/backfill-selection.js';
 import { type Lead } from '../../src/domain/leads/lead.js';
@@ -18,21 +19,51 @@ function lead(over: Partial<Lead> = {}): Lead {
   };
 }
 
+/** All leads passed carry enrichment evidence unless a test overrides the set. */
+const enrichedAll = (leads: readonly Lead[]): Set<string> => new Set(leads.map((l) => l.id));
+
 describe('places-backfill selection', () => {
   it('skips leads without a placeId', () => {
-    const res = selectBackfillTargets([lead({ id: 'a', placeId: null })], { includeActive: false });
+    const leads = [lead({ id: 'a', placeId: null })];
+    const res = selectBackfillTargets(leads, { enrichedLeadIds: enrichedAll(leads) });
     expect(res.selected).toHaveLength(0);
     expect(res.skipped).toEqual([{ leadId: 'a', reason: 'no_place_id' }]);
   });
 
-  it('excludes outreach-active statuses by default and includes them with includeActive', () => {
-    const leads = [lead({ id: 'sched', status: 'SCHEDULED' }), lead({ id: 'fin', status: 'FINALIZED_EMAIL_PENDING' })];
-    const off = selectBackfillTargets(leads, { includeActive: false });
-    expect(off.selected).toHaveLength(0);
-    expect(off.skipped.map((s) => s.reason)).toEqual(['excluded_outreach_status', 'excluded_outreach_status']);
+  it('skips leads with no enrichment evidence (e.g. NEW) without an allowlist', () => {
+    const leads = [lead({ id: 'new', status: 'NEW' }), lead({ id: 'q', status: 'QUALIFIED' })];
+    // Only the QUALIFIED lead has evidence.
+    const res = selectBackfillTargets(leads, { enrichedLeadIds: new Set(['q']) });
+    expect(res.selected.map((l) => l.id)).toEqual(['q']);
+    expect(res.skipped).toEqual([{ leadId: 'new', reason: 'not_enriched' }]);
+  });
 
-    const on = selectBackfillTargets(leads, { includeActive: true });
-    expect(on.selected.map((l) => l.id).sort()).toEqual(['fin', 'sched']);
+  it('excludes outreach-active statuses even when enriched', () => {
+    const leads = [lead({ id: 'sched', status: 'SCHEDULED' }), lead({ id: 'fin', status: 'FINALIZED_EMAIL_PENDING' })];
+    const res = selectBackfillTargets(leads, { enrichedLeadIds: enrichedAll(leads) });
+    expect(res.selected).toHaveLength(0);
+    expect(res.skipped.map((s) => s.reason)).toEqual(['excluded_outreach_status', 'excluded_outreach_status']);
+  });
+
+  it('excludes terminal/dead statuses even when enriched', () => {
+    const leads = [
+      lead({ id: 'rej', status: 'REJECTED' }),
+      lead({ id: 'auto', status: 'REJECTED_AUTOMATICALLY' }),
+      lead({ id: 'dup', status: 'DUPLICATE' }),
+    ];
+    const res = selectBackfillTargets(leads, { enrichedLeadIds: enrichedAll(leads) });
+    expect(res.selected).toHaveLength(0);
+    expect(res.skipped.map((s) => s.reason)).toEqual(['terminal_status', 'terminal_status', 'terminal_status']);
+  });
+
+  it('includes enriched leads that have advanced past enrichment', () => {
+    const leads = [
+      lead({ id: 'mr', status: 'NEEDS_MANUAL_REVIEW' }),
+      lead({ id: 'audit', status: 'READY_FOR_AUDIT' }),
+      lead({ id: 're', status: 'READY_FOR_ENRICHMENT' }),
+    ];
+    const res = selectBackfillTargets(leads, { enrichedLeadIds: enrichedAll(leads) });
+    expect(res.selected.map((l) => l.id).sort()).toEqual(['audit', 'mr', 're']);
   });
 
   it('respects --limit with deterministic createdAt,id ordering', () => {
@@ -41,25 +72,34 @@ describe('places-backfill selection', () => {
       lead({ id: 'a', createdAt: new Date('2026-01-01T00:00:00Z') }),
       lead({ id: 'b', createdAt: new Date('2026-01-02T00:00:00Z') }),
     ];
-    const res = selectBackfillTargets(leads, { includeActive: false, limit: 2 });
+    const res = selectBackfillTargets(leads, { enrichedLeadIds: enrichedAll(leads), limit: 2 });
     expect(res.selected.map((l) => l.id)).toEqual(['a', 'b']);
   });
 
-  it('single-lead mode is fail-closed', () => {
-    expect(selectBackfillTargets([], { lead: 'x', includeActive: false }).skipped).toEqual([{ leadId: 'x', reason: 'lead_not_found' }]);
-    expect(selectBackfillTargets([lead({ id: 'x', placeId: null })], { lead: 'x', includeActive: false }).skipped)
+  it('single-lead mode obeys the same rules and fails closed', () => {
+    const q = lead({ id: 'x', status: 'QUALIFIED' });
+    expect(selectBackfillTargets([], { lead: 'x', enrichedLeadIds: new Set() }).skipped)
+      .toEqual([{ leadId: 'x', reason: 'lead_not_found' }]);
+    expect(selectBackfillTargets([lead({ id: 'x', placeId: null })], { lead: 'x', enrichedLeadIds: new Set(['x']) }).skipped)
       .toEqual([{ leadId: 'x', reason: 'no_place_id' }]);
-    expect(selectBackfillTargets([lead({ id: 'x', status: 'SENT' })], { lead: 'x', includeActive: false }).skipped)
-      .toEqual([{ leadId: 'x', reason: 'excluded_outreach_status' }]);
-    expect(selectBackfillTargets([lead({ id: 'x', status: 'SENT' })], { lead: 'x', includeActive: true }).selected.map((l) => l.id))
+    // has placeId but no enrichment evidence → fail closed
+    expect(selectBackfillTargets([q], { lead: 'x', enrichedLeadIds: new Set() }).skipped)
+      .toEqual([{ leadId: 'x', reason: 'not_enriched' }]);
+    expect(selectBackfillTargets([lead({ id: 'x', status: 'REJECTED' })], { lead: 'x', enrichedLeadIds: new Set(['x']) }).skipped)
+      .toEqual([{ leadId: 'x', reason: 'terminal_status' }]);
+    // fully eligible
+    expect(selectBackfillTargets([q], { lead: 'x', enrichedLeadIds: new Set(['x']) }).selected.map((l) => l.id))
       .toEqual(['x']);
   });
 
-  it('classifies excluded outreach statuses', () => {
+  it('classifies excluded outreach and terminal statuses', () => {
     expect(isExcludedOutreachStatus('SCHEDULED')).toBe(true);
     expect(isExcludedOutreachStatus('FINALIZED_EMAIL_PENDING')).toBe(true);
     expect(isExcludedOutreachStatus('QUALIFIED')).toBe(false);
-    expect(isExcludedOutreachStatus('NEEDS_MANUAL_REVIEW')).toBe(false);
+    expect(isTerminalStatus('REJECTED')).toBe(true);
+    expect(isTerminalStatus('REJECTED_AUTOMATICALLY')).toBe(true);
+    expect(isTerminalStatus('DUPLICATE')).toBe(true);
+    expect(isTerminalStatus('NEEDS_MANUAL_REVIEW')).toBe(false);
   });
 });
 

@@ -406,13 +406,12 @@ program
 
 program
   .command('places-backfill')
-  .description('State-neutral, missing-only backfill of rating/review_count/phone from Place Details. PLAN by default (no API call); --confirm + paid-read env for a bounded live run. Never changes lead state or runs qualification/verification/audit/email/send.')
-  .option('--lead <id>', 'backfill exactly one lead id (fail-closed, single-lead)')
+  .description('State-neutral, missing-only backfill of rating/review_count/phone from Place Details, restricted to already-enriched leads. PLAN by default (no API call); --confirm + paid-read env for a bounded live run. Never changes lead state or runs qualification/verification/audit/email/send.')
+  .option('--lead <id>', 'backfill exactly one lead id (fail-closed, single-lead; same eligibility rules)')
   .option('--limit <n>', 'max leads to backfill this run (bounded batch)')
   .option('--plan', 'read-only projection; make no API call (default when --confirm is absent)')
   .option('--confirm', 'perform the bounded LIVE paid backfill (requires ALLOW_PAID_READS + GOOGLE_PLACES_API_KEY)')
-  .option('--include-active', 'explicitly include outreach-active/terminal leads (excluded by default)')
-  .action((opts: { lead?: string; limit?: string; plan?: boolean; confirm?: boolean; includeActive?: boolean }) =>
+  .action((opts: { lead?: string; limit?: string; plan?: boolean; confirm?: boolean }) =>
     withContext((ctx) => placesBackfillCommand(ctx, opts)),
   );
 
