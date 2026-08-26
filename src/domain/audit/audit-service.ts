@@ -37,6 +37,7 @@ import {
   MAX_OUTREACH_SAFE_FINDINGS,
 } from './audit-types.js';
 import { buildReviewerPackage, type EvidencePackage } from './evidence-package.js';
+import { translateGeneratorAliases } from './evidence-alias.js';
 import { OPPORTUNITY_RULES, scoreOpportunity, type OpportunityResult } from './opportunity-score.js';
 import { describeViolation, validateGeneratorOutput, validateReviewMapping } from './validation.js';
 
@@ -435,15 +436,19 @@ export class AuditService {
         previousViolations = codes.length ? codes : ['schema_invalid'];
         continue;
       }
-      const validation = validateGeneratorOutput(parsed.data, input.package);
+      // Resolve model-facing evidence tags (E1, E2 …) to real evidence IDs BEFORE validation.
+      // Unknown/hallucinated tags pass through unchanged so validation still fails them closed.
+      const translated = translateGeneratorAliases(parsed.data, input.package);
+      const validation = validateGeneratorOutput(translated, input.package);
       if (!validation.ok) {
+        // Show the model its own (alias-space) output on repair, not the resolved IDs.
         await recordValidationFailure(rec, res, attempt, 'validation_failed', validation.violations, parsed.data, parsed.data.findings.map((f) => f.findingRef));
         genRepairHint = `Fix these evidence/claim problems: ${validation.violations.slice(0, 8).join('; ')}`;
         previousInvalidOutput = parsed.data;
         previousViolations = validation.violations;
         continue;
       }
-      generatorOutput = parsed.data;
+      generatorOutput = translated;
       generatorResponseId = res.responseId;
       break;
     }

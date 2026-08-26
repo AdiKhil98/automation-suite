@@ -187,7 +187,7 @@ describe('prompt hardening', () => {
 
   it('prompt versions are pinned constants', () => {
     expect(AUDIT_RUBRIC_VERSION).toBe('audit-rubric-1');
-    expect(GENERATOR_PROMPT_VERSION).toBe('audit-generator-1');
-    expect(REVIEWER_PROMPT_VERSION).toBe('audit-reviewer-1');
+    expect(GENERATOR_PROMPT_VERSION).toBe('audit-generator-2');
+    expect(REVIEWER_PROMPT_VERSION).toBe('audit-reviewer-2');
   });
 });

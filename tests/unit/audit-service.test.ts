@@ -524,7 +524,9 @@ describe('AuditService validation-debug envelope', () => {
     expect(h.provider.calls[0]?.user).toContain('REPAIR ATTEMPT 2');
     expect(h.provider.calls[0]?.user).toContain('PREVIOUS INVALID OUTPUT');
     expect(h.provider.calls[0]?.user).toContain('invented-id');
-    expect(h.provider.calls[0]?.user).toContain(validId);
+    // The repair block now lists the short evidence TAGS the model must cite (E1 …), not raw ids.
+    expect(h.provider.calls[0]?.user).toContain('VALID EVIDENCE TAGS');
+    expect(h.provider.calls[0]?.user).toContain('E1');
     expect(h.persisted[0]?.modelCalls[0]?.retryNumber).toBe(1);
   });
 

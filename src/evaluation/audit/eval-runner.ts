@@ -10,6 +10,7 @@ import {
 import { buildReviewerPackage, type EvidenceImage, type EvidencePackage } from '../../domain/audit/evidence-package.js';
 import { worstCaseInputTokensForCall } from '../../domain/audit/token-budget.js';
 import { validateGeneratorOutput } from '../../domain/audit/validation.js';
+import { translateGeneratorAliases } from '../../domain/audit/evidence-alias.js';
 import { buildGeneratorMessages, buildReviewerMessages } from '../../prompts/website-audit/index.js';
 import { estimateImageTokens } from '../../integrations/llm/image-tokens.js';
 import { worstCaseCostUsd } from '../../integrations/llm/pricing.js';
@@ -178,7 +179,9 @@ export async function runEvalMatrix(
       let genSchemaFailure = false;
       if (genRes.status === 'ok') {
         const parsed = auditGeneratorOutputSchema.safeParse(genRes.rawJson);
-        if (parsed.success) gen = parsed.data;
+        // Mirror the audit service: resolve model-facing evidence tags (E1 …) to real IDs before
+        // validation/grading, so the eval reflects the real pipeline. Unknown tags pass through.
+        if (parsed.success) gen = translateGeneratorAliases(parsed.data, c.package);
         else genSchemaFailure = true;
       }
 
