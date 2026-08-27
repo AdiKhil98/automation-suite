@@ -577,7 +577,8 @@ program
   .description('Phase 9: write one factual cold email per DEMO_READY/DEMO_DECIDED lead (mock by default; independent reviewer; no sending, no Gmail, no deploy)')
   .requiredOption('--campaign <name>', 'campaign name (see src/config/campaigns.ts)')
   .option('--limit <n>', 'max leads to write emails for this run')
-  .action((opts: { campaign: string; limit?: string }) => withContext((ctx) => generateEmailsCommand(ctx, opts)));
+  .option('--lead <id>', 'restrict the run to a single lead id (paid canary / single-lead scoping)')
+  .action((opts: { campaign: string; limit?: string; lead?: string }) => withContext((ctx) => generateEmailsCommand(ctx, opts)));
 
 program
   .command('outreach-compose-preview')
