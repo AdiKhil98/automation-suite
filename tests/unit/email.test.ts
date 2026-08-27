@@ -385,3 +385,73 @@ describe('EmailWriterService quality gates', () => {
     expect(result.callsMade).toBe(0);
   });
 });
+
+describe('EmailWriterService — no-demo OPPORTUNITY_READY path', () => {
+  // A uow that records the exact transition sequence the writer requests.
+  function spyingUow(sink: EmailPersist[], leadStatus: string, transitions: string[]): EmailUnitOfWork {
+    const leadService = { async transition(_id: string, to: string) { transitions.push(to); } } as unknown as LeadService;
+    return {
+      async transaction(fn) {
+        return fn({
+          leads: { async getById() { return { id: 'lead-1', status: leadStatus } as unknown as Lead; } } as never,
+          leadService,
+          emails: { async persist(record: EmailPersist) { sink.push(record); } },
+          events: { async record() { /* no-op */ } },
+        });
+      },
+    };
+  }
+
+  it('advances an OPPORTUNITY_READY lead (demo=null) to READY_FOR_HUMAN_APPROVAL', async () => {
+    const sink: EmailPersist[] = [];
+    const transitions: string[] = [];
+    const service = new EmailWriterService({
+      provider: new MockLlmProvider(defaultMockEmailResponder),
+      uow: spyingUow(sink, 'OPPORTUNITY_READY', transitions),
+      logger,
+      config: config(),
+    });
+    const result = await service.write(serviceInput(), 'run-1');
+    expect(result.outcome).toBe('APPROVED_READY');
+    expect(sink[0]!.routeTo).toBe('READY_FOR_HUMAN_APPROVAL');
+    // No demo → no {{DEMO_URL}} placeholder, reply-only email.
+    expect(sink[0]!.email?.hasDemoUrlPlaceholder).toBe(false);
+    // Same advance sequence as the demo-bearing states.
+    expect(transitions).toEqual(['EMAIL_DRAFTED', 'EMAIL_APPROVED', 'READY_FOR_HUMAN_APPROVAL']);
+  });
+
+  it('routes a rejected OPPORTUNITY_READY draft to EMAIL_REVIEW_FAILED', async () => {
+    const sink: EmailPersist[] = [];
+    const transitions: string[] = [];
+    // Reviewer rejects → REVIEW_REJECTED → EMAIL_REVIEW_FAILED.
+    const responder = (request: LlmRequest, index: number) =>
+      request.task === 'email_write'
+        ? defaultMockEmailResponder(request, index)
+        : { rawJson: reviewJson({ decision: 'REJECT', persuasive: false }) };
+    const service = new EmailWriterService({
+      provider: new MockLlmProvider(responder),
+      uow: spyingUow(sink, 'OPPORTUNITY_READY', transitions),
+      logger,
+      config: config(),
+    });
+    const result = await service.write(serviceInput(), 'run-1');
+    expect(result.outcome).toBe('REVIEW_REJECTED');
+    expect(transitions).toEqual(['EMAIL_DRAFTED', 'EMAIL_REVIEW_FAILED']);
+  });
+});
+
+describe('no-demo email cannot leak a demo claim (validation fences)', () => {
+  it('rejects a VIEW_CONCEPT CTA when no demo is allowed', () => {
+    const out = { ...strongEnglish(), primary_cta: 'VIEW_CONCEPT' as const };
+    const result = validateEmail(out, validationContext('en', false));
+    expect(result.ok).toBe(false);
+    expect(result.violations).toContain('demo_cta_without_approved_demo');
+  });
+
+  it('rejects a demo/prototype mention in the body when no demo is allowed', () => {
+    const out = { ...strongEnglish(), email_body: `${strongEnglish().email_body} I can show you a quick prototype.` };
+    const result = validateEmail(out, validationContext('en', false));
+    expect(result.ok).toBe(false);
+    expect(result.violations).toContain('mentions_demo_without_approved_demo');
+  });
+});

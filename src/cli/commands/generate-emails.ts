@@ -35,16 +35,26 @@ export async function generateEmailsCommand(ctx: CliContext, cliOpts: GenerateEm
   const perCallR = worstCaseCostUsd(c.EMAIL_REVIEWER_MODEL, worstCaseEmailInputTokens(), c.EMAIL_MAX_OUTPUT_TOKENS);
   const perLeadWorstCase = providerName === 'mock' ? 0 : (perCallW ?? 0) + (perCallR ?? 0);
 
+  // A bespoke demo is optional proof, not a required stage: OPPORTUNITY_READY leads (post-audit,
+  // opportunity-scored, no demo) are eligible alongside the demo-bearing DEMO_* states. Demo-link
+  // emails are still only possible when an APPROVED demo actually exists (demo=null → reply-only).
+  const EMAIL_ELIGIBLE_STATUSES = new Set(['DEMO_READY', 'DEMO_DECIDED', 'OPPORTUNITY_READY']);
   const all = await ctx.leads.list(1000);
-  let leads = all.filter((l) => (l.status === 'DEMO_READY' || l.status === 'DEMO_DECIDED') && (!cliOpts.lead || l.id === cliOpts.lead));
+  let leads = all.filter((l) => EMAIL_ELIGIBLE_STATUSES.has(l.status) && (!cliOpts.lead || l.id === cliOpts.lead));
   if (cliOpts.limit) leads = leads.slice(0, Number.parseInt(cliOpts.limit, 10));
 
   const items: EmailItem[] = [];
   let skippedNoAudit = 0;
+  let skippedNoContactEmail = 0;
   for (const lead of leads) {
     const audit = await auditRepo.latestAuditForComposer(lead.id);
     if (!audit) { skippedNoAudit += 1; continue; }
     const facts = await factsRepo.listCurrentFacts(lead.id);
+    // This pipeline delivers via Gmail to an email address. A lead with only a contact_form_url is
+    // NOT deliverable here — it stays for a future/manual written-outreach path, never entering the
+    // send pipeline that cannot reach it. Require a usable current contact_email.
+    const hasContactEmail = facts.some((f) => f.factType === 'contact_email' && f.isCurrent && f.value.trim() !== '');
+    if (!hasContactEmail) { skippedNoContactEmail += 1; continue; }
     let demo = await emailInputRepo.latestDemo(lead.id);
     if (cliOpts.controlledTestRunId) {
       if (!demo?.contentHash) throw new Error('controlled_test_demo_hash_missing');
@@ -59,7 +69,11 @@ export async function generateEmailsCommand(ctx: CliContext, cliOpts: GenerateEm
   }
 
   console.log(`\nEmail run (${campaign.name}, provider=${providerName}):`);
-  console.log(`  eligible leads:            ${items.length}${skippedNoAudit > 0 ? ` (+${skippedNoAudit} skipped: no audit)` : ''}`);
+  const skipNotes = [
+    skippedNoAudit > 0 ? `${String(skippedNoAudit)} no audit` : null,
+    skippedNoContactEmail > 0 ? `${String(skippedNoContactEmail)} no contact_email` : null,
+  ].filter((n): n is string => n !== null);
+  console.log(`  eligible leads:            ${items.length}${skipNotes.length > 0 ? ` (skipped: ${skipNotes.join(', ')})` : ''}`);
   console.log(`  projected max cost / lead: $${perLeadWorstCase.toFixed(4)} (cap $${c.EMAIL_MAX_COST_USD_PER_LEAD.toFixed(2)})`);
   console.log(`  projected max cost / run:  $${(perLeadWorstCase * items.length).toFixed(4)}`);
 

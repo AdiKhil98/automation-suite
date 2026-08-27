@@ -15,6 +15,10 @@ import { LeadFactsRepository } from '../../src/persistence/repositories/lead-fac
 import { LeadsRepository } from '../../src/persistence/repositories/leads.repo.js';
 import { PipelineRunsRepository } from '../../src/persistence/repositories/runs.repo.js';
 import { auditFindings, auditRuns, emailDrafts, emailFactInputs, emailFindingInputs, modelCalls, opportunityAssessments } from '../../src/persistence/schema.js';
+import { generateEmailsCommand } from '../../src/cli/commands/generate-emails.js';
+import { PipelineRepository } from '../../src/persistence/repositories/pipeline.repo.js';
+import { LeadService } from '../../src/domain/leads/lead-service.js';
+import { type CliContext } from '../../src/cli/context.js';
 
 const testDatabase = requireIntegrationTestDatabase();
 const logger = pino({ level: 'silent' });
@@ -41,6 +45,43 @@ describe('generateEmails (PostgreSQL)', () => {
     await handle.db.insert(auditFindings).values({ id: randomUUID(), auditRunId: runId, findingRef: 'F1', category: 'CTA_CLARITY', observation: 'CTA hard to find', affectedUrls: [], affectedProfiles: ['DESKTOP'], severity: 'MEDIUM', confidence: 0.8, businessImpact: 'i', recommendation: 'Make CTA prominent', safeForOutreach: true, reviewDecision: 'APPROVE' });
     await handle.db.insert(opportunityAssessments).values({ id: randomUUID(), auditRunId: runId, leadId: lead.id, conversionScore: 60, mobileScore: 0, trustScore: 0, contactabilityScore: 0, overallScore: 60, rulesVersion: 'opp', rulesHash: 'h', breakdown: [], capsApplied: [] });
     return lead.id;
+  }
+
+  // Seed a lead that stays at OPPORTUNITY_READY (no demo stage), optionally with a contact_email.
+  async function seedOpportunity(opts: { contactEmail: boolean }): Promise<string> {
+    const leads = new LeadsRepository(handle.db);
+    const lead = buildCandidateLead({ sourcePlaceId: `p-${randomUUID()}`, source: 'mock' });
+    await leads.create(lead);
+    await handle.db.transaction(async (tx) => {
+      const fr = new LeadFactsRepository(tx);
+      const facts: [string, string][] = [['business_name', 'Zahnärzte am Ufer'], ['city', 'Berlin'], ['services', 'Implantology|Whitening']];
+      if (opts.contactEmail) facts.push(['contact_email', 'info@example.com']);
+      for (const [t, v] of facts)
+        await fr.writeCurrentFact({ leadId: lead.id, factType: t as never, value: v, normalizedValue: v.toLowerCase(), sourceType: 'website', sourceUrl: null, confidence: 1 });
+    });
+    await leads.updateStatus(lead.id, 'OPPORTUNITY_READY', new Date());
+    const runId = randomUUID();
+    await handle.db.insert(auditRuns).values({ id: runId, leadId: lead.id, outcome: 'AUDITED', rubricVersion: 'r', generatorPromptVersion: 'g', reviewerPromptVersion: 'rev', schemaVersion: 's', opportunityRulesVersion: 'opp', opportunityRulesHash: 'h', provider: 'mock', requestedAuditModel: 'm', reasoningEffort: 'medium', reasoningMode: 'standard', imageDetail: 'high', responseStore: false, inputFingerprint: 'fp', startedAt: new Date() });
+    await handle.db.insert(auditFindings).values({ id: randomUUID(), auditRunId: runId, findingRef: 'F1', category: 'CTA_CLARITY', observation: 'CTA hard to find', affectedUrls: [], affectedProfiles: ['DESKTOP'], severity: 'MEDIUM', confidence: 0.8, businessImpact: 'i', recommendation: 'Make CTA prominent', safeForOutreach: true, reviewDecision: 'APPROVE' });
+    await handle.db.insert(opportunityAssessments).values({ id: randomUUID(), auditRunId: runId, leadId: lead.id, conversionScore: 60, mobileScore: 0, trustScore: 0, contactabilityScore: 0, overallScore: 60, rulesVersion: 'opp', rulesHash: 'h', breakdown: [], capsApplied: [] });
+    return lead.id;
+  }
+
+  // Minimal config the generate-emails command + mock email provider read. LLM_PROVIDER='mock'
+  // keeps it free (MockLlmProvider); no paid call is possible.
+  function cliCtx(): CliContext {
+    const cfg = {
+      EMAIL_GENERATION_ENABLED: true, LLM_PROVIDER: 'mock', DRY_RUN: true,
+      EMAIL_WRITER_MODEL: 'gpt-5.6-sol', EMAIL_REVIEWER_MODEL: 'gpt-5.6-terra',
+      EMAIL_WRITER_EFFORT: 'medium', EMAIL_REVIEWER_EFFORT: 'medium', LLM_STORE_RESPONSES: false,
+      EMAIL_TIMEOUT_MS: 1000, EMAIL_MAX_OUTPUT_TOKENS: 1500, EMAIL_MAX_RETRIES: 0,
+      EMAIL_MAX_CALLS_PER_LEAD: 2, EMAIL_MAX_COST_USD_PER_LEAD: 0.2, EMAIL_DEBUG_DIR: '.email-debug',
+    };
+    return {
+      config: cfg as unknown as CliContext['config'], logger, db: handle.db,
+      leads: new LeadsRepository(handle.db), events: new PipelineRepository(handle.db),
+      service: new LeadService(new LeadsRepository(handle.db), new PipelineRepository(handle.db)),
+    };
   }
 
   function service(): EmailWriterService {
@@ -73,5 +114,34 @@ describe('generateEmails (PostgreSQL)', () => {
     const calls = await handle.db.select().from(modelCalls).where(eq(modelCalls.leadId, leadId));
     expect(calls).toHaveLength(2);
     expect(calls.every((c) => c.auditRunId === null)).toBe(true);
+  });
+
+  it('advances an OPPORTUNITY_READY lead (no demo) straight to READY_FOR_HUMAN_APPROVAL', async () => {
+    const leadId = await seedOpportunity({ contactEmail: true });
+    const audit = await new DemoInputRepository(handle.db).latestAuditForComposer(leadId);
+    const facts = await new LeadFactsRepository(handle.db).listCurrentFacts(leadId);
+    const runId = await new PipelineRunsRepository(handle.db).start('emails:test', true);
+    const r = await service().write({ leadId, facts, findings: audit?.findings ?? [], demo: null, opportunityScore: audit?.opportunityScore ?? null }, runId);
+    expect(r.outcome).toBe('APPROVED_READY');
+    expect((await new LeadsRepository(handle.db).getById(leadId))?.status).toBe('READY_FOR_HUMAN_APPROVAL');
+    const rows = await handle.db.select().from(emailDrafts).where(eq(emailDrafts.leadId, leadId));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.demoId).toBeNull();
+    expect(rows[0]?.ctaKind).toBe('reply');
+  });
+
+  it('CLI selects an OPPORTUNITY_READY + contact_email lead and produces a human-review draft', async () => {
+    const leadId = await seedOpportunity({ contactEmail: true });
+    await generateEmailsCommand(cliCtx(), { campaign: 'dental-london-google', lead: leadId });
+    expect((await new LeadsRepository(handle.db).getById(leadId))?.status).toBe('READY_FOR_HUMAN_APPROVAL');
+    expect((await handle.db.select().from(emailDrafts).where(eq(emailDrafts.leadId, leadId)))).toHaveLength(1);
+  });
+
+  it('CLI skips an OPPORTUNITY_READY lead with no contact_email (undeliverable via Gmail)', async () => {
+    const leadId = await seedOpportunity({ contactEmail: false });
+    await generateEmailsCommand(cliCtx(), { campaign: 'dental-london-google', lead: leadId });
+    // Not selected: no draft, lead untouched.
+    expect((await handle.db.select().from(emailDrafts).where(eq(emailDrafts.leadId, leadId)))).toHaveLength(0);
+    expect((await new LeadsRepository(handle.db).getById(leadId))?.status).toBe('OPPORTUNITY_READY');
   });
 });

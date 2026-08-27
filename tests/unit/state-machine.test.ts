@@ -14,6 +14,11 @@ describe('lead state machine', () => {
     expect(canTransition('READY_FOR_QUALIFICATION', 'QUALIFIED')).toBe(true);
     expect(canTransition('EMAIL_DRAFTED', 'EMAIL_APPROVED')).toBe(true);
     expect(canTransition('EMAIL_REVIEW_FAILED', 'EMAIL_DRAFTED')).toBe(true);
+    // A demo is optional: an evidence-backed lead may draft an email without a bespoke demo.
+    expect(canTransition('OPPORTUNITY_READY', 'EMAIL_DRAFTED')).toBe(true);
+    // The demo branches remain valid for leads that do build one.
+    expect(canTransition('OPPORTUNITY_READY', 'DEMO_DECIDED')).toBe(true);
+    expect(canTransition('DEMO_DECIDED', 'EMAIL_DRAFTED')).toBe(true);
     expect(canTransition('HUMAN_APPROVED', 'DRAFT_CREATED')).toBe(true);
     // Phase 13/14: a created draft is scheduled first; sending acts on the schedule.
     // There is intentionally no direct DRAFT_CREATED → SENT edge.

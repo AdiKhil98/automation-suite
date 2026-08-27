@@ -43,7 +43,10 @@ const BASE_TRANSITIONS: Record<LeadStatus, LeadStatus[]> = {
   // no forward send edge are added: reaching HUMAN_APPROVED later stays gated by the existing Gmail/send
   // eligibility checks. It can still be parked for manual review.
   OUTREACH_READY_DETERMINISTIC: ['NEEDS_MANUAL_REVIEW', 'READY_FOR_HUMAN_APPROVAL'],
-  OPPORTUNITY_READY: ['COMPETITOR_RESEARCH_READY', 'DEMO_DECIDED'],
+  // A demo is optional proof, not a mandatory stage: an evidence-backed, contactable lead may go
+  // straight to email drafting without a bespoke demo. The demo branches remain for leads that do
+  // build one; reaching HUMAN_APPROVED/send later stays gated by the existing eligibility checks.
+  OPPORTUNITY_READY: ['COMPETITOR_RESEARCH_READY', 'DEMO_DECIDED', 'EMAIL_DRAFTED'],
   COMPETITOR_RESEARCH_READY: ['DEMO_DECIDED'],
   // DEMO_READY only applies when the demo tier is not NONE; both edges are valid.
   DEMO_DECIDED: ['DEMO_READY', 'EMAIL_DRAFTED'],

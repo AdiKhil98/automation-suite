@@ -97,7 +97,7 @@ export interface EmailPersist {
   factInputs: Array<{ id: string; emailId: string; leadFactId: string; field: string }>;
   findingInputs: Array<{ id: string; emailId: string; auditFindingId: string; directive: string }>;
   modelCalls: EmailModelCall[];
-  /** Terminal lead state for this run (routing), applied from DEMO_READY/DEMO_DECIDED. */
+  /** Terminal lead state for this run (routing), applied from DEMO_READY/DEMO_DECIDED/OPPORTUNITY_READY. */
   routeTo: LeadStatus;
 }
 
@@ -199,7 +199,9 @@ export class EmailWriterService {
       if (persist.email) persist.email.runId = runId;
       await this.deps.uow.transaction(async (repos) => {
         const lead = await repos.leads.getById(input.leadId);
-        if (lead && (lead.status === 'DEMO_READY' || lead.status === 'DEMO_DECIDED')) {
+        // A demo is optional: OPPORTUNITY_READY (no demo) advances the same way as the demo-bearing
+        // states. All three reach EMAIL_DRAFTED via a legal edge in the state machine.
+        if (lead && (lead.status === 'DEMO_READY' || lead.status === 'DEMO_DECIDED' || lead.status === 'OPPORTUNITY_READY')) {
           await repos.leadService.transition(input.leadId, 'EMAIL_DRAFTED');
           if (persist.routeTo === 'EMAIL_REVIEW_FAILED') {
             await repos.leadService.transition(input.leadId, 'EMAIL_REVIEW_FAILED');
