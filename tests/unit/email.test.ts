@@ -142,6 +142,32 @@ describe('Cold Email Copy Standard fixtures', () => {
   });
 });
 
+describe('cta_in_model_body (click carve-out for hyphenated compounds)', () => {
+  it('still rejects model-authored click CTAs', () => {
+    const ctaBodies = [
+      'The booking action is hidden.\n\nClick here to fix it.',
+      'The booking action is hidden.\n\nJust click this link when ready.',
+      'The booking action is hidden.\n\nClick below to see the change.',
+    ];
+    for (const email_body of ctaBodies) {
+      const result = validateEmail({ ...strongEnglish(), email_body }, validationContext());
+      expect(result.violations, email_body).toContain('cta_in_model_body');
+    }
+  });
+
+  it('does not flag hyphenated compounds / technical nouns that contain "click"', () => {
+    const safeBodies = [
+      "Your WhatsApp destination does not match the number in the site's click-to-call links.\n\nStandardising those targets removes ambiguity at that step.",
+      'The homepage relies on one-click booking that points to an outdated number.\n\nAligning it with the published number would remove the mismatch.',
+      'The click-through path from the header goes to a stale contact page.\n\nPointing it at the current details would keep the routes consistent.',
+    ];
+    for (const email_body of safeBodies) {
+      const result = validateEmail({ ...strongEnglish(), email_body }, validationContext());
+      expect(result.violations, email_body).not.toContain('cta_in_model_body');
+    }
+  });
+});
+
 describe('revealing-subject denylist (high precision)', () => {
   const withSubjects = (options: [string, string, string], selected: string): EmailWriterOutput =>
     ({ ...strongEnglish(), subject_options: options, selected_subject: selected });

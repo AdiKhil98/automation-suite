@@ -25,7 +25,10 @@ export const FAKE_URGENCY_RE = /\b(?:act now|urgent(?:ly)?|immediately|last chan
 export const UNSUPPORTED_BEHAVIOR_RE = /\b(?:visitors?|patients?|customers?)\s+(?:are|will be|werden|würden)\s+(?:leaving|leave|abandon|lost|abspringen|verlassen)\b/i;
 export const COMPETITOR_RE = /\b(?:competitors?|competition|other (?:clinics?|practices?|businesses)|market leaders?|mitbewerber|konkurrenz|andere (?:kliniken|praxen|unternehmen))\b/i;
 export const DEMO_MENTION_RE = /\b(?:demo|mock-?up|redesign|concept|preview|prototype|mockup|konzept|entwurf|vorschau)\b/i;
-const CTA_IN_BODY_RE = /\b(?:reply|respond|book a call|schedule a call|call me|take a look|view (?:the|this)|open (?:the|this)|click|visit|antworten sie|schreiben sie mir|termin vereinbaren|ansehen|öffnen sie|klicken sie)\b/i;
+// `click` matches model-authored CTA verbs ("click here", "click this link", "click below").
+// The lookarounds exempt hyphenated compounds/technical nouns ("click-to-call", "click-through",
+// "one-click") so a body describing the site's own click-to-call links is not mistaken for a CTA.
+const CTA_IN_BODY_RE = /\b(?:reply|respond|book a call|schedule a call|call me|take a look|view (?:the|this)|open (?:the|this)|(?<!-)click(?!-)|visit|antworten sie|schreiben sie mir|termin vereinbaren|ansehen|öffnen sie|klicken sie)\b/i;
 const GENERIC_OPENING_RE = /^(?:i (?:just )?(?:wanted to|thought i(?:'d| would)|came across)|ich wollte mich kurz|ich dachte,? ich|in today'?s|in der heutigen|i hope|ich hoffe)/i;
 export const MARKDOWN_RE = /(?:^|\n)\s{0,3}(?:#{1,6}\s|[-*+]\s|\d+\.\s|>\s)|\[[^\]]+\]\([^)]+\)|`{1,3}|\*\*|__/m;
 export const EMOJI_RE = /\p{Extended_Pictographic}/u;
