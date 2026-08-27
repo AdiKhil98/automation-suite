@@ -182,6 +182,14 @@ advancement stops at `HUMAN_REVIEW_REQUIRED`. V1 remains selected and unchanged.
 > 3. **Improve evidence-citation prompting** if the fabricated-reference rate is material.
 > 4. **Run future paid evaluations in small foreground batches with explicit stop points** (not a single 48-call background run).
 
+> **Backlog — durable raw-writer-output persistence (NOT scheduled).** `email_drafts` persists only the
+> rendered `subject`/`body` + reviewer verdict, not the structured writer output (`subject_options`,
+> `evidence_ids`, `strategic_angle`, `genericity_score`, etc.). The reviewer-only `resume-email-review`
+> recovery therefore reloads the exact original draft from the ephemeral `.email-debug` record (git-ignored,
+> 7-day TTL), integrity-checked by re-rendering it against the persisted row. Backlog item: persist the raw
+> writer output durably in the DB (new column/table) so any `REVIEW_FAILED` draft is resumable without the
+> debug store, optionally backfilling from existing debug records. Not implemented; not scheduled.
+
 > **Phase 17A — outreach tracking & follow-up operations (IMPLEMENTED; tracking only, NEVER sends).**
 > Adds Postgres as the source of truth for outreach (migration `0026`, six additive `outreach_*` tables:
 > campaigns, per-(lead×campaign×contact) records with a 17-state machine, immutable message snapshots,

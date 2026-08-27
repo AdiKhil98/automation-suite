@@ -15,6 +15,7 @@ import { type LeadService, type LeadStore } from '../leads/lead-service.js';
 import { type LeadStatus } from '../leads/status.js';
 import { type NewPipelineEvent } from '../pipeline/pipeline-event.js';
 import { EMAIL_SCHEMA_VERSION, EMAIL_REVIEW_JSON_SCHEMA, EMAIL_WRITER_JSON_SCHEMA, emailReviewSchema, emailWriterSchema } from './email-schema.js';
+import { buildEmailBrief } from './email-brief.js';
 import { buildEmailContext, type EmailDemoMeta, type EmailFinding, type EmailInputs, renderEmail } from './email-render.js';
 import { EMAIL_WRITER_RULES_VERSION, type EmailStatus } from './email-types.js';
 import { validateEmail } from './email-validation.js';
@@ -159,7 +160,7 @@ export class EmailWriterService {
     const safeFindings = input.findings.filter((f) => f.safeForOutreach);
     const emailInputs: EmailInputs = { facts: input.facts, findings: safeFindings, demo: input.demo };
     const ctx = buildEmailContext(emailInputs);
-    const brief = this.brief(input, safeFindings, ctx.demoLinkAllowed);
+    const brief = this.brief(input, safeFindings);
 
     const canCall = (model: string): boolean => {
       if (costUnaccountable) return false;
@@ -342,29 +343,7 @@ export class EmailWriterService {
     };
   }
 
-  private brief(input: EmailWriteInput, safeFindings: EmailFinding[], demoLinkAllowed: boolean): EmailBrief {
-    const currentFacts = input.facts.filter((fact) => fact.isCurrent && fact.value.trim() !== '');
-    const val = (type: string): string | null =>
-      currentFacts.find((fact) => fact.factType === type)?.value.trim() ?? null;
-    return {
-      businessName: val('business_name'),
-      contactName: val('contact_name'),
-      language: buildEmailContext({ facts: input.facts, findings: safeFindings, demo: input.demo }).language,
-      facts: currentFacts.map((fact) => ({
-        evidenceId: fact.id,
-        type: fact.factType,
-        value: fact.value.trim(),
-      })),
-      findings: safeFindings.map((finding) => ({
-        evidenceId: finding.id,
-        findingRef: finding.findingRef,
-        category: finding.category,
-        observation: finding.observation,
-        recommendation: finding.recommendation,
-      })),
-      demoLinkAllowed,
-      approvedDemoFindingRefs: input.demo?.approvedFindingRefs ?? [],
-      competitorPackage: null,
-    };
+  private brief(input: EmailWriteInput, safeFindings: EmailFinding[]): EmailBrief {
+    return buildEmailBrief({ facts: input.facts, findings: safeFindings, demo: input.demo });
   }
 }

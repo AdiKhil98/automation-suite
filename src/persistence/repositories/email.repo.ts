@@ -1,4 +1,6 @@
+import { type PersistedDraftRow } from '../../domain/email/resume-email-review.js';
 import { type EmailPersist, type EmailRunStore } from '../../domain/email/email-writer-service.js';
+import { eq } from 'drizzle-orm';
 import { type DbExecutor } from '../db.js';
 import { emailDrafts, emailFactInputs, emailFindingInputs, modelCalls } from '../schema.js';
 
@@ -6,6 +8,19 @@ import { emailDrafts, emailFactInputs, emailFindingInputs, modelCalls } from '..
  * (fact + finding inputs), and the LLM model_calls (auditRunId = null; per-lead cost). */
 export class EmailRepository implements EmailRunStore {
   constructor(private readonly db: DbExecutor) {}
+
+  /** Read-only projection of one persisted draft (used by the reviewer-only resume path). */
+  async getById(id: string): Promise<PersistedDraftRow | null> {
+    const rows = await this.db.select().from(emailDrafts).where(eq(emailDrafts.id, id)).limit(1);
+    const r = rows[0];
+    if (!r) return null;
+    return {
+      id: r.id, leadId: r.leadId, runId: r.runId, status: r.status, subject: r.subject, body: r.body,
+      demoId: r.demoId, writerPromptVersion: r.writerPromptVersion, schemaVersion: r.schemaVersion,
+      rulesVersion: r.rulesVersion, provider: r.provider, requestedWriterModel: r.requestedWriterModel,
+      writerResponseId: r.writerResponseId,
+    };
+  }
 
   async persist(record: EmailPersist): Promise<void> {
     if (record.email) {

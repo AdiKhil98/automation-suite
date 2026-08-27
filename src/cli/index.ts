@@ -11,6 +11,7 @@ import { gateACheckCommand } from './commands/gate-a-check.js';
 import { generateDemosCommand } from './commands/generate-demos.js';
 import { composeDemosCommand } from './commands/compose-demos.js';
 import { generateEmailsCommand } from './commands/generate-emails.js';
+import { resumeEmailReviewCommand } from './commands/resume-email-review.js';
 import { reviewDashboardCommand } from './commands/review-dashboard.js';
 import { deployDemosCommand } from './commands/deploy-demos.js';
 import { gmailAuthCommand } from './commands/gmail-auth.js';
@@ -579,6 +580,13 @@ program
   .option('--limit <n>', 'max leads to write emails for this run')
   .option('--lead <id>', 'restrict the run to a single lead id (paid canary / single-lead scoping)')
   .action((opts: { campaign: string; limit?: string; lead?: string }) => withContext((ctx) => generateEmailsCommand(ctx, opts)));
+
+program
+  .command('resume-email-review')
+  .description('Phase 9 recovery: resume ONE persisted REVIEW_FAILED draft through validation + the reviewer WITHOUT re-running the writer (no Gmail, no send)')
+  .requiredOption('--lead <id>', 'lead id (must be EMAIL_REVIEW_FAILED)')
+  .requiredOption('--draft <id>', 'the REVIEW_FAILED email draft id to resume')
+  .action((opts: { lead: string; draft: string }) => withContext((ctx) => resumeEmailReviewCommand(ctx, opts)));
 
 program
   .command('outreach-compose-preview')
