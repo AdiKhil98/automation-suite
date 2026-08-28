@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { buildEmailWriterMessages, type EmailBrief, EMAIL_REVIEWER_PROMPT_VERSION, EMAIL_WRITER_PROMPT_VERSION } from '../../prompts/email/index.js';
-import { emailWriterSchema } from '../../domain/email/email-schema.js';
+import { emailWriterSchema, type EmailReviewParsed, type EmailWriterParsed } from '../../domain/email/email-schema.js';
+import { previewEmailReview, type PreviewReviewResult } from '../../domain/email/compose-preview-review.js';
 import { buildEmailContext, type EmailInputs, type EmailFinding } from '../../domain/email/email-render.js';
 import { EMAIL_WRITER_JSON_SCHEMA } from '../../domain/email/email-schema.js';
 import { validateEmail } from '../../domain/email/email-validation.js';
@@ -32,6 +33,7 @@ export interface ComposePreviewOptions {
   competitorPackage?: string;
   competitorPattern?: string;
   apply?: boolean;
+  review?: boolean;
 }
 
 const NAME_TOKEN_MIN = 4;
@@ -55,6 +57,11 @@ function identityTokens(names: (string | null)[]): string[] {
 export async function outreachComposePreviewCommand(ctx: CliContext, opts: ComposePreviewOptions): Promise<void> {
   if (!opts.lead) {
     console.error('Provide --lead <lead-id>.');
+    process.exitCode = 1;
+    return;
+  }
+  if (opts.review && opts.competitorPackage) {
+    console.error('--review is only valid for the prospect-only preview; do not combine it with --competitor-package. Failing closed.');
     process.exitCode = 1;
     return;
   }
@@ -102,6 +109,25 @@ export async function outreachComposePreviewCommand(ctx: CliContext, opts: Compo
     return;
   }
   const prospectDraft = parsed.data;
+
+  // --- optional reviewer preview (--review): writer → deterministic validation → production reviewer.
+  // Structurally read-only: no EmailUnitOfWork, no persistence, no lead transition, no Gmail, no send.
+  // At most 2 LLM calls per preview (the writer above + one reviewer). Guaranteed prospect-only by the
+  // early guard that rejects --review together with --competitor-package.
+  if (opts.review) {
+    const result = await previewEmailReview({
+      draft: prospectDraft, validationCtx, brief, provider,
+      config: {
+        reviewerModel: c.EMAIL_REVIEWER_MODEL, reviewerEffort: c.EMAIL_REVIEWER_EFFORT, store: c.LLM_STORE_RESPONSES,
+        timeoutMs: c.EMAIL_TIMEOUT_MS, maxOutputTokens: c.EMAIL_MAX_OUTPUT_TOKENS, maxRetries: c.EMAIL_MAX_RETRIES,
+      },
+      withReview: true,
+    });
+    printReviewPreview(leadId, prospectDraft, result);
+    if (result.verdict !== 'REVIEW_APPROVABLE') process.exitCode = 1;
+    return;
+  }
+
   const prospectCheck = validateEmail(prospectDraft, validationCtx);
   if (!prospectCheck.ok) {
     console.error(`Prospect draft failed the copy gate: ${prospectCheck.violations.join(', ')}`);
@@ -307,6 +333,67 @@ function buildBrief(
     approvedDemoFindingRefs,
     competitorPackage: null,
   };
+}
+
+function reviewerDimensions(rv: EmailReviewParsed): [string, boolean][] {
+  return [
+    ['subjectSpecific', rv.subjectSpecific],
+    ['subjectCuriosityGap', rv.subjectCuriosityGap],
+    ['openingSpecific', rv.openingSpecific],
+    ['businessRelevanceClear', rv.businessRelevanceClear],
+    ['urgencySupported', rv.urgencySupported],
+    ['competitorClaimsSupported', rv.competitorClaimsSupported],
+    ['humanStylePass', rv.humanStylePass],
+    ['punctuationPass', rv.punctuationPass],
+    ['singlePrimaryCta', rv.singlePrimaryCta],
+    ['sufficientlyPersonalized', rv.sufficientlyPersonalized],
+    ['evidenceSupported', rv.evidenceSupported],
+    ['demoAligned', rv.demoAligned],
+    ['persuasive', rv.persuasive],
+    ['singleObservation', rv.singleObservation],
+    ['buyerLanguageOnly', rv.buyerLanguageOnly],
+    ['conversationNotAudit', rv.conversationNotAudit],
+    ['confidentObservation', rv.confidentObservation],
+  ];
+}
+
+function printReviewPreview(leadId: string, draft: EmailWriterParsed, result: PreviewReviewResult): void {
+  console.log(`\n=== Review preview (lead ${leadId}) ===`);
+  console.log(`  writer prompt: ${EMAIL_WRITER_PROMPT_VERSION}   reviewer prompt: ${EMAIL_REVIEWER_PROMPT_VERSION}`);
+
+  console.log('\n  --- Writer output ---');
+  console.log(`  Subject: ${draft.selected_subject}`);
+  console.log(`  primary_cta: ${draft.primary_cta}   competitor_evidence_used: ${draft.competitor_evidence_used}`);
+  console.log(`\n${renderBodyForDisplay(draft.email_body)}`);
+
+  console.log('\n  --- Deterministic validation ---');
+  console.log(`  result: ${result.validation.ok ? 'PASS' : 'FAIL'}`);
+  if (result.validation.violations.length) console.log(`  violations: ${result.validation.violations.join(', ')}`);
+
+  const review = result.reviewer?.review ?? null;
+  console.log('\n  --- Reviewer ---');
+  if (!result.reviewRan) {
+    console.log(result.verdict === 'VALIDATION_FAILED'
+      ? '  skipped: deterministic validation failed (fail-closed; reviewer not run).'
+      : '  skipped.');
+  } else if (!review) {
+    console.log(`  reviewer error: status=${result.reviewer?.status ?? 'unknown'} schemaValid=${String(result.reviewer?.schemaValid ?? false)}`);
+  } else {
+    console.log(`  decision: ${review.decision}`);
+    console.log('  dimensions:');
+    for (const [name, pass] of reviewerDimensions(review)) {
+      console.log(`   ${pass ? 'PASS' : 'FAIL'}  ${name}`);
+    }
+    console.log('\n  problems / required revisions:');
+    console.log(`   problems:          ${review.problems.length ? review.problems.join(' | ') : '(none)'}`);
+    console.log(`   requiredRevisions: ${review.requiredRevisions.length ? review.requiredRevisions.join(' | ') : '(none)'}`);
+  }
+
+  console.log('\n  --- Final preview verdict ---');
+  console.log(`  fabrication risk: ${review ? String(review.fabricationRisk) : 'n/a'}`);
+  console.log(`  approvable:       ${review ? String(result.reviewer?.approvable ?? false) : 'n/a'}`);
+  console.log(`  verdict:          ${result.verdict}`);
+  console.log('\n  Read-only preview. No email persisted, no lead transition, no Gmail draft, no send.');
 }
 
 function renderBodyForDisplay(body: string): string {
