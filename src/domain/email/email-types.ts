@@ -3,7 +3,7 @@
  * prose. Greeting, CTA sentence, signoff, and URL insertion remain deterministic.
  */
 
-export const EMAIL_WRITER_RULES_VERSION = 'email-copy-standard-3';
+export const EMAIL_WRITER_RULES_VERSION = 'email-copy-standard-4';
 export const DEMO_URL_TOKEN = '{{DEMO_URL}}';
 
 export const PRIMARY_CTAS = ['VIEW_CONCEPT', 'REPLY_FOR_DETAILS'] as const;
