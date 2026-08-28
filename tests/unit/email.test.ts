@@ -172,6 +172,115 @@ describe('cta_in_model_body (click carve-out for hyphenated compounds)', () => {
   });
 });
 
+describe('cta_in_model_body (visit requires a recipient-directed object)', () => {
+  it('still rejects recipient-directed visit CTAs', () => {
+    const ctaBodies = [
+      'The booking action is hidden.\n\nVisit our site to see the fix.',
+      'The booking action is hidden.\n\nWhen you are ready, visit us.',
+      'The booking action is hidden.\n\nVisit this link for the details.',
+      'The booking action is hidden.\n\nVisit your dashboard to review it.',
+    ];
+    for (const email_body of ctaBodies) {
+      const result = validateEmail({ ...strongEnglish(), email_body }, validationContext());
+      expect(result.violations, email_body).toContain('cta_in_model_body');
+    }
+  });
+
+  it('does not flag intransitive "visit" in ordinary prose', () => {
+    const safeBodies = [
+      'The published hours do not line up across the page.\n\nThat matters when a patient is deciding when to visit or call.',
+      'The contact details differ between the header and the footer.\n\nA patient may not know which number to use before they visit.',
+    ];
+    for (const email_body of safeBodies) {
+      const result = validateEmail({ ...strongEnglish(), email_body }, validationContext());
+      expect(result.violations, email_body).not.toContain('cta_in_model_body');
+    }
+  });
+});
+
+describe('excessive_colons (clock-time carve-out)', () => {
+  it('does not count H:MM / HH:MM clock-time colons', () => {
+    const email_body = [
+      'The visible schedule lists Monday until 19:00, Saturday until 17:00 and Sunday until 14:00, while the FAQ gives Monday to Friday 09:00 to 18:00 and Saturday 09:00 to 15:00.',
+      'Aligning those hours would make availability clearer.',
+    ].join('\n\n');
+    const result = validateEmail({ ...strongEnglish(), email_body }, validationContext());
+    expect(result.violations).not.toContain('excessive_colons');
+  });
+
+  it('still flags three or more genuine stylistic colons', () => {
+    const email_body = 'One issue stands out: the hours, the contact route: unclear, and the label: vague.\n\nThat is worth a look.';
+    const result = validateEmail({ ...strongEnglish(), email_body }, validationContext());
+    expect(result.violations).toContain('excessive_colons');
+  });
+
+  it('still flags stylistic colons even when clock times are also present', () => {
+    const email_body = 'Two things stand out: the hours listed as 09:00 to 17:00, the route: unclear, and the label: vague.\n\nWorth aligning.';
+    const result = validateEmail({ ...strongEnglish(), email_body }, validationContext());
+    expect(result.violations).toContain('excessive_colons');
+  });
+
+  it('does not flag two stylistic colons alongside several clock times', () => {
+    const email_body = 'Two notes: the hours run 09:00 to 17:00 and 18:00 to 19:00, and one label: vague.\n\nWorth aligning.';
+    const result = validateEmail({ ...strongEnglish(), email_body }, validationContext());
+    expect(result.violations).not.toContain('excessive_colons');
+  });
+});
+
+describe('Norwood canary revalidation (both false positives removed)', () => {
+  // The exact writer draft the paid Norwood canary produced previously failed the deterministic
+  // gate on cta_in_model_body ("visit or call") and excessive_colons (six HH:MM opening hours).
+  // With both narrow fixes it must now validate cleanly so the reviewer can run.
+  const norwoodWriter: EmailWriterOutput = {
+    ...strongEnglish(),
+    subject_options: [
+      'Something I noticed on Norwood Road Dental Clinic’s site',
+      'A question about the opening hours on your site',
+      'The two schedules on your Norwood Road page',
+    ],
+    selected_subject: 'Something I noticed on Norwood Road Dental Clinic’s site',
+    selected_subject_reason:
+      'It signals a specific observation without revealing which detail, so the recipient is curious enough to open.',
+    email_body: [
+      'The hours shown on Norwood Road Dental Clinic’s page do not line up. The visible schedule lists Monday until 19:00, Saturday until 17:00 and Sunday until 14:00, while the FAQ gives Monday to Friday 09:00 to 18:00 and Saturday 09:00 to 15:00.',
+      'Because the page also says appointments can be booked by phone seven days a week, it is unclear whether either schedule refers to clinic opening or telephone-booking hours.',
+      'Clear hours matter when a patient is deciding when to visit or call.',
+    ].join('\n\n'),
+    evidence_ids: ['3d62f702-ffe1-4573-930b-4fe24edd75d2', '4e8a7b19-775e-47a5-98b1-1248c285759f'],
+    strategic_angle:
+      'Highlight one patient-facing ambiguity in the clinic’s published hours and invite a conversation about the details.',
+    business_relevance:
+      'Patients need clear clinic and telephone-booking hours when deciding when to visit or call.',
+    urgency_basis:
+      'The conflicting schedules are currently visible within the patient journey and concern practical access information.',
+    competitor_evidence_used: 'NONE',
+    primary_cta: 'REPLY_FOR_DETAILS',
+    prohibited_phrase_scan: 'PASS',
+    punctuation_scan: 'PASS',
+    genericity_score: 15,
+    human_style_result: 'PASS',
+    demo_alignment_result: 'NOT_APPLICABLE',
+  };
+
+  const norwoodContext: EmailValidationContext = {
+    availableEvidenceIds: new Set([
+      '3d62f702-ffe1-4573-930b-4fe24edd75d2',
+      '4e8a7b19-775e-47a5-98b1-1248c285759f',
+    ]),
+    factEvidenceIds: new Set(['3d62f702-ffe1-4573-930b-4fe24edd75d2']),
+    acceptedFindingIds: new Set(['4e8a7b19-775e-47a5-98b1-1248c285759f']),
+    approvedDemoFindingIds: new Set<string>(),
+    demoLinkAllowed: false,
+    language: 'en',
+  };
+
+  it('passes the deterministic copy gate with no violations', () => {
+    const result = validateEmail(norwoodWriter, norwoodContext);
+    expect(result.violations).toEqual([]);
+    expect(result.ok).toBe(true);
+  });
+});
+
 describe('revealing-subject denylist (high precision)', () => {
   const withSubjects = (options: [string, string, string], selected: string): EmailWriterOutput =>
     ({ ...strongEnglish(), subject_options: options, selected_subject: selected });

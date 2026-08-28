@@ -28,7 +28,9 @@ export const DEMO_MENTION_RE = /\b(?:demo|mock-?up|redesign|concept|preview|prot
 // `click` matches model-authored CTA verbs ("click here", "click this link", "click below").
 // The lookarounds exempt hyphenated compounds/technical nouns ("click-to-call", "click-through",
 // "one-click") so a body describing the site's own click-to-call links is not mistaken for a CTA.
-const CTA_IN_BODY_RE = /\b(?:reply|respond|book a call|schedule a call|call me|take a look|view (?:the|this)|open (?:the|this)|(?<!-)click(?!-)|visit|antworten sie|schreiben sie mir|termin vereinbaren|ansehen|öffnen sie|klicken sie)\b/i;
+// `visit` requires a recipient-directed object ("visit our site", "visit us", "visit this link");
+// bare intransitive prose ("deciding when to visit or call") is normal copy, not a CTA.
+const CTA_IN_BODY_RE = /\b(?:reply|respond|book a call|schedule a call|call me|take a look|view (?:the|this)|open (?:the|this)|(?<!-)click(?!-)|visit (?:the|this|our|your|us|me)|antworten sie|schreiben sie mir|termin vereinbaren|ansehen|öffnen sie|klicken sie)\b/i;
 const GENERIC_OPENING_RE = /^(?:i (?:just )?(?:wanted to|thought i(?:'d| would)|came across)|ich wollte mich kurz|ich dachte,? ich|in today'?s|in der heutigen|i hope|ich hoffe)/i;
 // Day-1 narrow implementation-jargon backstop. Catches only UNMISTAKABLE technical leakage that a
 // plain buyer-language email never contains — encoded spaces, a leading space in a link target,
@@ -179,7 +181,10 @@ export function validateEmail(out: EmailWriterOutput, ctx: EmailValidationContex
   if (copySegments.some((s) => REPEATED_COMMA_RE.test(s))) violations.push('contains_repeated_commas');
   if (MARKDOWN_RE.test(body)) violations.push('contains_markdown');
   if (EMOJI_RE.test(allModelText)) violations.push('contains_emoji');
-  if ((body.match(/:/g) ?? []).length > 2) violations.push('excessive_colons');
+  // Clock-time colons (H:MM / HH:MM) are natural prose, not stylistic punctuation; strip them
+  // before counting so a body that cites opening hours is not flagged for colon overuse.
+  const styleColons = (body.replace(/\b\d{1,2}:\d{2}\b/g, '').match(/:/g) ?? []).length;
+  if (styleColons > 2) violations.push('excessive_colons');
   if ((body.match(/;/g) ?? []).length > 1) violations.push('semicolon_heavy');
 
   if (out.prohibited_phrase_scan !== 'PASS') violations.push('writer_prohibited_phrase_scan_failed');
