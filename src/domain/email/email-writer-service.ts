@@ -286,7 +286,11 @@ export class EmailWriterService {
       && review.sufficientlyPersonalized
       && review.evidenceSupported
       && review.demoAligned
-      && review.persuasive;
+      && review.persuasive
+      && review.singleObservation
+      && review.buyerLanguageOnly
+      && review.conversationNotAudit
+      && review.confidentObservation;
     if (!approvable) {
       const p = this.buildPersist(input, draft, review, 'REVIEW_FAILED', 'EMAIL_REVIEW_FAILED', emailInputs, wRes, rRes, cost, modelCalls);
       await recordDebug('REVIEW_REJECTED', draft, review, []);

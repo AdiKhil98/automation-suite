@@ -30,6 +30,12 @@ export const DEMO_MENTION_RE = /\b(?:demo|mock-?up|redesign|concept|preview|prot
 // "one-click") so a body describing the site's own click-to-call links is not mistaken for a CTA.
 const CTA_IN_BODY_RE = /\b(?:reply|respond|book a call|schedule a call|call me|take a look|view (?:the|this)|open (?:the|this)|(?<!-)click(?!-)|visit|antworten sie|schreiben sie mir|termin vereinbaren|ansehen|öffnen sie|klicken sie)\b/i;
 const GENERIC_OPENING_RE = /^(?:i (?:just )?(?:wanted to|thought i(?:'d| would)|came across)|ich wollte mich kurz|ich dachte,? ich|in today'?s|in der heutigen|i hope|ich hoffe)/i;
+// Day-1 narrow implementation-jargon backstop. Catches only UNMISTAKABLE technical leakage that a
+// plain buyer-language email never contains — encoded spaces, a leading space in a link target,
+// href / tel: link attributes, and the "phone target" diagnostic phrase. Intentionally narrow: it
+// does NOT ban ordinary verbs such as click, test, or verify. The reviewer's buyerLanguageOnly /
+// conversationNotAudit booleans catch the subtler mini-audit / diagnostic-tone failures.
+export const IMPLEMENTATION_JARGON_RE = /%20|\bhref\b|\btel:|\bencoded spaces?\b|\bleading space\b|\bphone target\b/i;
 export const MARKDOWN_RE = /(?:^|\n)\s{0,3}(?:#{1,6}\s|[-*+]\s|\d+\.\s|>\s)|\[[^\]]+\]\([^)]+\)|`{1,3}|\*\*|__/m;
 export const EMOJI_RE = /\p{Extended_Pictographic}/u;
 export const REPEATED_COMMA_RE = /,\s*,/;
@@ -159,6 +165,7 @@ export function validateEmail(out: EmailWriterOutput, ctx: EmailValidationContex
     violations.push('unsupported_competitor_language');
   }
   if (CTA_IN_BODY_RE.test(body)) violations.push('cta_in_model_body');
+  if (IMPLEMENTATION_JARGON_RE.test(allModelText)) violations.push('contains_implementation_jargon');
 
   const lowered = allModelText.toLocaleLowerCase();
   for (const phrase of FORBIDDEN_PHRASES) {

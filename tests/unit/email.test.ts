@@ -94,6 +94,10 @@ const reviewJson = (overrides: Record<string, unknown> = {}) => ({
   evidenceSupported: true,
   demoAligned: true,
   persuasive: true,
+  singleObservation: true,
+  buyerLanguageOnly: true,
+  conversationNotAudit: true,
+  confidentObservation: true,
   problems: [],
   requiredRevisions: [],
   ...overrides,
@@ -198,6 +202,55 @@ describe('revealing-subject denylist (high precision)', () => {
       const result = validateEmail(withSubjects([subject, ...filler], subject), validationContext());
       expect(result.violations.some((v) => v.startsWith('subject_reveals_finding')), subject).toBe(false);
     }
+  });
+});
+
+describe('Day-1 single-observation quality backstop', () => {
+  it('fails a technical mini-audit that leaks implementation jargon', () => {
+    const miniAudit: EmailWriterOutput = {
+      ...strongEnglish(),
+      email_body: [
+        "Diamond Smile's homepage call button points to a tel: link that has an encoded space (%20) in the href.",
+        'The phone target also carries a leading space, so tapping it does not dial on mobile.',
+      ].join('\n\n'),
+    };
+    const result = validateEmail(miniAudit, validationContext());
+    expect(result.ok).toBe(false);
+    expect(result.violations).toContain('contains_implementation_jargon');
+  });
+
+  it('passes a plain buyer-language single observation about the same issue', () => {
+    const plain: EmailWriterOutput = {
+      ...strongEnglish(),
+      email_body: [
+        "Diamond Smile's call button does not connect when a visitor taps it on a phone.",
+        'That quietly turns people away at the moment they are ready to get in touch.',
+      ].join('\n\n'),
+    };
+    expect(validateEmail(plain, validationContext()).ok).toBe(true);
+  });
+
+  it('still allows one justified qualifier', () => {
+    const oneQualifier: EmailWriterOutput = {
+      ...strongEnglish(),
+      email_body: [
+        "Diamond Smile's call button might not connect when a visitor taps it on a phone.",
+        'That quietly turns people away at the moment they are ready to get in touch.',
+      ].join('\n\n'),
+    };
+    expect(validateEmail(oneQualifier, validationContext()).ok).toBe(true);
+  });
+
+  it('does not ban ordinary words like click, test, or verify', () => {
+    const ordinary: EmailWriterOutput = {
+      ...strongEnglish(),
+      email_body: [
+        "Diamond Smile's call button does not connect when a visitor taps it on a phone.",
+        'A quick test from a phone shows the number does not open the dialer as expected.',
+      ].join('\n\n'),
+    };
+    const result = validateEmail(ordinary, validationContext());
+    expect(result.violations).not.toContain('contains_implementation_jargon');
   });
 });
 
@@ -355,6 +408,22 @@ describe('EmailWriterService quality gates', () => {
     });
     expect((await service.write(serviceInput(), 'run-1')).outcome).toBe('REVIEW_REJECTED');
   });
+
+  for (const flag of ['singleObservation', 'buyerLanguageOnly', 'conversationNotAudit', 'confidentObservation'] as const) {
+    it(`does not approve when the reviewer fails ${flag}`, async () => {
+      const responder = (request: LlmRequest, index: number) =>
+        request.task === 'email_write'
+          ? defaultMockEmailResponder(request, index)
+          : { rawJson: reviewJson({ [flag]: false }) };
+      const service = new EmailWriterService({
+        provider: new MockLlmProvider(responder),
+        uow: fakeUow([]),
+        logger,
+        config: config(),
+      });
+      expect((await service.write(serviceInput(), 'run-1')).outcome).toBe('REVIEW_REJECTED');
+    });
+  }
 
   it('stops before reviewer cost when deterministic validation fails', async () => {
     const responder = (request: LlmRequest, index: number) => {

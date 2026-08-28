@@ -223,7 +223,11 @@ export class ResumeEmailReviewService {
       && review.sufficientlyPersonalized
       && review.evidenceSupported
       && review.demoAligned
-      && review.persuasive;
+      && review.persuasive
+      && review.singleObservation
+      && review.buyerLanguageOnly
+      && review.conversationNotAudit
+      && review.confidentObservation;
 
     const route: LeadStatus = rendered.hasDemoUrlPlaceholder ? 'WAITING_FOR_DEMO_URL' : 'READY_FOR_HUMAN_APPROVAL';
     const newDraftId = randomUUID();

@@ -48,6 +48,11 @@ export const emailReviewSchema = z.object({
   evidenceSupported: z.boolean(),
   demoAligned: z.boolean(),
   persuasive: z.boolean(),
+  // Day-1 single-observation quality gate. All four are fail-closed and required for APPROVE.
+  singleObservation: z.boolean(),
+  buyerLanguageOnly: z.boolean(),
+  conversationNotAudit: z.boolean(),
+  confidentObservation: z.boolean(),
   problems: z.array(z.string().trim().min(1).max(300)).max(20),
   requiredRevisions: z.array(z.string().trim().min(1).max(300)).max(20),
 });
@@ -103,6 +108,10 @@ export const EMAIL_REVIEW_JSON_SCHEMA = strictObject(
     evidenceSupported: { type: 'boolean' },
     demoAligned: { type: 'boolean' },
     persuasive: { type: 'boolean' },
+    singleObservation: { type: 'boolean' },
+    buyerLanguageOnly: { type: 'boolean' },
+    conversationNotAudit: { type: 'boolean' },
+    confidentObservation: { type: 'boolean' },
     problems: { type: 'array', items: { type: 'string' } },
     requiredRevisions: { type: 'array', items: { type: 'string' } },
   },
@@ -111,6 +120,7 @@ export const EMAIL_REVIEW_JSON_SCHEMA = strictObject(
     'businessRelevanceClear', 'urgencySupported', 'competitorClaimsSupported',
     'humanStylePass', 'punctuationPass', 'singlePrimaryCta',
     'sufficientlyPersonalized', 'evidenceSupported', 'demoAligned', 'persuasive',
+    'singleObservation', 'buyerLanguageOnly', 'conversationNotAudit', 'confidentObservation',
     'problems', 'requiredRevisions',
   ],
 );

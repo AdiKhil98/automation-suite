@@ -2,8 +2,8 @@ import { MAX_EMAIL_WORDS, PRIMARY_CTAS } from '../../domain/email/email-types.js
 import { type EmailWriterParsed } from '../../domain/email/email-schema.js';
 
 export const EMAIL_RUBRIC_VERSION = 'cold-email-copy-standard-3';
-export const EMAIL_WRITER_PROMPT_VERSION = 'email-writer-3';
-export const EMAIL_REVIEWER_PROMPT_VERSION = 'email-reviewer-3';
+export const EMAIL_WRITER_PROMPT_VERSION = 'email-writer-4';
+export const EMAIL_REVIEWER_PROMPT_VERSION = 'email-reviewer-4';
 
 export interface EmailBrief {
   businessName: string | null;
@@ -75,7 +75,22 @@ ${SUBJECT_STANDARD}
   excessive colons, or semicolon-heavy prose.
 - prohibited_phrase_scan, punctuation_scan, and human_style_result must truthfully report PASS or FAIL.
 - genericity_score is 0 for uniquely specific copy and 100 for copy reusable for almost any business.
-- demo_alignment_result is PASS for a verified aligned concept CTA, otherwise NOT_APPLICABLE.`;
+- demo_alignment_result is PASS for a verified aligned concept CTA, otherwise NOT_APPLICABLE.
+
+SINGLE-OBSERVATION, BUYER-LANGUAGE STANDARD:
+- The body makes exactly ONE evidence-backed observation. Do not stack a second finding, list several
+  issues, or turn the email into a mini audit of the site.
+- Translate technical evidence into plain language the business owner uses. Describe what a visitor,
+  customer, or patient experiences, not the implementation detail behind it. Never mention code, markup,
+  attributes, link targets, encoded characters, or diagnostic steps.
+- State the business relevance in ONE short sentence: why that single observation matters in the
+  customer or patient journey.
+- Do NOT include remediation steps, an implementation diagnosis, a fix walkthrough, a tool or AI pitch,
+  or any outcome or result claim the evidence does not support.
+- At most ONE necessary, concise qualifier is allowed when a claim genuinely needs it. Do not over-hedge
+  or pile up cautious words that make the observation sound uncertain or self-defeating.
+- State the observation plainly and confidently. The curiosity gap belongs to the SUBJECT only; never
+  obscure or withhold the observation in the body to manufacture curiosity.`;
 
 const FORBIDDEN = `FORBIDDEN PHRASES INCLUDE:
 German: In der heutigen digitalen Welt; In der heutigen schnelllebigen Zeit; Es ist wichtig zu beachten;
@@ -124,8 +139,21 @@ information gap, or reads as obvious marketing copy. Set it to true only when th
 natural curiosity, stays truthfully connected to the email, remains relevant to the prospect, sounds
 human, and uses no clickbait, fake urgency, deception, or fake-reply tactics.
 
+Judge the SINGLE-OBSERVATION, BUYER-LANGUAGE STANDARD with four fail-closed booleans:
+- singleObservation: false when the body makes more than one distinct observation, stacks findings, or
+  reads as a mini audit of the site; true when it makes exactly one evidence-backed observation.
+- buyerLanguageOnly: false when the copy uses technical or implementation language (code, markup,
+  attributes, link targets, encoded characters, diagnostic steps) instead of plain buyer language;
+  true when the whole email speaks in the words the business owner and their customers use.
+- conversationNotAudit: false when the email reads as an audit, diagnostic report, remediation plan, or
+  tool/AI pitch; true when it reads as a short, human note stating one thing and its relevance.
+- confidentObservation: false ONLY for excessive or self-defeating hedging that makes the observation
+  sound uncertain. A single necessary "may", "might", or "could" is fine and must NOT fail this — do not
+  penalise ordinary, warranted qualification.
+
 Decisions are APPROVE, APPROVE_WITH_REVISIONS, or REJECT. APPROVE requires every boolean quality
-dimension to be true and fabricationRisk false. APPROVE_WITH_REVISIONS means the current copy is not
+dimension to be true (including singleObservation, buyerLanguageOnly, conversationNotAudit, and
+confidentObservation) and fabricationRisk false. APPROVE_WITH_REVISIONS means the current copy is not
 approved; list every required revision. Return strict JSON matching the schema.`;
 
 function serializeBrief(brief: EmailBrief): string {

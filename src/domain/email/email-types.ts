@@ -72,6 +72,11 @@ export interface EmailReviewOutput {
   evidenceSupported: boolean;
   demoAligned: boolean;
   persuasive: boolean;
+  /** Day-1 single-observation quality gate. All four are fail-closed and required for APPROVE. */
+  singleObservation: boolean;
+  buyerLanguageOnly: boolean;
+  conversationNotAudit: boolean;
+  confidentObservation: boolean;
   problems: string[];
   requiredRevisions: string[];
 }

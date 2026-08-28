@@ -40,7 +40,8 @@ const approveReview = (over: Record<string, unknown> = {}): Record<string, unkno
   decision: 'APPROVE', fabricationRisk: false, subjectSpecific: true, subjectCuriosityGap: true, openingSpecific: true,
   businessRelevanceClear: true, urgencySupported: true, competitorClaimsSupported: true, humanStylePass: true,
   punctuationPass: true, singlePrimaryCta: true, sufficientlyPersonalized: true, evidenceSupported: true,
-  demoAligned: true, persuasive: true, problems: [], requiredRevisions: [], ...over,
+  demoAligned: true, persuasive: true, singleObservation: true, buyerLanguageOnly: true,
+  conversationNotAudit: true, confidentObservation: true, problems: [], requiredRevisions: [], ...over,
 });
 
 const config: ResumeReviewConfig = {
