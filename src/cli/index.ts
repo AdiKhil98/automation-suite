@@ -595,7 +595,8 @@ program
   .option('--competitor-package <id>', 'explicit APPROVED competitor pattern package id to enrich with (else prospect-only)')
   .option('--competitor-pattern <id>', 'explicit pattern id within the package (else deterministic selection)')
   .option('--apply', 'persist the composed enriched email + provenance + claim ledger (still no Gmail/send)')
-  .action((opts: { lead: string; competitorPackage?: string; competitorPattern?: string; apply?: boolean }) =>
+  .option('--review', 'prospect-only: run the production reviewer after deterministic validation and print its verdict (read-only; no persistence; not valid with --competitor-package)')
+  .action((opts: { lead: string; competitorPackage?: string; competitorPattern?: string; apply?: boolean; review?: boolean }) =>
     withContext((ctx) => outreachComposePreviewCommand(ctx, opts)));
 
 program
