@@ -3,6 +3,7 @@ import { buildEmailWriterMessages, type EmailBrief, EMAIL_REVIEWER_PROMPT_VERSIO
 import { emailWriterSchema, type EmailReviewParsed, type EmailWriterParsed } from '../../domain/email/email-schema.js';
 import { previewEmailReview, type PreviewReviewResult } from '../../domain/email/compose-preview-review.js';
 import { buildEmailContext, type EmailInputs, type EmailFinding } from '../../domain/email/email-render.js';
+import { type LlmUsage } from '../../integrations/llm/provider.js';
 import { EMAIL_WRITER_JSON_SCHEMA } from '../../domain/email/email-schema.js';
 import { validateEmail } from '../../domain/email/email-validation.js';
 import { EMAIL_WRITER_RULES_VERSION } from '../../domain/email/email-types.js';
@@ -123,7 +124,7 @@ export async function outreachComposePreviewCommand(ctx: CliContext, opts: Compo
       },
       withReview: true,
     });
-    printReviewPreview(leadId, prospectDraft, result);
+    printReviewPreview(leadId, prospectDraft, result, wRes.usage);
     if (result.verdict !== 'REVIEW_APPROVABLE') process.exitCode = 1;
     return;
   }
@@ -357,13 +358,17 @@ function reviewerDimensions(rv: EmailReviewParsed): [string, boolean][] {
   ];
 }
 
-function printReviewPreview(leadId: string, draft: EmailWriterParsed, result: PreviewReviewResult): void {
+function printReviewPreview(leadId: string, draft: EmailWriterParsed, result: PreviewReviewResult, writerUsage: LlmUsage): void {
   console.log(`\n=== Review preview (lead ${leadId}) ===`);
   console.log(`  writer prompt: ${EMAIL_WRITER_PROMPT_VERSION}   reviewer prompt: ${EMAIL_REVIEWER_PROMPT_VERSION}`);
 
   console.log('\n  --- Writer output ---');
   console.log(`  Subject: ${draft.selected_subject}`);
   console.log(`  primary_cta: ${draft.primary_cta}   competitor_evidence_used: ${draft.competitor_evidence_used}`);
+  console.log(`  evidence_ids: ${draft.evidence_ids.join(', ')}`);
+  console.log(`  strategic_angle:    ${draft.strategic_angle}`);
+  console.log(`  business_relevance: ${draft.business_relevance}`);
+  console.log(`  urgency_basis:      ${draft.urgency_basis}`);
   console.log(`\n${renderBodyForDisplay(draft.email_body)}`);
 
   console.log('\n  --- Deterministic validation ---');
@@ -389,11 +394,22 @@ function printReviewPreview(leadId: string, draft: EmailWriterParsed, result: Pr
     console.log(`   requiredRevisions: ${review.requiredRevisions.length ? review.requiredRevisions.join(' | ') : '(none)'}`);
   }
 
+  console.log('\n  --- Cost (display-only; estimated from provider usage) ---');
+  console.log(`  writer:   ${formatUsage(writerUsage)}`);
+  console.log(`  reviewer: ${result.reviewerUsage ? formatUsage(result.reviewerUsage) : '(not run)'}`);
+  const totalCost = (writerUsage.estimatedCostUsd ?? 0) + (result.reviewerUsage?.estimatedCostUsd ?? 0);
+  console.log(`  total:    $${totalCost.toFixed(6)} (${result.reviewerUsage ? 2 : 1} paid call(s))`);
+
   console.log('\n  --- Final preview verdict ---');
   console.log(`  fabrication risk: ${review ? String(review.fabricationRisk) : 'n/a'}`);
   console.log(`  approvable:       ${review ? String(result.reviewer?.approvable ?? false) : 'n/a'}`);
   console.log(`  verdict:          ${result.verdict}`);
   console.log('\n  Read-only preview. No email persisted, no lead transition, no Gmail draft, no send.');
+}
+
+function formatUsage(u: LlmUsage): string {
+  const cost = u.estimatedCostUsd === null ? 'n/a' : `$${u.estimatedCostUsd.toFixed(6)}`;
+  return `${cost}  (in ${u.inputTokens ?? '?'} / out ${u.outputTokens ?? '?'} / reasoning ${u.reasoningTokens ?? '?'} tokens)`;
 }
 
 function renderBodyForDisplay(body: string): string {

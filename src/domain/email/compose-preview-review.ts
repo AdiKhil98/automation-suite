@@ -1,5 +1,5 @@
 import { buildEmailReviewerMessages, type EmailBrief } from '../../prompts/email/index.js';
-import { type LlmProvider, type LlmStatus, type ReasoningEffort } from '../../integrations/llm/provider.js';
+import { type LlmProvider, type LlmStatus, type LlmUsage, type ReasoningEffort } from '../../integrations/llm/provider.js';
 import {
   EMAIL_REVIEW_JSON_SCHEMA,
   emailReviewSchema,
@@ -58,6 +58,8 @@ export interface PreviewReviewResult {
   verdict: PreviewVerdict;
   /** Number of reviewer LLM calls issued by this function (0 or 1). */
   reviewerCalls: number;
+  /** Usage/estimated cost of the reviewer call, when one was issued (else null). Display-only. */
+  reviewerUsage: LlmUsage | null;
 }
 
 export interface PreviewReviewArgs {
@@ -75,10 +77,10 @@ export async function previewEmailReview(args: PreviewReviewArgs): Promise<Previ
   // Deterministic validation gate — the reviewer never runs on copy that already fails the gate.
   const validation = validateEmail(draft, validationCtx);
   if (!validation.ok) {
-    return { validation, reviewRan: false, reviewer: null, verdict: 'VALIDATION_FAILED', reviewerCalls: 0 };
+    return { validation, reviewRan: false, reviewer: null, verdict: 'VALIDATION_FAILED', reviewerCalls: 0, reviewerUsage: null };
   }
   if (!withReview) {
-    return { validation, reviewRan: false, reviewer: null, verdict: 'PREVIEW_ONLY', reviewerCalls: 0 };
+    return { validation, reviewRan: false, reviewer: null, verdict: 'PREVIEW_ONLY', reviewerCalls: 0, reviewerUsage: null };
   }
 
   // Exact production reviewer prompt + schema.
@@ -92,7 +94,7 @@ export async function previewEmailReview(args: PreviewReviewArgs): Promise<Previ
 
   if (rRes.status !== 'ok') {
     return {
-      validation, reviewRan: true, reviewerCalls: 1, verdict: 'REVIEWER_ERROR',
+      validation, reviewRan: true, reviewerCalls: 1, verdict: 'REVIEWER_ERROR', reviewerUsage: rRes.usage,
       reviewer: { status: rRes.status, schemaValid: false, review: null, approvable: false },
     };
   }
@@ -100,7 +102,7 @@ export async function previewEmailReview(args: PreviewReviewArgs): Promise<Previ
   const parsed = emailReviewSchema.safeParse(rRes.rawJson);
   if (!parsed.success) {
     return {
-      validation, reviewRan: true, reviewerCalls: 1, verdict: 'REVIEWER_ERROR',
+      validation, reviewRan: true, reviewerCalls: 1, verdict: 'REVIEWER_ERROR', reviewerUsage: rRes.usage,
       reviewer: { status: rRes.status, schemaValid: false, review: null, approvable: false },
     };
   }
@@ -108,7 +110,7 @@ export async function previewEmailReview(args: PreviewReviewArgs): Promise<Previ
   const review = parsed.data;
   const approvable = isEmailReviewApprovable(review);
   return {
-    validation, reviewRan: true, reviewerCalls: 1,
+    validation, reviewRan: true, reviewerCalls: 1, reviewerUsage: rRes.usage,
     reviewer: { status: rRes.status, schemaValid: true, review, approvable },
     verdict: approvable ? 'REVIEW_APPROVABLE' : 'REVIEW_NOT_APPROVABLE',
   };
