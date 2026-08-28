@@ -18,6 +18,7 @@ import {
 import { type EmailStatus } from './email-types.js';
 import { type EmailModelCall, type EmailPersist } from './email-writer-service.js';
 import { validateEmail } from './email-validation.js';
+import { isEmailReviewApprovable } from './email-review-gate.js';
 
 /** The persisted email_drafts fields the resume path needs (read-only projection). */
 export interface PersistedDraftRow {
@@ -208,26 +209,8 @@ export class ResumeEmailReviewService {
     if (!rParsed.success) return this.result(leadId, draftId, 'SCHEMA_INVALID', cost, 1, [], null, null, null);
     const review = rParsed.data;
 
-    // The EXISTING approvable gate — identical conjunction to the writer service.
-    const approvable = review.decision === 'APPROVE'
-      && !review.fabricationRisk
-      && review.subjectSpecific
-      && review.subjectCuriosityGap
-      && review.openingSpecific
-      && review.businessRelevanceClear
-      && review.urgencySupported
-      && review.competitorClaimsSupported
-      && review.humanStylePass
-      && review.punctuationPass
-      && review.singlePrimaryCta
-      && review.sufficientlyPersonalized
-      && review.evidenceSupported
-      && review.demoAligned
-      && review.persuasive
-      && review.singleObservation
-      && review.buyerLanguageOnly
-      && review.conversationNotAudit
-      && review.confidentObservation;
+    // The EXISTING approvable gate — shared with the writer service (single source of truth).
+    const approvable = isEmailReviewApprovable(review);
 
     const route: LeadStatus = rendered.hasDemoUrlPlaceholder ? 'WAITING_FOR_DEMO_URL' : 'READY_FOR_HUMAN_APPROVAL';
     const newDraftId = randomUUID();

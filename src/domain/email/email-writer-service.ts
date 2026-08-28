@@ -19,6 +19,7 @@ import { buildEmailBrief } from './email-brief.js';
 import { buildEmailContext, type EmailDemoMeta, type EmailFinding, type EmailInputs, renderEmail } from './email-render.js';
 import { EMAIL_WRITER_RULES_VERSION, type EmailStatus } from './email-types.js';
 import { validateEmail } from './email-validation.js';
+import { isEmailReviewApprovable } from './email-review-gate.js';
 
 export type EmailOutcome =
   | 'APPROVED_READY'
@@ -271,26 +272,8 @@ export class EmailWriterService {
     const review = rParsed.data;
 
     // Revisions are never silently approved without being applied. Every persuasion, evidence,
-    // punctuation, CTA, competitor, and demo-alignment dimension must pass.
-    const approvable = review.decision === 'APPROVE'
-      && !review.fabricationRisk
-      && review.subjectSpecific
-      && review.subjectCuriosityGap
-      && review.openingSpecific
-      && review.businessRelevanceClear
-      && review.urgencySupported
-      && review.competitorClaimsSupported
-      && review.humanStylePass
-      && review.punctuationPass
-      && review.singlePrimaryCta
-      && review.sufficientlyPersonalized
-      && review.evidenceSupported
-      && review.demoAligned
-      && review.persuasive
-      && review.singleObservation
-      && review.buyerLanguageOnly
-      && review.conversationNotAudit
-      && review.confidentObservation;
+    // punctuation, CTA, competitor, and demo-alignment dimension must pass (shared gate).
+    const approvable = isEmailReviewApprovable(review);
     if (!approvable) {
       const p = this.buildPersist(input, draft, review, 'REVIEW_FAILED', 'EMAIL_REVIEW_FAILED', emailInputs, wRes, rRes, cost, modelCalls);
       await recordDebug('REVIEW_REJECTED', draft, review, []);
