@@ -41,6 +41,25 @@ const envSchema = z.object({
   MAX_MODEL_COST_USD_PER_RUN: z.coerce.number().nonnegative().default(5),
   MAX_MODEL_COST_USD_PER_LEAD: z.coerce.number().nonnegative().default(0.5),
 
+  // --- Contact enrichment (decision-maker work-email discovery) ---
+  // Provider-abstracted (mock default). `instantly` is the first external provider. Paid calls are
+  // hard-gated by ALLOW_PAID_ENRICHMENT_CALLS + CONTACT_ENRICHMENT_ENABLED; both default OFF so no
+  // credits can be spent unless explicitly enabled. Hunter/Apollo can be added later behind the same
+  // provider interface; they are NOT integrated now.
+  CONTACT_ENRICHMENT_ENABLED: boolString(false),
+  ALLOW_PAID_ENRICHMENT_CALLS: boolString(false),
+  CONTACT_ENRICHMENT_PROVIDER: z.enum(['mock', 'instantly']).default('mock'),
+  // Bounded spend controls for a single enrichment run (preferred + a small number of fallbacks).
+  CONTACT_ENRICHMENT_MAX_REQUESTS_PER_RUN: z.coerce.number().int().min(1).max(10).default(3),
+  CONTACT_ENRICHMENT_MAX_CREDITS_PER_RUN: z.coerce.number().int().min(1).max(20).default(3),
+  // Instantly API v2. Key is a secret read only from env, never hard-coded, never logged.
+  INSTANTLY_API_KEY: z.string().optional(),
+  INSTANTLY_API_BASE_URL: z.string().url().default('https://api.instantly.ai/api/v2'),
+  INSTANTLY_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
+  // Async SuperSearch enrichment result polling (bounded; no unbounded waits).
+  INSTANTLY_POLL_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(30).default(8),
+  INSTANTLY_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(2_000),
+
   // LLM provider config (abstraction-first; concrete provider chosen in Phase 5).
   LLM_PROVIDER: z.string().default('mock'),
   LLM_MODEL_RESEARCH: z.string().optional(),

@@ -8,6 +8,7 @@ import { enrichLeadsCommand } from './commands/enrich-leads.js';
 import { placesBackfillCommand } from './commands/places-backfill.js';
 import { evalAuditCommand } from './commands/eval-audit.js';
 import { gateACheckCommand } from './commands/gate-a-check.js';
+import { contactEnrichCommand, type ContactEnrichCliOptions } from './commands/contact-enrich.js';
 import { generateDemosCommand } from './commands/generate-demos.js';
 import { composeDemosCommand } from './commands/compose-demos.js';
 import { generateEmailsCommand } from './commands/generate-emails.js';
@@ -546,6 +547,17 @@ program
   .option('--limit <n>', 'max READY_FOR_AUDIT leads to report')
   .action((opts: { limit?: string }) => withContext((ctx) => gateACheckCommand(ctx, opts)))
   ;
+
+program
+  .command('contact-enrich')
+  .description('Find a VERIFIED decision-maker work email for one lead via a provider (mock default; Instantly hard-gated). Plan/dry-run unless --confirm. Never guesses; fails closed; no info@ fallback; no email/send.')
+  .requiredOption('--lead <id>', 'exactly one lead id')
+  .option('--candidate <spec>', 'decision-maker as "Full Name|Title" (repeatable; order = priority)', (v: string, acc: string[]) => [...acc, v], [])
+  .option('--domain <domain>', 'override the company domain (default: lead official_domain fact)')
+  .option('--max-credits <n>', 'per-run credit cap (default from CONTACT_ENRICHMENT_MAX_CREDITS_PER_RUN)')
+  .option('--max-requests <n>', 'per-run request cap (default from CONTACT_ENRICHMENT_MAX_REQUESTS_PER_RUN)')
+  .option('--confirm', 'execute the enrichment (mock is safe/free; Instantly requires the paid gates)')
+  .action((opts: ContactEnrichCliOptions) => withContext((ctx) => contactEnrichCommand(ctx, opts)));
 
 program
   .command('clean-audit-debug')
