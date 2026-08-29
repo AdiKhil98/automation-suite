@@ -6,6 +6,7 @@ import { LocalEnvelopeStore } from '../../integrations/audit/envelope-store.js';
 import { MockLlmProvider } from '../../integrations/llm/mock-llm.js';
 import { OpenAiResponsesProvider } from '../../integrations/llm/openai-responses.js';
 import { priceKnown, PRICE_VERIFIED_AT } from '../../integrations/llm/pricing.js';
+import { assertLiveCallsAllowed } from '../../config/live-call-guard.js';
 import { type LlmProvider } from '../../integrations/llm/provider.js';
 import { DrizzleAuditUnitOfWork } from '../../persistence/audit-unit-of-work.js';
 import { type CliContext } from '../context.js';
@@ -37,6 +38,8 @@ export function buildAuditService(ctx: CliContext, opts?: { severeCaptureLimitat
     if (!priceKnown(c.LLM_MODEL_AUDIT)) throw new Error(`No verified price for model "${c.LLM_MODEL_AUDIT}" — add it to pricing.ts before paid calls.`);
     const reviewModel = c.LLM_MODEL_REVIEW ?? c.LLM_MODEL_AUDIT;
     if (!priceKnown(reviewModel)) throw new Error(`No verified price for review model "${reviewModel}".`);
+    // Global DRY_RUN kill switch: even with ALLOW_PAID_LLM_CALLS=true + key, dry-run blocks the live call.
+    assertLiveCallsAllowed(c.DRY_RUN, 'audit-llm');
     provider = new OpenAiResponsesProvider({ apiKey: c.OPENAI_API_KEY, logger: ctx.logger });
     auditModel = c.LLM_MODEL_AUDIT;
   } else {

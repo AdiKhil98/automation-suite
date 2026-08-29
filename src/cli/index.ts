@@ -556,7 +556,8 @@ program
   .option('--domain <domain>', 'override the company domain (default: lead official_domain fact)')
   .option('--max-credits <n>', 'per-run credit cap (default from CONTACT_ENRICHMENT_MAX_CREDITS_PER_RUN)')
   .option('--max-requests <n>', 'per-run request cap (default from CONTACT_ENRICHMENT_MAX_REQUESTS_PER_RUN)')
-  .option('--confirm', 'execute the enrichment (mock is safe/free; Instantly requires the paid gates)')
+  .option('--preview', 'live NON-PAID preview/search + local identity match only (no credits, no enrichment)')
+  .option('--confirm', 'full run: preview → match → paid work-email enrichment of a matched person (needs ALLOW_PAID_ENRICHMENT_CALLS)')
   .action((opts: ContactEnrichCliOptions) => withContext((ctx) => contactEnrichCommand(ctx, opts)));
 
 program

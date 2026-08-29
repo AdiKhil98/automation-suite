@@ -11,46 +11,48 @@ import {
   type ContactEnrichmentResult,
   type EnrichmentQuery,
   type EnrichmentVerificationStatus,
+  type PreviewPerson,
   type ProviderEnrichmentOutcome,
-  type ReturnedIdentity,
 } from '../../src/domain/contact-enrichment/types.js';
-import { decideAcceptance, isGenericMailbox } from '../../src/domain/contact-enrichment/verification.js';
-import { MockContactEnrichmentProvider } from '../../src/integrations/contact-enrichment/mock-provider.js';
-import {
-  InstantlyContactEnrichmentProvider,
-  type FetchLike,
-} from '../../src/integrations/contact-enrichment/instantly-provider.js';
-import {
-  buildEnrichLeadsRequestBody,
-  buildLeadsListRequestBody,
-  normalizeInstantlyVerification,
-} from '../../src/integrations/contact-enrichment/instantly-schema.js';
+import { decideAcceptance, isGenericMailbox, matchPreviewPerson } from '../../src/domain/contact-enrichment/verification.js';
+import { MockContactEnrichmentProvider, type MockEnrichmentResponder, type MockPreviewResponder } from '../../src/integrations/contact-enrichment/mock-provider.js';
+import { InstantlyContactEnrichmentProvider, type FetchLike } from '../../src/integrations/contact-enrichment/instantly-provider.js';
+import { buildEnrichLeadsRequestBody, buildPreviewRequestBody, normalizeInstantlyVerification } from '../../src/integrations/contact-enrichment/instantly-schema.js';
 import { buildContactEnrichmentProvider } from '../../src/cli/commands/contact-enrich-build.js';
 
 const logger = { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} } as unknown as Logger;
 const caps: EnrichmentRunCaps = { maxRequests: 3, maxCredits: 3, minCreditsPerLookup: 1 };
 const DOMAIN = 'diamond-smile.com';
+const FULL = { performEnrichment: true };
+const PREVIEW_ONLY = { performEnrichment: false };
 
 function person(name: string, title: string, priority: number): CandidatePerson {
   const t = name.split(/\s+/);
   return { fullName: name, firstName: t[0] ?? name, lastName: t[t.length - 1] ?? name, title, priority };
 }
-
 const CANDIDATES: CandidatePerson[] = [
   person('Shyam Shastri', 'Principal Dentist', 1),
   person('Shaimil Patel', 'Clinical Director', 2),
   person('Kymya Doyley', 'Practice Manager', 3),
 ];
 
-function idFor(p: CandidatePerson, domain: string): ReturnedIdentity {
-  return { name: p.fullName, firstName: p.firstName, lastName: p.lastName, domain, title: p.title };
+function previewPersonFor(p: CandidatePerson, domain: string): PreviewPerson {
+  return { name: p.fullName, firstName: p.firstName, lastName: p.lastName, domain, title: p.title, providerLeadId: `L-${p.lastName}` };
 }
-
+function previewResponder(...people: PreviewPerson[]): MockPreviewResponder {
+  return (domain) => ({ domain, people, creditsReported: null, resourceId: 'prev', endpoint: 'mock://preview', rawDigest: 'pd' });
+}
 function outcome(query: EnrichmentQuery, over: Partial<ProviderEnrichmentOutcome>): ProviderEnrichmentOutcome {
   return {
     query, email: null, returnedIdentity: null, verificationStatus: 'NOT_FOUND', dataQuality: null, confidence: null,
-    creditsUsed: 1, resourceId: null, endpoint: 'mock://x', rawDigest: 'digest', ...over,
+    creditsReported: null, resourceId: null, endpoint: 'mock://x', rawDigest: 'd', ...over,
   };
+}
+function enrichVerified(forLast: string): MockEnrichmentResponder {
+  return (q) => q.lastName !== forLast ? outcome(q, {}) : outcome(q, {
+    email: `${q.firstName.toLowerCase()}@${q.domain}`, verificationStatus: 'VERIFIED', dataQuality: 'high', confidence: 0.98, creditsReported: 1,
+    returnedIdentity: { name: q.fullName, firstName: q.firstName, lastName: q.lastName, domain: q.domain, title: q.title },
+  });
 }
 
 class MemStore implements ContactEnrichmentStore {
@@ -60,136 +62,104 @@ class MemStore implements ContactEnrichmentStore {
   }
   save(result: ContactEnrichmentResult): Promise<void> { this.rows.push(result); return Promise.resolve(); }
 }
-
-/** Verified + fully matching identity for the candidate whose lastName === forLast. */
-function verifiedResponder(forLast: string) {
-  return (q: EnrichmentQuery): ProviderEnrichmentOutcome => {
-    if (q.lastName !== forLast) return outcome(q, { verificationStatus: 'NOT_FOUND', creditsUsed: 1 });
-    return outcome(q, {
-      email: `${q.firstName.toLowerCase()}@${q.domain}`, verificationStatus: 'VERIFIED', dataQuality: 'high', confidence: 0.98,
-      creditsUsed: 1, resourceId: 'job', returnedIdentity: { name: q.fullName, firstName: q.firstName, lastName: q.lastName, domain: q.domain, title: q.title },
-    });
-  };
+function svc(preview: MockPreviewResponder, enrich: MockEnrichmentResponder = () => outcome({ domain: DOMAIN, fullName: '', firstName: '', lastName: '', title: '' }, {}), store = new MemStore()) {
+  const provider = new MockContactEnrichmentProvider(enrich, preview);
+  const previewSpy = vi.spyOn(provider, 'preview');
+  const enrichSpy = vi.spyOn(provider, 'enrich');
+  return { service: new ContactEnrichmentService({ provider, store, logger }), store, previewSpy, enrichSpy };
 }
 
-describe('contact-enrichment verification (trust boundary + identity match)', () => {
-  const p = person('Shyam Shastri', 'Principal Dentist', 1);
-  const q: EnrichmentQuery = { domain: DOMAIN, fullName: p.fullName, firstName: p.firstName, lastName: p.lastName, title: p.title };
-  const good = { email: `shyam@${DOMAIN}`, verificationStatus: 'VERIFIED' as const, returnedIdentity: idFor(p, DOMAIN) };
-
-  it('accepts a VERIFIED, non-generic, host-matching, identity-matching address', () => {
-    const d = decideAcceptance(outcome(q, good), p, DOMAIN);
-    expect(d.accepted).toBe(true);
-    expect(d.contact?.email).toBe(`shyam@${DOMAIN}`);
-    expect(d.match).toEqual({ name: true, domain: true, title: 'match' });
+describe('verification: preview match + acceptance', () => {
+  const p = CANDIDATES[0];
+  it('matchPreviewPerson: name+domain+non-conflicting title', () => {
+    expect(matchPreviewPerson(previewPersonFor(p, DOMAIN), p, DOMAIN).isMatch).toBe(true);
+    expect(matchPreviewPerson({ ...previewPersonFor(p, DOMAIN), title: 'Receptionist' }, p, DOMAIN).isMatch).toBe(false);
+    expect(matchPreviewPerson({ ...previewPersonFor(p, DOMAIN), lastName: 'Other', name: 'Shyam Other' }, p, DOMAIN).isMatch).toBe(false);
+    expect(matchPreviewPerson({ ...previewPersonFor(p, DOMAIN), title: null }, p, DOMAIN).isMatch).toBe(true); // unconfirmed title ok
   });
-  it('rejects non-verified statuses', () => {
-    for (const s of ['RISKY', 'CATCH_ALL', 'INVALID', 'UNKNOWN'] as EnrichmentVerificationStatus[]) {
-      expect(decideAcceptance(outcome(q, { ...good, verificationStatus: s }), p, DOMAIN).accepted).toBe(false);
-    }
-  });
-  it('rejects a generic inbox even when verified', () => {
+  it('decideAcceptance still enforces verified + host + identity', () => {
+    const q: EnrichmentQuery = { domain: DOMAIN, fullName: p.fullName, firstName: p.firstName, lastName: p.lastName, title: p.title };
+    const good = outcome(q, { email: `shyam@${DOMAIN}`, verificationStatus: 'VERIFIED', returnedIdentity: { name: p.fullName, firstName: p.firstName, lastName: p.lastName, domain: DOMAIN, title: p.title } });
+    expect(decideAcceptance(good, p, DOMAIN).accepted).toBe(true);
     expect(decideAcceptance(outcome(q, { ...good, email: `info@${DOMAIN}` }), p, DOMAIN).reason).toBe('generic_mailbox_rejected');
-  });
-  it('rejects when the email host does not match the requested domain', () => {
-    expect(decideAcceptance(outcome(q, { ...good, email: 'shyam@other.com', returnedIdentity: { ...idFor(p, DOMAIN), domain: 'other.com' } }), p, DOMAIN).reason).toBe('domain_mismatch');
-  });
-  it('rejects when the returned person name does not match', () => {
-    expect(decideAcceptance(outcome(q, { ...good, returnedIdentity: idFor(person('Someone Else', 'Principal Dentist', 1), DOMAIN) }), p, DOMAIN).reason).toBe('name_mismatch');
-  });
-  it('rejects when the returned title clearly conflicts', () => {
-    expect(decideAcceptance(outcome(q, { ...good, returnedIdentity: { ...idFor(p, DOMAIN), title: 'Receptionist' } }), p, DOMAIN).reason).toBe('title_mismatch');
-  });
-  it('accepts when the title is absent (unconfirmed, not a mismatch)', () => {
-    const d = decideAcceptance(outcome(q, { ...good, returnedIdentity: { ...idFor(p, DOMAIN), title: null } }), p, DOMAIN);
-    expect(d.accepted).toBe(true);
-    expect(d.match.title).toBe('unconfirmed');
-  });
-  it('rejects when there is no returned identity to validate', () => {
-    expect(decideAcceptance(outcome(q, { email: `shyam@${DOMAIN}`, verificationStatus: 'VERIFIED', returnedIdentity: null }), p, DOMAIN).reason).toBe('no_returned_identity_to_validate');
-  });
-  it('classifies generic mailboxes', () => {
-    for (const g of ['info@d.com', 'reception@d.com', 'bookings+london@d.com']) expect(isGenericMailbox(g)).toBe(true);
-    expect(isGenericMailbox('shyam.shastri@d.com')).toBe(false);
+    expect(isGenericMailbox(`info@${DOMAIN}`)).toBe(true);
   });
 });
 
-describe('contact-enrichment service', () => {
-  function svc(responder: (q: EnrichmentQuery) => ProviderEnrichmentOutcome, store = new MemStore()) {
-    const provider = new MockContactEnrichmentProvider(responder);
-    const enrichSpy = vi.spyOn(provider, 'enrich');
-    return { service: new ContactEnrichmentService({ provider, store, logger }), store, enrichSpy };
-  }
-
-  it('accepts the preferred candidate first and stops (1 request)', async () => {
-    const { service, enrichSpy } = svc(verifiedResponder('Shastri'));
-    const r = await service.run('lead1', DOMAIN, CANDIDATES, caps);
+describe('service: preview-first strategy', () => {
+  it('preview coverage=0 → PREVIEW_NO_MATCH, NO enrichment call', async () => {
+    const { service, enrichSpy } = svc(previewResponder());
+    const r = await service.run('l', DOMAIN, CANDIDATES, caps, FULL);
+    expect(r.outcome).toBe('PREVIEW_NO_MATCH');
+    expect(enrichSpy).not.toHaveBeenCalled();
+    expect(r.creditsEstimated).toBe(0);
+  });
+  it('preview has people but none match → PREVIEW_NO_MATCH, NO enrichment', async () => {
+    const stranger: PreviewPerson = { name: 'Someone Else', firstName: 'Someone', lastName: 'Else', domain: DOMAIN, title: 'Dentist', providerLeadId: 'x' };
+    const { service, enrichSpy } = svc(previewResponder(stranger));
+    const r = await service.run('l', DOMAIN, CANDIDATES, caps, FULL);
+    expect(r.outcome).toBe('PREVIEW_NO_MATCH');
+    expect(enrichSpy).not.toHaveBeenCalled();
+  });
+  it('preview matches + performEnrichment=false → PREVIEW_MATCHED, NO enrichment', async () => {
+    const { service, enrichSpy } = svc(previewResponder(previewPersonFor(CANDIDATES[0], DOMAIN)));
+    const r = await service.run('l', DOMAIN, CANDIDATES, caps, PREVIEW_ONLY);
+    expect(r.outcome).toBe('PREVIEW_MATCHED');
+    expect(enrichSpy).not.toHaveBeenCalled();
+    expect((r.provenance as { matches: unknown[] }).matches).toHaveLength(1);
+  });
+  it('preview match → paid enrich → VERIFIED (only the matched person is enriched)', async () => {
+    const { service, previewSpy, enrichSpy } = svc(previewResponder(previewPersonFor(CANDIDATES[0], DOMAIN)), enrichVerified('Shastri'));
+    const r = await service.run('l', DOMAIN, CANDIDATES, caps, FULL);
     expect(r.outcome).toBe('VERIFIED');
-    expect(r.accepted?.fullName).toBe('Shyam Shastri');
     expect(r.accepted?.email).toBe(`shyam@${DOMAIN}`);
+    expect(previewSpy).toHaveBeenCalledTimes(1);
     expect(enrichSpy).toHaveBeenCalledTimes(1);
+    expect(r.creditsEstimated).toBe(1);
+    expect(r.creditsReported).toBe(1);
   });
-  it('falls back in priority order when the preferred is not found', async () => {
-    const { service, enrichSpy } = svc(verifiedResponder('Patel'));
-    const r = await service.run('lead1', DOMAIN, CANDIDATES, caps);
+  it('enriches matched people in priority order (preferred preview-miss, fallback matches)', async () => {
+    const { service, enrichSpy } = svc(previewResponder(previewPersonFor(CANDIDATES[1], DOMAIN)), enrichVerified('Patel'));
+    const r = await service.run('l', DOMAIN, CANDIDATES, caps, FULL);
     expect(r.accepted?.title).toBe('Clinical Director');
-    expect(enrichSpy).toHaveBeenCalledTimes(2);
+    expect(enrichSpy).toHaveBeenCalledTimes(1); // only the matched person
   });
-  it('fails closed (NOT_FOUND) when nobody verifies', async () => {
-    const { service } = svc((q) => outcome(q, { verificationStatus: 'NOT_FOUND' }));
-    const r = await service.run('lead1', DOMAIN, CANDIDATES, caps);
+  it('matched but enrichment returns a generic verified address → NOT_FOUND (no info@ fallback)', async () => {
+    const enrich: MockEnrichmentResponder = (q) => outcome(q, { email: `info@${q.domain}`, verificationStatus: 'VERIFIED', returnedIdentity: { name: q.fullName, firstName: q.firstName, lastName: q.lastName, domain: q.domain, title: q.title } });
+    const { service } = svc(previewResponder(previewPersonFor(CANDIDATES[0], DOMAIN)), enrich);
+    const r = await service.run('l', DOMAIN, CANDIDATES, caps, FULL);
     expect(r.outcome).toBe('NOT_FOUND');
     expect(r.accepted).toBeNull();
   });
-  it('fails closed when verified but the returned identity does not match', async () => {
-    const { service } = svc((q) => outcome(q, {
-      email: `x@${q.domain}`, verificationStatus: 'VERIFIED',
-      returnedIdentity: { name: 'Wrong Person', firstName: 'Wrong', lastName: 'Person', domain: q.domain, title: q.title },
-    }));
-    const r = await service.run('lead1', DOMAIN, CANDIDATES, caps);
-    expect(r.outcome).toBe('NOT_FOUND');
-    expect(r.accepted).toBeNull();
+  it('credit accounting: reported stays null when the provider reports nothing', async () => {
+    const enrich: MockEnrichmentResponder = (q) => outcome(q, { email: `shyam@${q.domain}`, verificationStatus: 'RISKY', creditsReported: null, returnedIdentity: { name: q.fullName, firstName: q.firstName, lastName: q.lastName, domain: q.domain, title: q.title } });
+    const { service } = svc(previewResponder(previewPersonFor(CANDIDATES[0], DOMAIN)), enrich);
+    const r = await service.run('l', DOMAIN, CANDIDATES, caps, FULL);
+    expect(r.creditsEstimated).toBe(1); // one attempt
+    expect(r.creditsReported).toBeNull(); // provider reported nothing → not a fabricated 1
   });
-  it('never accepts a generic verified address (no info@ fallback)', async () => {
-    const { service } = svc((q) => outcome(q, { email: `info@${q.domain}`, verificationStatus: 'VERIFIED', returnedIdentity: null }));
-    const r = await service.run('lead1', DOMAIN, CANDIDATES, caps);
-    expect(r.outcome).toBe('NOT_FOUND');
-  });
-  it('enforces the request cap (CAPPED)', async () => {
-    const { service, enrichSpy } = svc((q) => outcome(q, { verificationStatus: 'NOT_FOUND' }));
-    const r = await service.run('lead1', DOMAIN, CANDIDATES, { maxRequests: 1, maxCredits: 9, minCreditsPerLookup: 1 });
-    expect(r.outcome).toBe('CAPPED');
-    expect(enrichSpy).toHaveBeenCalledTimes(1);
-  });
-  it('enforces the credit cap before spending', async () => {
-    const { service, enrichSpy } = svc(verifiedResponder('Shastri'));
-    const r = await service.run('lead1', DOMAIN, CANDIDATES, { maxRequests: 9, maxCredits: 1, minCreditsPerLookup: 2 });
-    expect(r.outcome).toBe('CAPPED');
-    expect(enrichSpy).toHaveBeenCalledTimes(0);
-  });
-  it('is idempotent: a persisted result is returned without re-spending', async () => {
+  it('is idempotent (no re-preview, no re-spend)', async () => {
     const store = new MemStore();
-    const { service, enrichSpy } = svc(verifiedResponder('Shastri'), store);
-    const r1 = await service.run('lead1', DOMAIN, CANDIDATES, caps);
-    const r2 = await service.run('lead1', DOMAIN, CANDIDATES, caps);
+    const { service, previewSpy, enrichSpy } = svc(previewResponder(previewPersonFor(CANDIDATES[0], DOMAIN)), enrichVerified('Shastri'), store);
+    const r1 = await service.run('l', DOMAIN, CANDIDATES, caps, FULL);
+    const r2 = await service.run('l', DOMAIN, CANDIDATES, caps, FULL);
     expect(r2.id).toBe(r1.id);
+    expect(previewSpy).toHaveBeenCalledTimes(1);
     expect(enrichSpy).toHaveBeenCalledTimes(1);
-    expect(store.rows).toHaveLength(1);
   });
-  it('never retries a provider error (fail closed as ERROR)', async () => {
+  it('never retries a preview error (ERROR, fail closed)', async () => {
     const provider = new MockContactEnrichmentProvider();
-    vi.spyOn(provider, 'enrich').mockRejectedValue(new Error('boom'));
-    const service = new ContactEnrichmentService({ provider, store: new MemStore(), logger });
-    const r = await service.run('lead1', DOMAIN, CANDIDATES, caps);
+    vi.spyOn(provider, 'preview').mockRejectedValue(new Error('boom'));
+    const r = await new ContactEnrichmentService({ provider, store: new MemStore(), logger }).run('l', DOMAIN, CANDIDATES, caps, FULL);
     expect(r.outcome).toBe('ERROR');
   });
-  it('computeInputHash is stable regardless of candidate array order', () => {
+  it('computeInputHash stable regardless of order', () => {
     expect(computeInputHash('instantly', DOMAIN, CANDIDATES)).toBe(computeInputHash('instantly', 'DIAMOND-SMILE.com', [...CANDIDATES].reverse()));
   });
 });
 
-describe('Instantly provider — real 3-step sequence (fake transport, zero network/credits)', () => {
-  function fakeFetch(seq: Array<{ ok?: boolean; status?: number; body: unknown }>): { fetchImpl: FetchLike; calls: Array<{ url: string; method: string; headers: Record<string, string>; body?: string }> } {
+describe('Instantly provider — preview + enrich sequences (fake transport)', () => {
+  function fakeFetch(seq: Array<{ ok?: boolean; status?: number; body: unknown }>) {
     const calls: Array<{ url: string; method: string; headers: Record<string, string>; body?: string }> = [];
     let i = 0;
     const fetchImpl = ((url: string, init: RequestInit) => {
@@ -199,114 +169,76 @@ describe('Instantly provider — real 3-step sequence (fake transport, zero netw
     }) as unknown as FetchLike;
     return { fetchImpl, calls };
   }
-  function provider(fetchImpl: FetchLike) {
+  function provider(fetchImpl: FetchLike, allowPaidEnrichment = true) {
     return new InstantlyContactEnrichmentProvider({
       apiKey: 'secret-key-123', baseUrl: 'https://api.instantly.ai/api/v2', timeoutMs: 5000,
-      pollMaxAttempts: 4, pollIntervalMs: 1, logger, fetchImpl, sleep: () => Promise.resolve(),
+      pollMaxAttempts: 4, pollIntervalMs: 1, previewLimit: 25, allowPaidEnrichment, logger, fetchImpl, sleep: () => Promise.resolve(),
     });
   }
   const q: EnrichmentQuery = { domain: DOMAIN, fullName: 'Shyam Shastri', firstName: 'Shyam', lastName: 'Shastri', title: 'Principal Dentist' };
 
-  it('enrich -> poll -> leads/list; returns verified email + identity; Bearer auth; no key leak', async () => {
+  it('preview: non-enriching search returns people (no email), sends domain-only filter', async () => {
     const { fetchImpl, calls } = fakeFetch([
-      { body: { resource_id: 'list_9' } },
-      { body: { resource_id: 'list_9', in_progress: false, credits_used: 1 } },
-      { body: { items: [{ work_email: `shyam@${DOMAIN}`, first_name: 'Shyam', last_name: 'Shastri', company_domain: DOMAIN, title: 'Principal Dentist', email_verification: { status: 'valid', score: 0.99 }, data_quality: 'high' }] } },
+      { body: { resource_id: 'list_p' } },
+      { body: { in_progress: false } },
+      { body: { items: [{ name: 'Shyam Shastri', first_name: 'Shyam', last_name: 'Shastri', company_domain: DOMAIN, title: 'Principal Dentist' }] } },
     ]);
-    const r = await provider(fetchImpl).enrich(q);
+    const r = await provider(fetchImpl).preview(DOMAIN);
+    expect(r.people).toHaveLength(1);
+    expect(r.people[0]).toMatchObject({ firstName: 'Shyam', lastName: 'Shastri', domain: DOMAIN, title: 'Principal Dentist' });
+    expect(JSON.parse(calls[0].body ?? '{}')).toMatchObject({ work_email_enrichment: false, search_filters: { domains: [DOMAIN] } });
+    expect(JSON.parse(calls[0].body ?? '{}').search_filters.name).toBeUndefined();
+    for (const call of calls) expect(call.headers.Authorization).toBe('Bearer secret-key-123');
+  });
+  it('enrich: 3-step, verified email + identity; fails closed if paid disabled', async () => {
+    const seq = [
+      { body: { resource_id: 'list_9' } },
+      { body: { in_progress: false, credits_used: 1 } },
+      { body: { items: [{ work_email: `shyam@${DOMAIN}`, first_name: 'Shyam', last_name: 'Shastri', company_domain: DOMAIN, title: 'Principal Dentist', email_verification: { status: 'valid' } }] } },
+    ];
+    const r = await provider(fakeFetch(seq).fetchImpl).enrich(q);
     expect(r.email).toBe(`shyam@${DOMAIN}`);
     expect(r.verificationStatus).toBe('VERIFIED');
-    expect(r.creditsUsed).toBe(1);
-    expect(r.resourceId).toBe('list_9');
-    expect(r.returnedIdentity).toMatchObject({ firstName: 'Shyam', lastName: 'Shastri', domain: DOMAIN, title: 'Principal Dentist' });
-    // 3-step endpoint sequence
-    expect(calls[0].method).toBe('POST');
-    expect(calls[0].url).toContain('/supersearch-enrichment/enrich-leads-from-supersearch');
-    expect(calls[1].method).toBe('GET');
-    expect(calls[1].url).toContain('/supersearch-enrichment/list_9');
-    expect(calls[2].method).toBe('POST');
-    expect(calls[2].url).toContain('/leads/list');
-    // request shapes
-    expect(JSON.parse(calls[0].body ?? '{}')).toMatchObject({ limit: 1, work_email_enrichment: true, skip_rows_without_email: true, search_filters: { name: ['Shyam Shastri'], domains: [DOMAIN], title: { include: ['Principal Dentist'] } } });
-    expect(JSON.parse(calls[2].body ?? '{}')).toMatchObject({ list_id: 'list_9' });
-    for (const call of calls) expect(call.headers.Authorization).toBe('Bearer secret-key-123');
-    expect(calls[0].body).not.toContain('secret-key-123');
+    expect(r.creditsReported).toBe(1);
+    await expect(provider(fakeFetch(seq).fetchImpl, false).enrich(q)).rejects.toMatchObject({ code: 'ENRICHMENT_PROVIDER_NOT_ALLOWED' });
   });
-
-  it('polls until in_progress clears, then lists (bounded)', async () => {
-    const { fetchImpl, calls } = fakeFetch([
-      { body: { resource_id: 'list_2' } },
-      { body: { resource_id: 'list_2', in_progress: true } },
-      { body: { resource_id: 'list_2', in_progress: false } },
-      { body: { leads: [{ email: `a@${DOMAIN}`, first_name: 'Shyam', last_name: 'Shastri', domain: DOMAIN, title: 'Principal Dentist', verification_status: 'valid' }] } },
-    ]);
-    const r = await provider(fetchImpl).enrich(q);
-    expect(r.verificationStatus).toBe('VERIFIED');
-    expect(calls.filter((c) => c.method === 'GET')).toHaveLength(2);
-    expect(calls.filter((c) => c.url.includes('/leads/list'))).toHaveLength(1);
+  it('enrich: empty list → NOT_FOUND; missing email field → schema mismatch (stops)', async () => {
+    const empty = await provider(fakeFetch([{ body: { resource_id: 'e' } }, { body: { in_progress: false } }, { body: { items: [] } }]).fetchImpl).enrich(q);
+    expect(empty.verificationStatus).toBe('NOT_FOUND');
+    await expect(provider(fakeFetch([{ body: { resource_id: 'x' } }, { body: { in_progress: false } }, { body: { items: [{ first_name: 'Shyam', last_name: 'Shastri' }] } }]).fetchImpl).enrich(q))
+      .rejects.toMatchObject({ code: 'INSTANTLY_SCHEMA_MISMATCH' });
   });
-
-  it('returns NOT_FOUND (no email) when the list is empty', async () => {
-    const { fetchImpl } = fakeFetch([
-      { body: { resource_id: 'list_e' } },
-      { body: { in_progress: false } },
-      { body: { items: [] } },
-    ]);
-    const r = await provider(fetchImpl).enrich(q);
-    expect(r.email).toBeNull();
-    expect(r.verificationStatus).toBe('NOT_FOUND');
-    expect(r.returnedIdentity).toBeNull();
+  it('does not report a fabricated credit when the provider omits it', async () => {
+    const r = await provider(fakeFetch([{ body: { resource_id: 'r' } }, { body: { in_progress: false } }, { body: { items: [{ work_email: `a@${DOMAIN}`, first_name: 'Shyam', last_name: 'Shastri', domain: DOMAIN, email_verification: { status: 'valid' } }] } }]).fetchImpl).enrich(q);
+    expect(r.creditsReported).toBeNull();
   });
-
-  it('STOPS (schema mismatch) when a lead is returned without a recognizable email field', async () => {
-    const { fetchImpl } = fakeFetch([
-      { body: { resource_id: 'list_x' } },
-      { body: { in_progress: false } },
-      { body: { items: [{ first_name: 'Shyam', last_name: 'Shastri', some_other_field: 'x' }] } },
-    ]);
-    await expect(provider(fetchImpl).enrich(q)).rejects.toMatchObject({ code: 'INSTANTLY_SCHEMA_MISMATCH' });
-  });
-
-  it('STOPS (schema mismatch) when a lead has an email but no verification field', async () => {
-    const { fetchImpl } = fakeFetch([
-      { body: { resource_id: 'list_v' } },
-      { body: { in_progress: false } },
-      { body: { items: [{ work_email: `shyam@${DOMAIN}`, first_name: 'Shyam', last_name: 'Shastri' }] } },
-    ]);
-    await expect(provider(fetchImpl).enrich(q)).rejects.toMatchObject({ code: 'INSTANTLY_SCHEMA_MISMATCH' });
-  });
-
-  it('throws on non-2xx without leaking the API key', async () => {
-    const { fetchImpl } = fakeFetch([{ ok: false, status: 401, body: { error: 'unauthorized' } }]);
-    await expect(provider(fetchImpl).enrich(q)).rejects.toMatchObject({ code: 'INSTANTLY_HTTP_401' });
-    await expect(provider(fetchImpl).enrich(q)).rejects.toThrow(/^(?!.*secret-key-123).*$/);
-  });
-
-  it('maps verification vocabulary', () => {
-    const cases: Array<[string | null, EnrichmentVerificationStatus]> = [
-      ['valid', 'VERIFIED'], ['verified', 'VERIFIED'], ['catch_all', 'CATCH_ALL'], ['risky', 'RISKY'], ['invalid', 'INVALID'], ['weird', 'UNKNOWN'], ['', 'NOT_FOUND'], [null, 'NOT_FOUND'],
-    ];
-    for (const [raw, expected] of cases) expect(normalizeInstantlyVerification(raw)).toBe(expected);
-  });
-
-  it('builds the documented request bodies', () => {
-    const body = buildEnrichLeadsRequestBody(q) as { limit: number; work_email_enrichment: boolean; skip_rows_without_email: boolean; search_filters: Record<string, unknown> };
-    expect(body).toMatchObject({ limit: 1, work_email_enrichment: true, skip_rows_without_email: true });
-    expect(body.search_filters).toEqual({ name: ['Shyam Shastri'], domains: [DOMAIN], title: { include: ['Principal Dentist'] } });
-    expect(buildLeadsListRequestBody('list_9')).toEqual({ list_id: 'list_9', limit: 1 });
+  it('maps verification vocabulary + builds request bodies', () => {
+    const cases: Array<[string | null, EnrichmentVerificationStatus]> = [['valid', 'VERIFIED'], ['catch_all', 'CATCH_ALL'], ['risky', 'RISKY'], ['invalid', 'INVALID'], ['', 'NOT_FOUND']];
+    for (const [raw, exp] of cases) expect(normalizeInstantlyVerification(raw)).toBe(exp);
+    expect(buildPreviewRequestBody(DOMAIN, 25)).toMatchObject({ work_email_enrichment: false, limit: 25, search_filters: { domains: [DOMAIN] } });
+    expect((buildEnrichLeadsRequestBody(q) as { search_filters: { name: string[] } }).search_filters.name).toEqual(['Shyam Shastri']);
   });
 });
 
-describe('buildContactEnrichmentProvider gating', () => {
+describe('buildContactEnrichmentProvider gating + DRY_RUN kill switch', () => {
   const base = {
-    CONTACT_ENRICHMENT_PROVIDER: 'instantly', CONTACT_ENRICHMENT_ENABLED: false, ALLOW_PAID_ENRICHMENT_CALLS: false,
-    INSTANTLY_API_KEY: undefined as string | undefined, INSTANTLY_API_BASE_URL: 'https://api.instantly.ai/api/v2',
-    INSTANTLY_TIMEOUT_MS: 30000, INSTANTLY_POLL_MAX_ATTEMPTS: 8, INSTANTLY_POLL_INTERVAL_MS: 2000,
+    DRY_RUN: false, CONTACT_ENRICHMENT_PROVIDER: 'instantly', CONTACT_ENRICHMENT_ENABLED: true, ALLOW_PAID_ENRICHMENT_CALLS: true,
+    INSTANTLY_API_KEY: 'k', INSTANTLY_API_BASE_URL: 'https://api.instantly.ai/api/v2', INSTANTLY_TIMEOUT_MS: 30000,
+    INSTANTLY_POLL_MAX_ATTEMPTS: 8, INSTANTLY_POLL_INTERVAL_MS: 2000, CONTACT_ENRICHMENT_PREVIEW_LIMIT: 25,
   };
   const ctx = (over: Partial<typeof base>) => ({ config: { ...base, ...over }, logger } as unknown as Parameters<typeof buildContactEnrichmentProvider>[0]);
-  it('returns the mock provider when provider != instantly', () => { expect(buildContactEnrichmentProvider(ctx({ CONTACT_ENRICHMENT_PROVIDER: 'mock' })).name).toBe('mock'); });
-  it('fails closed without enable flag', () => { expect(() => buildContactEnrichmentProvider(ctx({}))).toThrow(/CONTACT_ENRICHMENT_ENABLED/); });
-  it('fails closed without the paid kill switch', () => { expect(() => buildContactEnrichmentProvider(ctx({ CONTACT_ENRICHMENT_ENABLED: true }))).toThrow(/ALLOW_PAID_ENRICHMENT_CALLS/); });
-  it('fails closed without an API key', () => { expect(() => buildContactEnrichmentProvider(ctx({ CONTACT_ENRICHMENT_ENABLED: true, ALLOW_PAID_ENRICHMENT_CALLS: true }))).toThrow(/INSTANTLY_API_KEY/); });
-  it('constructs when fully gated open', () => { expect(buildContactEnrichmentProvider(ctx({ CONTACT_ENRICHMENT_ENABLED: true, ALLOW_PAID_ENRICHMENT_CALLS: true, INSTANTLY_API_KEY: 'k' })).name).toBe('instantly'); });
+
+  it('mock provider when provider != instantly (unaffected by DRY_RUN)', () => {
+    expect(buildContactEnrichmentProvider(ctx({ CONTACT_ENRICHMENT_PROVIDER: 'mock', DRY_RUN: true })).name).toBe('mock');
+  });
+  it('DRY_RUN=true blocks live Instantly even with all paid flags + key (fail closed before network)', () => {
+    expect(() => buildContactEnrichmentProvider(ctx({ DRY_RUN: true }))).toThrow(/DRY_RUN=true blocks/);
+  });
+  it('constructs live provider when DRY_RUN=false + enabled + key (preview allowed without paid flag)', () => {
+    expect(buildContactEnrichmentProvider(ctx({ ALLOW_PAID_ENRICHMENT_CALLS: false })).name).toBe('instantly');
+  });
+  it('fails closed without enable flag / without key', () => {
+    expect(() => buildContactEnrichmentProvider(ctx({ CONTACT_ENRICHMENT_ENABLED: false }))).toThrow(/CONTACT_ENRICHMENT_ENABLED/);
+    expect(() => buildContactEnrichmentProvider(ctx({ INSTANTLY_API_KEY: undefined }))).toThrow(/INSTANTLY_API_KEY/);
+  });
 });

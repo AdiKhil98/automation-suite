@@ -16,6 +16,7 @@ import {
 import { EnrichmentRepository } from '../../persistence/repositories/enrichment.repo.js';
 import { LeadFactsRepository } from '../../persistence/repositories/lead-facts.repo.js';
 import { AppError } from '../../utils/errors.js';
+import { assertLiveCallsAllowed } from '../../config/live-call-guard.js';
 import { type CliContext } from '../context.js';
 
 export interface PlacesBackfillOptions {
@@ -103,6 +104,8 @@ export async function placesBackfillCommand(
 
   // ---- Live paid run: gates + bounded loop ----
   if (!c.ALLOW_PAID_READS) throw new AppError('PAID_READS_DISABLED', 'Live backfill requires ALLOW_PAID_READS=true.');
+  // Global DRY_RUN kill switch: dry-run blocks the live paid Places call even with ALLOW_PAID_READS=true.
+  assertLiveCallsAllowed(c.DRY_RUN, 'google-places-backfill');
   const client = deps.detailsClient
     ?? (c.GOOGLE_PLACES_API_KEY
       ? new GooglePlacesDetailsClient(c.GOOGLE_PLACES_API_KEY, c.ENRICH_HTTP_TIMEOUT_MS, ctx.logger)

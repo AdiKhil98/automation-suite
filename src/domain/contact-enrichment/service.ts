@@ -1,11 +1,12 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { type Logger } from 'pino';
 import { type ContactEnrichmentProvider } from './provider.js';
-import { decideAcceptance } from './verification.js';
+import { decideAcceptance, matchPreviewPerson } from './verification.js';
 import {
   type CandidatePerson,
   type ContactEnrichmentResult,
   type EnrichmentQuery,
+  type PreviewPerson,
   type VerifiedContact,
 } from './types.js';
 
@@ -18,8 +19,13 @@ export interface ContactEnrichmentStore {
 export interface EnrichmentRunCaps {
   maxRequests: number;
   maxCredits: number;
-  /** Conservative minimum credits assumed per lookup when deciding whether the next call fits the cap. */
+  /** Conservative minimum credits assumed per enrichment call when checking the cap. */
   minCreditsPerLookup: number;
+}
+
+export interface EnrichmentRunOptions {
+  /** When false, run preview + local match only and STOP before any paid enrichment (no credits). */
+  performEnrichment: boolean;
 }
 
 export interface ContactEnrichmentServiceDeps {
@@ -28,7 +34,6 @@ export interface ContactEnrichmentServiceDeps {
   logger: Logger;
 }
 
-/** A pure, side-effect-free plan of what a run WOULD do. No network, no spend. */
 export interface EnrichmentPlan {
   leadId: string;
   provider: string;
@@ -55,14 +60,19 @@ export function computeInputHash(provider: string, domain: string, candidates: C
   return createHash('sha256').update(material).digest('hex');
 }
 
+/** Non-secret preview-person view for provenance (name + title + domain; no email — preview has none). */
+function safePreviewView(p: PreviewPerson): Record<string, unknown> {
+  return { name: p.name, title: p.title, domain: p.domain };
+}
+
 /**
- * Orchestrates decision-maker work-email enrichment for ONE lead:
- *  - tries candidates strictly in priority order,
- *  - accepts ONLY a provider-VERIFIED, non-generic, syntactically valid address,
- *  - enforces per-run request AND credit caps (stops BEFORE exceeding either),
- *  - is idempotent (a persisted result for the same inputs is returned without spending),
- *  - fails closed (no verified email -> NOT_FOUND/CAPPED, never a generic/guessed fallback),
- *  - never retries a provider error and never writes lead_facts (so no manual fact is overwritten).
+ * Orchestrates decision-maker work-email discovery for ONE lead using a preview-first strategy:
+ *  1. NON-ENRICHING preview/search of the domain (no credit),
+ *  2. local identity match (name + domain + non-conflicting title) against the priority candidates,
+ *  3. PAID work-email enrichment ONLY of a matched person (when performEnrichment), accepting ONLY a
+ *     provider-VERIFIED, non-generic, host-matching, identity-matching address.
+ * Enforces request + credit caps, is idempotent, fails closed, never retries a provider error, never
+ * writes lead_facts, and reports provider-credits separately from an internal estimate.
  */
 export class ContactEnrichmentService {
   constructor(private readonly deps: ContactEnrichmentServiceDeps) {}
@@ -72,11 +82,7 @@ export class ContactEnrichmentService {
     const inputHash = computeInputHash(provider, domain, candidates);
     const ordered = [...candidates].sort((a, b) => a.priority - b.priority || a.fullName.localeCompare(b.fullName));
     return this.deps.store.findByInputHash(leadId, provider, inputHash).then((existing) => ({
-      leadId,
-      provider,
-      domain,
-      inputHash,
-      orderedCandidates: ordered,
+      leadId, provider, domain, inputHash, orderedCandidates: ordered,
       projectedMaxRequests: Math.min(caps.maxRequests, ordered.length),
       projectedMaxCredits: Math.min(caps.maxCredits, ordered.length * Math.max(1, caps.minCreditsPerLookup)),
       alreadyResolved: existing,
@@ -88,11 +94,11 @@ export class ContactEnrichmentService {
     domain: string,
     candidates: CandidatePerson[],
     caps: EnrichmentRunCaps,
+    opts: EnrichmentRunOptions,
   ): Promise<ContactEnrichmentResult> {
     const provider = this.deps.provider.name;
     const inputHash = computeInputHash(provider, domain, candidates);
 
-    // Idempotency: a prior terminal result for identical inputs is returned without spending.
     const existing = await this.deps.store.findByInputHash(leadId, provider, inputHash);
     if (existing) {
       this.deps.logger.info({ leadId, provider, outcome: existing.outcome }, 'contact-enrichment: idempotent hit; no spend');
@@ -100,73 +106,98 @@ export class ContactEnrichmentService {
     }
 
     const ordered = [...candidates].sort((a, b) => a.priority - b.priority || a.fullName.localeCompare(b.fullName));
+    let reportedCredits: number | null = null;
+    const addReported = (v: number | null): void => { if (v !== null) reportedCredits = (reportedCredits ?? 0) + v; };
+
+    const finish = (
+      outcome: ContactEnrichmentResult['outcome'],
+      accepted: VerifiedContact | null,
+      creditsEstimated: number,
+      resourceId: string | null,
+      endpoint: string | null,
+      provenance: Record<string, unknown>,
+    ): Promise<ContactEnrichmentResult> => {
+      const result: ContactEnrichmentResult = {
+        id: randomUUID(), leadId, provider, inputHash, requestedDomain: domain, candidates: ordered,
+        outcome, accepted, creditsEstimated, creditsReported: reportedCredits, providerResourceId: resourceId,
+        endpoint, provenance, createdAt: new Date(), completedAt: new Date(),
+      };
+      return this.deps.store.save(result).then(() => {
+        this.deps.logger.info({ leadId, provider, outcome, creditsEstimated, creditsReported: reportedCredits }, 'contact-enrichment: run complete');
+        return result;
+      });
+    };
+
+    // ---- Step 1: NON-ENRICHING preview/search (no credit) ----
+    let preview;
+    try {
+      preview = await this.deps.provider.preview(domain);
+    } catch (err) {
+      this.deps.logger.error({ leadId, err: err instanceof Error ? err.message : String(err) }, 'contact-enrichment: preview error (no retry)');
+      return finish('ERROR', null, 0, null, null, { stage: 'preview', error: err instanceof Error ? err.message : String(err) });
+    }
+    addReported(preview.creditsReported);
+
+    // ---- Step 2: local identity match against priority candidates ----
+    const matches: Array<{ person: CandidatePerson; previewPerson: PreviewPerson; match: ReturnType<typeof matchPreviewPerson> }> = [];
+    for (const person of ordered) {
+      for (const pp of preview.people) {
+        const m = matchPreviewPerson(pp, person, domain);
+        if (m.isMatch) { matches.push({ person, previewPerson: pp, match: m }); break; }
+      }
+    }
+    const previewProvenance = {
+      stage: 'preview',
+      previewPeopleCount: preview.people.length,
+      previewPeople: preview.people.map(safePreviewView),
+      matches: matches.map((m) => ({ candidate: m.person.fullName, title: m.person.title, matchedTitle: m.previewPerson.title, match: m.match })),
+      creditsReportedPreview: preview.creditsReported,
+    };
+
+    if (matches.length === 0) {
+      return finish('PREVIEW_NO_MATCH', null, 0, preview.resourceId, preview.endpoint, previewProvenance);
+    }
+    if (!opts.performEnrichment) {
+      // Matched in preview, but paid enrichment not requested/allowed — report justification, spend nothing.
+      return finish('PREVIEW_MATCHED', null, 0, preview.resourceId, preview.endpoint, { ...previewProvenance, enrichmentJustified: true });
+    }
+
+    // ---- Step 3: PAID work-email enrichment of matched people (priority order, within caps) ----
     const attempts: Array<Record<string, unknown>> = [];
-    let creditsUsed = 0;
+    let creditsEstimated = 0;
     let requestsUsed = 0;
     let accepted: VerifiedContact | null = null;
-    let endpoint: string | null = null;
-    let resourceId: string | null = null;
-    let capped = false;
-    let errored = false;
+    let endpoint: string | null = preview.endpoint;
+    let resourceId: string | null = preview.resourceId;
+    let capped = false, errored = false;
 
-    for (const person of ordered) {
+    for (const { person } of matches) {
       if (requestsUsed >= caps.maxRequests) { capped = true; break; }
-      if (creditsUsed + Math.max(1, caps.minCreditsPerLookup) > caps.maxCredits) { capped = true; break; }
-
+      if (creditsEstimated + Math.max(1, caps.minCreditsPerLookup) > caps.maxCredits) { capped = true; break; }
       let outcome;
       try {
         outcome = await this.deps.provider.enrich(queryFor(domain, person));
       } catch (err) {
-        // Never auto-retry a provider error; record and fail closed.
         errored = true;
         attempts.push({ person: person.fullName, error: err instanceof Error ? err.message : String(err) });
-        this.deps.logger.error({ leadId, person: person.fullName }, 'contact-enrichment: provider error (no retry)');
+        this.deps.logger.error({ leadId, person: person.fullName }, 'contact-enrichment: enrich error (no retry)');
         break;
       }
-
       requestsUsed += 1;
-      creditsUsed += outcome.creditsUsed;
+      creditsEstimated += 1;
+      addReported(outcome.creditsReported);
       endpoint = outcome.endpoint;
       if (outcome.resourceId) resourceId = outcome.resourceId;
-
       const decision = decideAcceptance(outcome, person, domain);
       attempts.push({
-        person: person.fullName,
-        title: person.title,
-        verificationStatus: outcome.verificationStatus,
-        accepted: decision.accepted,
-        reason: decision.reason,
-        match: decision.match,
-        returnedIdentity: outcome.returnedIdentity,
-        creditsUsed: outcome.creditsUsed,
-        rawDigest: outcome.rawDigest,
+        person: person.fullName, title: person.title, verificationStatus: outcome.verificationStatus,
+        accepted: decision.accepted, reason: decision.reason, match: decision.match,
+        returnedIdentity: outcome.returnedIdentity, creditsReported: outcome.creditsReported, rawDigest: outcome.rawDigest,
       });
-
-      if (decision.accepted && decision.contact) {
-        accepted = decision.contact;
-        break;
-      }
+      if (decision.accepted && decision.contact) { accepted = decision.contact; break; }
     }
 
     const outcome = accepted ? 'VERIFIED' : errored ? 'ERROR' : capped ? 'CAPPED' : 'NOT_FOUND';
-    const result: ContactEnrichmentResult = {
-      id: randomUUID(),
-      leadId,
-      provider,
-      inputHash,
-      requestedDomain: domain,
-      candidates: ordered,
-      outcome,
-      accepted,
-      creditsUsed,
-      providerResourceId: resourceId,
-      endpoint,
-      provenance: { attempts, requestsUsed, caps },
-      createdAt: new Date(),
-      completedAt: new Date(),
-    };
-    await this.deps.store.save(result);
-    this.deps.logger.info({ leadId, provider, outcome, creditsUsed, requestsUsed }, 'contact-enrichment: run complete');
-    return result;
+    return finish(outcome, accepted, creditsEstimated, resourceId, endpoint, { ...previewProvenance, stage: 'enrich', attempts, requestsUsed, caps });
   }
 }
