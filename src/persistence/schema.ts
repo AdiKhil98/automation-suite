@@ -2812,3 +2812,44 @@ export const deterministicFindingEvidence = pgTable(
   },
   (t) => ({ pk: primaryKey({ columns: [t.deterministicFindingId, t.captureEvidenceId] }) }),
 );
+
+// --- Contact enrichment: decision-maker work-email discovery (provider-abstracted; Instantly first) ---
+// One row per enrichment RUN over a lead's ordered decision-maker candidate list. Additive only; no
+// existing table is altered and NO lead_facts are written by this feature (so no manual contact fact is
+// ever overwritten). The partial unique index gives idempotent re-runs for identical inputs.
+export const contactEnrichmentResults = pgTable(
+  'contact_enrichment_results',
+  {
+    id: text('id').primaryKey(),
+    leadId: text('lead_id').notNull().references(() => leads.id, { onDelete: 'cascade' }),
+    provider: text('provider').notNull(),
+    inputHash: text('input_hash').notNull(),
+    requestedDomain: text('requested_domain').notNull(),
+    candidates: jsonb('candidates').notNull(),
+    outcome: text('outcome').notNull(),
+    acceptedName: text('accepted_name'),
+    acceptedTitle: text('accepted_title'),
+    acceptedEmail: text('accepted_email'),
+    verificationStatus: text('verification_status'),
+    dataQuality: text('data_quality'),
+    confidence: doublePrecision('confidence'),
+    creditsUsed: integer('credits_used').notNull().default(0),
+    providerResourceId: text('provider_resource_id'),
+    endpoint: text('endpoint'),
+    provenance: jsonb('provenance').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+  },
+  (t) => ({
+    leadIdx: index('contact_enrichment_results_lead_idx').on(t.leadId),
+    idempotencyUk: uniqueIndex('contact_enrichment_results_idempotency_uk').on(t.leadId, t.provider, t.inputHash),
+    outcomeCk: check('contact_enrichment_outcome_ck', sql`${t.outcome} IN ('VERIFIED','NOT_FOUND','CAPPED','ERROR')`),
+    creditsCk: check('contact_enrichment_credits_ck', sql`${t.creditsUsed} >= 0`),
+    // A VERIFIED row MUST carry an accepted email + VERIFIED status; a non-VERIFIED row MUST NOT.
+    acceptedCk: check(
+      'contact_enrichment_accepted_ck',
+      sql`(${t.outcome} = 'VERIFIED' AND ${t.acceptedEmail} IS NOT NULL AND ${t.verificationStatus} = 'VERIFIED')
+          OR (${t.outcome} <> 'VERIFIED' AND ${t.acceptedEmail} IS NULL)`,
+    ),
+  }),
+);

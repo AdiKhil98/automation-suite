@@ -274,6 +274,13 @@
       "when": 1786479600000,
       "tag": "0038_scheduled_send_automation",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1786566000000,
+      "tag": "0039_contact_enrichment",
+      "breakpoints": true
     }
   ]
 }
