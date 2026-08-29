@@ -58,6 +58,7 @@ async function runProspect(ctx: CliContext, cli: ProspectRunCliOptions, controll
   const c = ctx.config;
   if (!c.PROSPECT_DISCOVERY_ENABLED) { console.log('Prospect discovery is disabled (PROSPECT_DISCOVERY_ENABLED=false).'); return }
   if (!c.ALLOW_PAID_READS) { console.log('Prospect discovery is blocked (ALLOW_PAID_READS=false).'); return }
+  if (c.DRY_RUN) { console.log('Prospect discovery is blocked (DRY_RUN=true; no live paid reads under dry-run).'); return }
   if (!c.GOOGLE_PLACES_API_KEY) { console.log('Prospect discovery requires GOOGLE_PLACES_API_KEY.'); return }
   if (cli.continuePipeline && !c.PROSPECT_CONTINUE_PIPELINE) { console.log('Pipeline continuation is disabled (PROSPECT_CONTINUE_PIPELINE=false).'); return }
   const input = validateProspectInput({

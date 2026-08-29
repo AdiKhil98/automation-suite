@@ -52,6 +52,8 @@ const envSchema = z.object({
   // Bounded spend controls for a single enrichment run (preferred + a small number of fallbacks).
   CONTACT_ENRICHMENT_MAX_REQUESTS_PER_RUN: z.coerce.number().int().min(1).max(10).default(3),
   CONTACT_ENRICHMENT_MAX_CREDITS_PER_RUN: z.coerce.number().int().min(1).max(20).default(3),
+  // Max domain contacts to inspect in the non-enriching preview/search step (no credits spent).
+  CONTACT_ENRICHMENT_PREVIEW_LIMIT: z.coerce.number().int().min(1).max(100).default(25),
   // Instantly API v2. Key is a secret read only from env, never hard-coded, never logged.
   INSTANTLY_API_KEY: z.string().optional(),
   INSTANTLY_API_BASE_URL: z.string().url().default('https://api.instantly.ai/api/v2'),

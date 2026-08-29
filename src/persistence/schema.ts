@@ -2833,7 +2833,9 @@ export const contactEnrichmentResults = pgTable(
     verificationStatus: text('verification_status'),
     dataQuality: text('data_quality'),
     confidence: doublePrecision('confidence'),
+    // credits_used = internal ESTIMATE (1 per enrichment attempt); credits_reported = provider truth (NULL when unreported).
     creditsUsed: integer('credits_used').notNull().default(0),
+    creditsReported: integer('credits_reported'),
     providerResourceId: text('provider_resource_id'),
     endpoint: text('endpoint'),
     provenance: jsonb('provenance').notNull(),
@@ -2843,8 +2845,8 @@ export const contactEnrichmentResults = pgTable(
   (t) => ({
     leadIdx: index('contact_enrichment_results_lead_idx').on(t.leadId),
     idempotencyUk: uniqueIndex('contact_enrichment_results_idempotency_uk').on(t.leadId, t.provider, t.inputHash),
-    outcomeCk: check('contact_enrichment_outcome_ck', sql`${t.outcome} IN ('VERIFIED','NOT_FOUND','CAPPED','ERROR')`),
-    creditsCk: check('contact_enrichment_credits_ck', sql`${t.creditsUsed} >= 0`),
+    outcomeCk: check('contact_enrichment_outcome_ck', sql`${t.outcome} IN ('VERIFIED','NOT_FOUND','CAPPED','ERROR','PREVIEW_MATCHED','PREVIEW_NO_MATCH')`),
+    creditsCk: check('contact_enrichment_credits_ck', sql`${t.creditsUsed} >= 0 AND (${t.creditsReported} IS NULL OR ${t.creditsReported} >= 0)`),
     // A VERIFIED row MUST carry an accepted email + VERIFIED status; a non-VERIFIED row MUST NOT.
     acceptedCk: check(
       'contact_enrichment_accepted_ck',

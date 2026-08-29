@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { AppError } from '../../utils/errors.js';
-import { type EnrichmentQuery, type EnrichmentVerificationStatus, type ReturnedIdentity } from '../../domain/contact-enrichment/types.js';
+import { type EnrichmentQuery, type EnrichmentVerificationStatus, type PreviewPerson, type ReturnedIdentity } from '../../domain/contact-enrichment/types.js';
 
 /**
  * Instantly API v2 — SuperSearch enrichment + leads retrieval contract (the ONLY external surface we
@@ -54,6 +54,25 @@ export function buildEnrichLeadsRequestBody(q: EnrichmentQuery): Record<string, 
 /** Build the leads/list request body scoped to the generated enrichment list. */
 export function buildLeadsListRequestBody(resourceId: string): Record<string, unknown> {
   return { list_id: resourceId, limit: 1 };
+}
+
+/**
+ * Build a NON-ENRICHING preview/search over a domain: work_email_enrichment=false so no email is
+ * revealed and (by design) no enrichment credit is spent. No title restriction — we match the
+ * returned people locally. `limit` bounds how many domain contacts to inspect.
+ */
+export function buildPreviewRequestBody(domain: string, limit: number): Record<string, unknown> {
+  return {
+    limit,
+    work_email_enrichment: false,
+    skip_rows_without_email: false,
+    search_filters: { domains: [domain] },
+  };
+}
+
+/** Build a leads/list body for a preview list (more than one row). */
+export function buildPreviewLeadsListRequestBody(resourceId: string, limit: number): Record<string, unknown> {
+  return { list_id: resourceId, limit };
 }
 
 /** POST enrich response — the generated/list resource id. */
@@ -148,5 +167,17 @@ export function extractLead(lead: Record<string, unknown>): ExtractedLead {
     identity,
     dataQuality: str(lead['data_quality']),
     confidence: numv(lead['confidence']) ?? numv(ev['score']),
+  };
+}
+
+/** Map ONE preview/search row to a PreviewPerson (identity only — preview never reveals an email). */
+export function extractPreviewPerson(lead: Record<string, unknown>): PreviewPerson {
+  return {
+    name: str(lead['name']) ?? str(lead['full_name']),
+    firstName: str(lead['first_name']),
+    lastName: str(lead['last_name']),
+    domain: str(lead['company_domain']) ?? str(lead['organization_domain']) ?? str(lead['domain']),
+    title: str(lead['title']) ?? str(lead['job_title']) ?? str(lead['headline']),
+    providerLeadId: str(lead['id']) ?? str(lead['lead_id']),
   };
 }

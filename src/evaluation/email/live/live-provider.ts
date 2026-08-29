@@ -8,6 +8,7 @@
 
 import { type Logger } from 'pino';
 import { type AppConfig } from '../../../config/env.js';
+import { assertLiveCallsAllowed } from '../../../config/live-call-guard.js';
 import { MockLlmProvider } from '../../../integrations/llm/mock-llm.js';
 import { OpenAiResponsesProvider } from '../../../integrations/llm/openai-responses.js';
 import { PRICE_VERIFIED_AT, priceKnown } from '../../../integrations/llm/pricing.js';
@@ -72,6 +73,7 @@ export function buildLiveValidationProvider(config: AppConfig, logger: Logger, o
   if (!priceKnown(terraModel)) throw new LiveGuardError(`no verified price for Terra model "${terraModel}"`);
   if (!priceKnown(solModel)) throw new LiveGuardError(`no verified price for Sol model "${solModel}"`);
 
+  assertLiveCallsAllowed(config.DRY_RUN, 'email-eval-live-llm');
   return { provider: new OpenAiResponsesProvider({ apiKey: config.OPENAI_API_KEY, logger }), mode: 'LIVE' };
 }
 
@@ -98,5 +100,6 @@ export function buildSolRereviewProvider(config: AppConfig, logger: Logger, opts
   const solModel = config.COMPETITOR_EMAIL_LIVE_VALIDATION_SOL_MODEL;
   if (!priceKnown(solModel)) throw new LiveGuardError(`no verified price for Sol model "${solModel}"`);
 
+  assertLiveCallsAllowed(config.DRY_RUN, 'email-eval-live-llm');
   return { provider: new OpenAiResponsesProvider({ apiKey: config.OPENAI_API_KEY, logger }), mode: 'LIVE' };
 }

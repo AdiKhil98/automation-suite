@@ -281,6 +281,13 @@
       "when": 1786566000000,
       "tag": "0039_contact_enrichment",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1786652400000,
+      "tag": "0040_contact_enrichment_preview",
+      "breakpoints": true
     }
   ]
 }

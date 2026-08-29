@@ -1,18 +1,23 @@
 import { createHash } from 'node:crypto';
 import { type Logger } from 'pino';
 import { AppError } from '../../utils/errors.js';
-import { type ContactEnrichmentProvider } from '../../domain/contact-enrichment/provider.js';
+import { type ContactEnrichmentProvider, EnrichmentProviderNotAllowedError } from '../../domain/contact-enrichment/provider.js';
 import {
   type EnrichmentEstimate,
   type EnrichmentQuery,
+  type PreviewPerson,
+  type PreviewResult,
   type ProviderEnrichmentOutcome,
 } from '../../domain/contact-enrichment/types.js';
 import {
   INSTANTLY_ENDPOINTS,
   buildEnrichLeadsRequestBody,
   buildLeadsListRequestBody,
+  buildPreviewLeadsListRequestBody,
+  buildPreviewRequestBody,
   enrichResponseSchema,
   extractLead,
+  extractPreviewPerson,
   leadsFrom,
   leadsListResponseSchema,
   pollResponseSchema,
@@ -26,6 +31,9 @@ export interface InstantlyProviderDeps {
   timeoutMs: number;
   pollMaxAttempts: number;
   pollIntervalMs: number;
+  previewLimit: number;
+  /** Whether the PAID enrich() step may run. Preview() is always allowed (non-enriching). */
+  allowPaidEnrichment: boolean;
   logger: Logger;
   /** Injected for tests — a fake transport keeps the standard suite at zero paid/network calls. */
   fetchImpl?: FetchLike;
@@ -42,11 +50,15 @@ const readCredits = (o: Record<string, unknown>): number | null => {
 };
 
 /**
- * Instantly API v2 SuperSearch enrichment provider (3-step: enrich -> poll -> leads/list). Isolated
- * HTTP surface: Bearer auth (the key is only ever placed in the Authorization header, never logged),
- * per-request AbortController timeout, NO SDK/auto-retry, and bounded polling. Every response is
- * Zod-validated; a returned lead lacking an email/verification field throws a schema mismatch instead
- * of guessing. Network I/O flows only through the injected fetch, so tests run fully offline.
+ * Instantly API v2 SuperSearch provider. Two operations:
+ *  - preview(domain): NON-ENRICHING search (work_email_enrichment=false) -> people at the domain, no
+ *    email revealed, no enrichment credit. Used to confirm coverage + identity before any spend.
+ *  - enrich(query): PAID work-email enrichment for one known person (gated by allowPaidEnrichment).
+ *
+ * Isolated HTTP surface: Bearer auth (key only in the header, never logged), per-request timeout, NO
+ * auto-retry, bounded polling. Every response is Zod-validated; a returned enriched lead lacking an
+ * email/verification field throws a schema mismatch instead of guessing. Credits are PROVIDER-REPORTED
+ * (null when the provider reports none) — never silently defaulted. Network I/O only via injected fetch.
  */
 export class InstantlyContactEnrichmentProvider implements ContactEnrichmentProvider {
   readonly name = 'instantly';
@@ -64,74 +76,74 @@ export class InstantlyContactEnrichmentProvider implements ContactEnrichmentProv
     try {
       const res = await this.fetchImpl(`${this.deps.baseUrl}${path}`, {
         method,
-        headers: {
-          Authorization: `Bearer ${this.deps.apiKey}`,
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
-        },
+        headers: { Authorization: `Bearer ${this.deps.apiKey}`, 'Content-Type': 'application/json', Accept: 'application/json' },
         body: body === undefined ? undefined : JSON.stringify(body),
         signal: controller.signal,
       });
       const text = await res.text();
-      if (!res.ok) {
-        // Never echo the response body verbatim (may carry PII); code + status only.
-        throw new AppError(`INSTANTLY_HTTP_${String(res.status)}`, `Instantly ${method} ${path} failed (${String(res.status)}).`);
-      }
+      if (!res.ok) throw new AppError(`INSTANTLY_HTTP_${String(res.status)}`, `Instantly ${method} ${path} failed (${String(res.status)}).`);
       return text;
     } finally {
       clearTimeout(timer);
     }
   }
 
-  estimate(query: EnrichmentQuery): Promise<EnrichmentEstimate> {
-    // No documented pre-spend estimate endpoint; return a local projection (no network, no spend).
-    return Promise.resolve({ query, available: true, projectedCredits: 1, endpoint: INSTANTLY_ENDPOINTS.enrich });
-  }
-
-  async enrich(query: EnrichmentQuery): Promise<ProviderEnrichmentOutcome> {
-    // 1) Run the SuperSearch + work-email enrichment; get the generated list resource id.
-    const created = enrichResponseSchema.parse(JSON.parse(await this.request('POST', INSTANTLY_ENDPOINTS.enrich, buildEnrichLeadsRequestBody(query))));
+  /** Create an async SuperSearch resource from a request body and poll it to completion. */
+  private async createAndPoll(body: Record<string, unknown>): Promise<{ resourceId: string; credits: number | null }> {
+    const created = enrichResponseSchema.parse(JSON.parse(await this.request('POST', INSTANTLY_ENDPOINTS.enrich, body)));
     const resourceId = created.resource_id ?? created.id ?? null;
-    if (!resourceId) {
-      throw new AppError('INSTANTLY_NO_RESOURCE_ID', 'Instantly enrich-leads-from-supersearch returned no resource_id.');
-    }
-
-    // 2) Poll the enrichment job until it finishes (bounded).
-    let credits: number | null = null;
+    if (!resourceId) throw new AppError('INSTANTLY_NO_RESOURCE_ID', 'Instantly enrich-leads-from-supersearch returned no resource_id.');
+    let credits: number | null = readCredits(created);
     for (let attempt = 0; attempt < this.deps.pollMaxAttempts; attempt += 1) {
       const parsed = pollResponseSchema.parse(JSON.parse(await this.request('GET', INSTANTLY_ENDPOINTS.getEnrichment(resourceId))));
       credits = readCredits(parsed) ?? credits;
       if (parsed.in_progress !== true) break;
       if (attempt < this.deps.pollMaxAttempts - 1) await this.sleep(this.deps.pollIntervalMs);
     }
+    return { resourceId, credits };
+  }
 
-    // 3) Retrieve the enriched contact from the generated list.
+  async preview(domain: string): Promise<PreviewResult> {
+    const { resourceId, credits: pollCredits } = await this.createAndPoll(buildPreviewRequestBody(domain, this.deps.previewLimit));
+    const listText = await this.request('POST', INSTANTLY_ENDPOINTS.leadsList, buildPreviewLeadsListRequestBody(resourceId, this.deps.previewLimit));
+    const listParsed = leadsListResponseSchema.parse(JSON.parse(listText));
+    const people: PreviewPerson[] = leadsFrom(listParsed).map((row) => extractPreviewPerson(row));
+    return {
+      domain,
+      people,
+      creditsReported: readCredits(listParsed) ?? pollCredits,
+      resourceId,
+      endpoint: INSTANTLY_ENDPOINTS.enrich,
+      rawDigest: sha256(listText),
+    };
+  }
+
+  estimate(query: EnrichmentQuery): Promise<EnrichmentEstimate> {
+    return Promise.resolve({ query, available: true, projectedCredits: 1, endpoint: INSTANTLY_ENDPOINTS.enrich });
+  }
+
+  async enrich(query: EnrichmentQuery): Promise<ProviderEnrichmentOutcome> {
+    // Paid kill switch: enrichment spends a credit and must fail closed when disabled. Preview does not.
+    if (!this.deps.allowPaidEnrichment) {
+      throw new EnrichmentProviderNotAllowedError('Instantly enrichment requires ALLOW_PAID_ENRICHMENT_CALLS=true (paid enrichment is off).');
+    }
+    const { resourceId, credits: pollCredits } = await this.createAndPoll(buildEnrichLeadsRequestBody(query));
     const listText = await this.request('POST', INSTANTLY_ENDPOINTS.leadsList, buildLeadsListRequestBody(resourceId));
     const listParsed = leadsListResponseSchema.parse(JSON.parse(listText));
-    credits = readCredits(listParsed) ?? credits;
+    const creditsReported = readCredits(listParsed) ?? pollCredits;
     const rows = leadsFrom(listParsed);
-    // A work-email enrichment consumes at least one credit even when reporting is absent.
-    const creditsUsed = credits ?? 1;
 
     if (rows.length === 0) {
       return {
         query, email: null, returnedIdentity: null, verificationStatus: 'NOT_FOUND',
-        dataQuality: null, confidence: null, creditsUsed, resourceId, endpoint: INSTANTLY_ENDPOINTS.enrich, rawDigest: sha256(listText),
+        dataQuality: null, confidence: null, creditsReported, resourceId, endpoint: INSTANTLY_ENDPOINTS.enrich, rawDigest: sha256(listText),
       };
     }
     // extractLead THROWS on a lead missing email/verification -> the run stops (never guesses).
     const lead = extractLead(rows[0] as Record<string, unknown>);
     return {
-      query,
-      email: lead.email,
-      returnedIdentity: lead.identity,
-      verificationStatus: lead.verification,
-      dataQuality: lead.dataQuality,
-      confidence: lead.confidence,
-      creditsUsed,
-      resourceId,
-      endpoint: INSTANTLY_ENDPOINTS.enrich,
-      rawDigest: sha256(listText),
+      query, email: lead.email, returnedIdentity: lead.identity, verificationStatus: lead.verification,
+      dataQuality: lead.dataQuality, confidence: lead.confidence, creditsReported, resourceId, endpoint: INSTANTLY_ENDPOINTS.enrich, rawDigest: sha256(listText),
     };
   }
 }

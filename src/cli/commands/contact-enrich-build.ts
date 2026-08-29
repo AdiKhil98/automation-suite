@@ -1,24 +1,27 @@
+import { assertLiveCallsAllowed } from '../../config/live-call-guard.js';
 import { type ContactEnrichmentProvider, EnrichmentProviderNotAllowedError } from '../../domain/contact-enrichment/provider.js';
 import { InstantlyContactEnrichmentProvider } from '../../integrations/contact-enrichment/instantly-provider.js';
 import { MockContactEnrichmentProvider } from '../../integrations/contact-enrichment/mock-provider.js';
 import { type CliContext } from '../context.js';
 
 /**
- * Build the contact-enrichment provider. Paid (Instantly) construction is hard-gated: it requires
- * CONTACT_ENRICHMENT_PROVIDER=instantly AND CONTACT_ENRICHMENT_ENABLED=true AND
- * ALLOW_PAID_ENRICHMENT_CALLS=true AND INSTANTLY_API_KEY. Any missing piece throws HERE — before a
- * lead is touched and before any request could be made. The default (mock) never spends or calls out.
+ * Build the contact-enrichment provider. The live Instantly provider is hard-gated:
+ *  - Global DRY_RUN kill switch: DRY_RUN=true blocks ALL live network provider construction (even the
+ *    non-enriching preview) regardless of the paid flags.
+ *  - Live construction requires CONTACT_ENRICHMENT_PROVIDER=instantly + CONTACT_ENRICHMENT_ENABLED +
+ *    INSTANTLY_API_KEY. Preview needs no credits, so ALLOW_PAID_ENRICHMENT_CALLS is NOT required to
+ *    construct — it is enforced at the paid enrich() step (the provider fails closed without it).
+ * The default (mock) never spends or calls out.
  */
 export function buildContactEnrichmentProvider(ctx: CliContext): ContactEnrichmentProvider {
   const c = ctx.config;
   if (c.CONTACT_ENRICHMENT_PROVIDER !== 'instantly') {
     return new MockContactEnrichmentProvider();
   }
+  // Global dry-run kill switch — before any credential/flag check that could construct a network client.
+  assertLiveCallsAllowed(c.DRY_RUN, 'instantly-contact-enrichment');
   if (!c.CONTACT_ENRICHMENT_ENABLED) {
     throw new EnrichmentProviderNotAllowedError('CONTACT_ENRICHMENT_PROVIDER=instantly requires CONTACT_ENRICHMENT_ENABLED=true.');
-  }
-  if (!c.ALLOW_PAID_ENRICHMENT_CALLS) {
-    throw new EnrichmentProviderNotAllowedError('CONTACT_ENRICHMENT_PROVIDER=instantly requires ALLOW_PAID_ENRICHMENT_CALLS=true (paid-call kill switch is off).');
   }
   if (!c.INSTANTLY_API_KEY) {
     throw new EnrichmentProviderNotAllowedError('CONTACT_ENRICHMENT_PROVIDER=instantly requires INSTANTLY_API_KEY (read from env; never hard-coded).');
@@ -29,6 +32,9 @@ export function buildContactEnrichmentProvider(ctx: CliContext): ContactEnrichme
     timeoutMs: c.INSTANTLY_TIMEOUT_MS,
     pollMaxAttempts: c.INSTANTLY_POLL_MAX_ATTEMPTS,
     pollIntervalMs: c.INSTANTLY_POLL_INTERVAL_MS,
+    previewLimit: c.CONTACT_ENRICHMENT_PREVIEW_LIMIT,
+    // Paid enrichment gate: preview always allowed; enrich() fails closed unless this is true.
+    allowPaidEnrichment: c.ALLOW_PAID_ENRICHMENT_CALLS,
     logger: ctx.logger,
   });
 }

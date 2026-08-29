@@ -11,6 +11,7 @@ export interface ContactEnrichCliOptions {
   lead?: string;
   candidate?: string[];
   domain?: string;
+  preview?: boolean;
   confirm?: boolean;
   maxCredits?: string;
   maxRequests?: string;
@@ -61,42 +62,55 @@ export async function contactEnrichCommand(ctx: CliContext, opts: ContactEnrichC
   const providerName = c.CONTACT_ENRICHMENT_PROVIDER;
 
   // ---- PLAN / DRY-RUN (default): pure projection. No provider constructed, no network, no spend. ----
-  if (!opts.confirm) {
+  if (!opts.preview && !opts.confirm) {
     const inputHash = computeInputHash(providerName, domain, candidates);
-    // Dry-run must not depend on the enrichment table existing yet (migration 0039 may be unapplied).
     const existing = await repo.findByInputHash(leadId, providerName, inputHash).catch(() => null);
     console.log(`\n=== contact-enrich PLAN (dry-run — no spend) ===`);
     console.log(`  lead:            ${leadId}`);
     console.log(`  domain:          ${domain}`);
     console.log(`  provider:        ${providerName}`);
+    console.log(`  DRY_RUN:         ${String(c.DRY_RUN)}  (must be false for a live preview/enrich)`);
     console.log(`  paid gates:      CONTACT_ENRICHMENT_ENABLED=${String(c.CONTACT_ENRICHMENT_ENABLED)} ALLOW_PAID_ENRICHMENT_CALLS=${String(c.ALLOW_PAID_ENRICHMENT_CALLS)} key=${c.INSTANTLY_API_KEY ? 'set' : 'MISSING'}`);
-    console.log(`  caps:            maxRequests=${String(caps.maxRequests)} maxCredits=${String(caps.maxCredits)}`);
+    console.log(`  caps:            maxRequests=${String(caps.maxRequests)} maxCredits=${String(caps.maxCredits)} previewLimit=${String(c.CONTACT_ENRICHMENT_PREVIEW_LIMIT)}`);
     console.log(`  candidates (priority order):`);
     for (const p of candidates) console.log(`    ${String(p.priority)}. ${p.fullName} — ${p.title}  (${p.firstName} ${p.lastName})`);
     if (providerName === 'instantly') {
-      console.log(`  endpoints:       POST ${INSTANTLY_ENDPOINTS.enrich} → GET ${INSTANTLY_ENDPOINTS.enrich}/{resource_id} → POST ${INSTANTLY_ENDPOINTS.leadsList} {list_id}`);
-      console.log(`  required scopes: ${INSTANTLY_SCOPES.enrich} (enrich) / ${INSTANTLY_SCOPES.read} (poll) / ${INSTANTLY_SCOPES.leadsRead} (retrieve)`);
-      console.log(`  expected credits/verified lead: 1 work-email enrichment + verification (see canary).`);
+      console.log(`  flow:            [--preview] non-enriching search (0 credits) → local match → [--confirm] paid enrich of a matched person only`);
+      console.log(`  endpoints:       POST ${INSTANTLY_ENDPOINTS.enrich} → GET ${INSTANTLY_ENDPOINTS.enrich}/{resource_id} → POST ${INSTANTLY_ENDPOINTS.leadsList}`);
+      console.log(`  required scopes: ${INSTANTLY_SCOPES.enrich} + ${INSTANTLY_SCOPES.read} + ${INSTANTLY_SCOPES.leadsRead}`);
     }
-    console.log(`  idempotency:     ${existing ? `EXISTING ${existing.outcome} (re-run would NOT spend)` : 'none yet (a run would create one)'}`);
-    console.log(`\n  To execute (mock is safe; Instantly requires the paid gates above): add --confirm`);
+    console.log(`  idempotency:     ${existing ? `EXISTING ${existing.outcome} (re-run would NOT spend)` : 'none yet'}`);
+    console.log(`\n  --preview = live non-paid search + match (no credits). --confirm = full run (paid enrich of a match).`);
     return;
   }
 
-  // ---- RUN: build provider (Instantly hard-gated) and enrich. Mock returns NOT_FOUND (fail closed). ----
+  // ---- LIVE: build provider (Instantly hard-gated incl. DRY_RUN kill switch). ----
   const provider = buildContactEnrichmentProvider(ctx);
   const service = new ContactEnrichmentService({ provider, store: repo, logger: ctx.logger });
-  const result = await service.run(leadId, domain, candidates, caps);
+  // --preview => never enrich. --confirm => enrich only if the paid kill switch is on.
+  const performEnrichment = Boolean(opts.confirm) && c.ALLOW_PAID_ENRICHMENT_CALLS;
+  const result = await service.run(leadId, domain, candidates, caps, { performEnrichment });
 
-  console.log(`\n=== contact-enrich RESULT (provider=${result.provider}) ===`);
+  const prov = result.provenance as { previewPeopleCount?: number; matches?: Array<{ candidate: string; title: string; matchedTitle: string | null }> };
+  console.log(`\n=== contact-enrich ${opts.preview && !opts.confirm ? 'PREVIEW' : 'RESULT'} (provider=${result.provider}) ===`);
   console.log(`  lead:            ${result.leadId}`);
+  console.log(`  domain:          ${result.requestedDomain}`);
   console.log(`  outcome:         ${result.outcome}`);
-  console.log(`  credits used:    ${String(result.creditsUsed)}`);
+  console.log(`  credits:         estimated=${String(result.creditsEstimated)}  provider-reported=${result.creditsReported === null ? 'none reported' : String(result.creditsReported)}`);
+  console.log(`  domain coverage: ${String(prov.previewPeopleCount ?? 0)} people returned by preview/search`);
+  const matches = prov.matches ?? [];
+  console.log(`  matched people:  ${matches.length}`);
+  for (const m of matches) console.log(`    - ${m.candidate} (requested: ${m.title}; provider title: ${m.matchedTitle ?? '—'})`);
+  if (result.outcome === 'PREVIEW_MATCHED') {
+    console.log(`  paid enrichment: JUSTIFIED for the matched person(s) above — not performed (${opts.confirm ? 'ALLOW_PAID_ENRICHMENT_CALLS is off' : 'preview mode'}).`);
+  } else if (result.outcome === 'PREVIEW_NO_MATCH') {
+    console.log(`  paid enrichment: NOT justified — ${(prov.previewPeopleCount ?? 0) === 0 ? 'domain has no coverage in this provider' : 'no requested candidate matched'}. Do not spend; consider Hunter next.`);
+  }
   if (result.accepted) {
     console.log(`  decision-maker:  ${result.accepted.fullName} — ${result.accepted.title}`);
     console.log(`  email:           ${result.accepted.email}`);
     console.log(`  verification:    ${result.accepted.verificationStatus} (data quality: ${result.accepted.dataQuality ?? '-'}, confidence: ${result.accepted.confidence ?? '-'})`);
-  } else {
+  } else if (result.outcome === 'NOT_FOUND' || result.outcome === 'CAPPED' || result.outcome === 'ERROR') {
     console.log(`  decision-maker:  none accepted — fail closed (no generic/guessed fallback).`);
   }
 }

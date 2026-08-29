@@ -65,7 +65,8 @@ export function buildEnrichmentService(ctx: CliContext, opts: BuildEnrichmentOpt
       : NULL_PLACES_CLIENT;
     contextProvider = new GoogleContextProvider({
       client,
-      allowPaidReads: c.ALLOW_PAID_READS,
+      // Global DRY_RUN kill switch: under dry-run, paid Google reads are disabled even if ALLOW_PAID_READS=true.
+      allowPaidReads: c.ALLOW_PAID_READS && !c.DRY_RUN,
       budget,
       logger: ctx.logger,
       detailsStore: new DrizzleGooglePlaceDetailsStore(ctx.db),

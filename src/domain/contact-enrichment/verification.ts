@@ -1,5 +1,5 @@
 import { normalizeContactEmail } from '../lead-facts/contact-email.js';
-import { type ProviderEnrichmentOutcome, type ReturnedIdentity, type VerifiedContact, type CandidatePerson } from './types.js';
+import { type ProviderEnrichmentOutcome, type ReturnedIdentity, type VerifiedContact, type CandidatePerson, type PreviewPerson } from './types.js';
 
 /**
  * Deterministic accept/reject for a single provider outcome. This is the trust boundary: an email
@@ -37,6 +37,27 @@ export function isGenericMailbox(email: string): boolean {
   if (GENERIC_LOCAL_PARTS.has(local)) return true;
   const base = local.split(/[+._-]/)[0] ?? local;
   return GENERIC_LOCAL_PARTS.has(base);
+}
+
+export interface PreviewMatch {
+  name: boolean;
+  domain: boolean;
+  title: 'match' | 'mismatch' | 'unconfirmed';
+  isMatch: boolean;
+}
+
+/**
+ * Local match of a previewed person (no email yet) against a requested candidate. Name must match and
+ * the title must not conflict; domain must match when the preview row carries one (the search is
+ * domain-scoped, so a missing preview domain is accepted). Used to decide whether a PAID enrichment
+ * is justified — it never accepts an email on its own.
+ */
+export function matchPreviewPerson(person: PreviewPerson, candidate: CandidatePerson, requestedDomain: string): PreviewMatch {
+  const name = nameMatches(person, candidate);
+  const want = stripWww(norm(requestedDomain));
+  const domain = person.domain ? stripWww(norm(person.domain)) === want : true;
+  const title = titleMatch(person, candidate);
+  return { name, domain, title, isMatch: name && domain && title !== 'mismatch' };
 }
 
 /** Name matches when both first and last (honorific-free) tokens agree. */
