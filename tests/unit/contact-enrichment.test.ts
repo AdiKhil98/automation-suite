@@ -18,7 +18,7 @@ import {
 import { decideAcceptance, isGenericMailbox, matchPreviewPerson } from '../../src/domain/contact-enrichment/verification.js';
 import { MockContactEnrichmentProvider, type MockEnrichmentResponder, type MockPreviewResponder } from '../../src/integrations/contact-enrichment/mock-provider.js';
 import { InstantlyContactEnrichmentProvider, type FetchLike } from '../../src/integrations/contact-enrichment/instantly-provider.js';
-import { buildEnrichLeadsRequestBody, buildPreviewRequestBody, normalizeInstantlyVerification } from '../../src/integrations/contact-enrichment/instantly-schema.js';
+import { buildEnrichLeadsRequestBody, buildPreviewLeadsFromSupersearchRequestBody, normalizeInstantlyVerification } from '../../src/integrations/contact-enrichment/instantly-schema.js';
 import { buildContactEnrichmentProvider } from '../../src/cli/commands/contact-enrich-build.js';
 
 const logger = { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} } as unknown as Logger;
@@ -229,18 +229,77 @@ describe('Instantly provider — preview + enrich sequences (fake transport)', (
   }
   const q: EnrichmentQuery = { domain: DOMAIN, fullName: 'Shyam Shastri', firstName: 'Shyam', lastName: 'Shastri', title: 'Principal Dentist' };
 
-  it('preview: non-enriching search returns people (no email), sends domain-only filter', async () => {
+  it('preview: calls exactly /preview-leads-from-supersearch, ONE request, never the enrich job endpoint', async () => {
     const { fetchImpl, calls } = fakeFetch([
-      { body: { resource_id: 'list_p' } },
-      { body: { in_progress: false } },
-      { body: { items: [{ name: 'Shyam Shastri', first_name: 'Shyam', last_name: 'Shastri', company_domain: DOMAIN, title: 'Principal Dentist' }] } },
+      { body: { number_of_leads: 1, number_of_redacted_results: 0, leads: [{ firstName: 'Shyam', lastName: 'Shastri', fullName: 'Shyam Shastri', jobTitle: 'Principal Dentist', companyName: 'Diamond Smile' }] } },
     ]);
     const r = await provider(fetchImpl).preview(DOMAIN);
+    expect(calls).toHaveLength(1); // synchronous — no poll, no leads/list
+    expect(calls[0].url).toContain('/supersearch-enrichment/preview-leads-from-supersearch');
+    for (const call of calls) expect(call.url).not.toContain('/enrich-leads-from-supersearch');
     expect(r.people).toHaveLength(1);
-    expect(r.people[0]).toMatchObject({ firstName: 'Shyam', lastName: 'Shastri', domain: DOMAIN, title: 'Principal Dentist' });
-    expect(JSON.parse(calls[0].body ?? '{}')).toMatchObject({ work_email_enrichment: false, search_filters: { domains: [DOMAIN] } });
-    expect(JSON.parse(calls[0].body ?? '{}').search_filters.name).toBeUndefined();
+    expect(r.people[0]).toMatchObject({ firstName: 'Shyam', lastName: 'Shastri', title: 'Principal Dentist' });
     for (const call of calls) expect(call.headers.Authorization).toBe('Bearer secret-key-123');
+  });
+  it('preview request is domain-first: no title filter, work_email_enrichment not enabled', async () => {
+    const { fetchImpl, calls } = fakeFetch([{ body: { number_of_leads: 0, number_of_redacted_results: 0, leads: [] } }]);
+    await provider(fetchImpl).preview(DOMAIN);
+    const body = JSON.parse(calls[0].body ?? '{}') as Record<string, unknown>;
+    expect(body).toMatchObject({ search_filters: { domains: [DOMAIN] } });
+    expect((body['search_filters'] as Record<string, unknown>)['title']).toBeUndefined();
+    expect((body['search_filters'] as Record<string, unknown>)['name']).toBeUndefined();
+    expect(body['work_email_enrichment']).not.toBe(true);
+  });
+  it('parses the official preview response shape (number_of_leads/number_of_redacted_results/leads[])', async () => {
+    const { fetchImpl } = fakeFetch([{
+      body: {
+        number_of_leads: 2, number_of_redacted_results: 1,
+        leads: [
+          { firstName: 'Shyam', lastName: 'Shastri', fullName: 'Shyam Shastri', jobTitle: 'Principal Dentist', companyName: 'Diamond Smile' },
+          { firstName: 'Someone', lastName: 'Else', fullName: 'Someone Else', jobTitle: 'Receptionist', companyName: 'Diamond Smile' },
+        ],
+      },
+    }]);
+    const r = await provider(fetchImpl).preview(DOMAIN);
+    expect(r.people).toHaveLength(2);
+    expect(r.people[0]).toMatchObject({ firstName: 'Shyam', lastName: 'Shastri', name: 'Shyam Shastri', title: 'Principal Dentist' });
+    expect(r.creditsReported).toBeNull(); // this response shape carries no credits field
+  });
+  it('zero-result preview → empty people (service layer turns this into PREVIEW_NO_MATCH)', async () => {
+    const { fetchImpl } = fakeFetch([{ body: { number_of_leads: 0, number_of_redacted_results: 0, leads: [] } }]);
+    const r = await provider(fetchImpl).preview(DOMAIN);
+    expect(r.people).toHaveLength(0);
+  });
+  it('domain preview results are locally matched to the requested candidates by name/title', async () => {
+    const { fetchImpl } = fakeFetch([{
+      body: {
+        number_of_leads: 3, number_of_redacted_results: 0,
+        leads: [
+          { firstName: 'Shyam', lastName: 'Shastri', fullName: 'Shyam Shastri', jobTitle: 'Principal Dentist', companyName: 'Diamond Smile' },
+          { firstName: 'Shaimil', lastName: 'Patel', fullName: 'Shaimil Patel', jobTitle: 'Clinical Director', companyName: 'Diamond Smile' },
+          { firstName: 'Someone', lastName: 'Else', fullName: 'Someone Else', jobTitle: 'Front Desk', companyName: 'Diamond Smile' },
+        ],
+      },
+    }]);
+    const r = await provider(fetchImpl).preview(DOMAIN);
+    const matchFor = (candidateName: string) => {
+      const candidate = CANDIDATES.find((c) => c.fullName === candidateName)!;
+      return r.people.find((p) => matchPreviewPerson(p, candidate, DOMAIN).isMatch);
+    };
+    expect(matchFor('Shyam Shastri')).toBeTruthy();
+    expect(matchFor('Shaimil Patel')).toBeTruthy();
+    expect(matchFor('Kymya Doyley')).toBeUndefined(); // not present in this preview response
+  });
+  it('service: real Instantly provider — same PREVIEW is idempotent (zero additional network calls)', async () => {
+    const { fetchImpl, calls } = fakeFetch([{
+      body: { number_of_leads: 1, number_of_redacted_results: 0, leads: [{ firstName: 'Shyam', lastName: 'Shastri', fullName: 'Shyam Shastri', jobTitle: 'Principal Dentist', companyName: 'Diamond Smile' }] },
+    }]);
+    const store = new MemStore();
+    const service = new ContactEnrichmentService({ provider: provider(fetchImpl), store, logger });
+    const r1 = await service.run('l', DOMAIN, CANDIDATES, caps, PREVIEW_ONLY);
+    const r2 = await service.run('l', DOMAIN, CANDIDATES, caps, PREVIEW_ONLY);
+    expect(r2.id).toBe(r1.id);
+    expect(calls).toHaveLength(1); // second run was an idempotent hit — no additional HTTP call
   });
   it('enrich: 3-step, verified email + identity; fails closed if paid disabled', async () => {
     const seq = [
@@ -267,7 +326,7 @@ describe('Instantly provider — preview + enrich sequences (fake transport)', (
   it('maps verification vocabulary + builds request bodies', () => {
     const cases: Array<[string | null, EnrichmentVerificationStatus]> = [['valid', 'VERIFIED'], ['catch_all', 'CATCH_ALL'], ['risky', 'RISKY'], ['invalid', 'INVALID'], ['', 'NOT_FOUND']];
     for (const [raw, exp] of cases) expect(normalizeInstantlyVerification(raw)).toBe(exp);
-    expect(buildPreviewRequestBody(DOMAIN, 25)).toMatchObject({ work_email_enrichment: false, limit: 25, search_filters: { domains: [DOMAIN] } });
+    expect(buildPreviewLeadsFromSupersearchRequestBody(DOMAIN, 25)).toEqual({ limit: 25, search_filters: { domains: [DOMAIN] } });
     expect((buildEnrichLeadsRequestBody(q) as { search_filters: { name: string[] } }).search_filters.name).toEqual(['Shyam Shastri']);
   });
 });

@@ -13,14 +13,14 @@ import {
   INSTANTLY_ENDPOINTS,
   buildEnrichLeadsRequestBody,
   buildLeadsListRequestBody,
-  buildPreviewLeadsListRequestBody,
-  buildPreviewRequestBody,
+  buildPreviewLeadsFromSupersearchRequestBody,
   enrichResponseSchema,
   extractLead,
   extractPreviewPerson,
   leadsFrom,
   leadsListResponseSchema,
   pollResponseSchema,
+  previewLeadsResponseSchema,
 } from './instantly-schema.js';
 
 export type FetchLike = typeof fetch;
@@ -50,15 +50,18 @@ const readCredits = (o: Record<string, unknown>): number | null => {
 };
 
 /**
- * Instantly API v2 SuperSearch provider. Two operations:
- *  - preview(domain): NON-ENRICHING search (work_email_enrichment=false) -> people at the domain, no
- *    email revealed, no enrichment credit. Used to confirm coverage + identity before any spend.
- *  - enrich(query): PAID work-email enrichment for one known person (gated by allowPaidEnrichment).
+ * Instantly API v2 SuperSearch provider. Two operations, two DISTINCT endpoints — never mixed:
+ *  - preview(domain): the dedicated, synchronous, NON-ENRICHING preview-leads-from-supersearch
+ *    endpoint -> people at the domain, no email revealed, no enrichment credit, no job/poll. Domain-
+ *    first query (no title filter); identity + title matching happens locally.
+ *  - enrich(query): the async enrich-leads-from-supersearch job (create -> poll -> leads/list), PAID
+ *    work-email enrichment for one known person (gated by allowPaidEnrichment).
  *
  * Isolated HTTP surface: Bearer auth (key only in the header, never logged), per-request timeout, NO
- * auto-retry, bounded polling. Every response is Zod-validated; a returned enriched lead lacking an
- * email/verification field throws a schema mismatch instead of guessing. Credits are PROVIDER-REPORTED
- * (null when the provider reports none) — never silently defaulted. Network I/O only via injected fetch.
+ * auto-retry, bounded polling (enrich only). Every response is Zod-validated; a returned enriched lead
+ * lacking an email/verification field throws a schema mismatch instead of guessing. Credits are
+ * PROVIDER-REPORTED (null when the provider reports none) — never silently defaulted. Network I/O only
+ * via injected fetch.
  */
 export class InstantlyContactEnrichmentProvider implements ContactEnrichmentProvider {
   readonly name = 'instantly';
@@ -104,17 +107,17 @@ export class InstantlyContactEnrichmentProvider implements ContactEnrichmentProv
   }
 
   async preview(domain: string): Promise<PreviewResult> {
-    const { resourceId, credits: pollCredits } = await this.createAndPoll(buildPreviewRequestBody(domain, this.deps.previewLimit));
-    const listText = await this.request('POST', INSTANTLY_ENDPOINTS.leadsList, buildPreviewLeadsListRequestBody(resourceId, this.deps.previewLimit));
-    const listParsed = leadsListResponseSchema.parse(JSON.parse(listText));
-    const people: PreviewPerson[] = leadsFrom(listParsed).map((row) => extractPreviewPerson(row));
+    const text = await this.request('POST', INSTANTLY_ENDPOINTS.previewLeads, buildPreviewLeadsFromSupersearchRequestBody(domain, this.deps.previewLimit));
+    const parsed = previewLeadsResponseSchema.parse(JSON.parse(text));
+    const people: PreviewPerson[] = (parsed.leads ?? []).map((row) => extractPreviewPerson(row));
     return {
       domain,
       people,
-      creditsReported: readCredits(listParsed) ?? pollCredits,
-      resourceId,
-      endpoint: INSTANTLY_ENDPOINTS.enrich,
-      rawDigest: sha256(listText),
+      // No credits field in this response shape — null unless the provider explicitly reports one.
+      creditsReported: readCredits(parsed),
+      resourceId: null,
+      endpoint: INSTANTLY_ENDPOINTS.previewLeads,
+      rawDigest: sha256(text),
     };
   }
 
