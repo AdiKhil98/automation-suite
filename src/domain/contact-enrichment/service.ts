@@ -234,12 +234,11 @@ export class ContactEnrichmentService {
     // only for a provider that implements this capability at all.
     let domainSearchProvenance: Record<string, unknown> | undefined;
     if (!accepted && !errored && !capped && this.deps.provider.domainSearch) {
-      // Gated by the CREDITS cap only, not the request cap: the per-candidate loop above already
-      // consumes one "request" per known candidate (so with N candidates and maxRequests=N — the
-      // common default — requestsUsed is exactly at the request cap by the time every candidate has
-      // been tried), but this is a single domain-wide lookup, not another per-person attempt, so it
-      // is not itself a "request" in that same budget.
-      if (creditsEstimated + Math.max(1, caps.minCreditsPerLookup) > caps.maxCredits) {
+      // Gated by BOTH caps, same as every other HTTP call this run makes: the request cap counts this
+      // as one more actual HTTP call (so reaching it requires sizing maxRequests for candidates + 1,
+      // e.g. 3 known candidates + 1 domain-wide call = maxRequests >= 4), and the credit cap still
+      // applies to its own estimated spend on top of whatever the per-candidate loop already used.
+      if (requestsUsed >= caps.maxRequests || creditsEstimated + Math.max(1, caps.minCreditsPerLookup) > caps.maxCredits) {
         capped = true;
       } else {
         try {

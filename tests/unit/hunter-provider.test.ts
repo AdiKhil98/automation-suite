@@ -8,6 +8,7 @@ import {
   buildEmailFinderParams,
   buildEmailVerifierParams,
   classifyDomainSearchEmail,
+  estimateDomainSearchCredits,
   extractDomainSearchPeople,
   hunterDomainSearchResponseSchema,
   normalizeHunterVerification,
@@ -15,6 +16,9 @@ import {
 
 const logger = { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} } as unknown as Logger;
 const caps: EnrichmentRunCaps = { maxRequests: 3, maxCredits: 3, minCreditsPerLookup: 1 };
+// 3 known candidates -> 3 Finder requests; Domain Search is a 4th HTTP call, so maxRequests must
+// leave room for it (this mirrors the real recommended canary caps: MAX_REQUESTS=4).
+const dsCaps: EnrichmentRunCaps = { maxRequests: 4, maxCredits: 3, minCreditsPerLookup: 1 };
 const DOMAIN = 'diamond-smile.com';
 
 function person(name: string, title: string, priority: number): CandidatePerson {
@@ -296,12 +300,14 @@ describe('Hunter as fallback provider #2 — full pipeline via ContactEnrichment
       },
     });
     const service = new ContactEnrichmentService({ provider: provider(fetchImpl), store: new MemStore(), logger });
-    const r = await service.run('l', DOMAIN, CANDIDATES, caps, { performEnrichment: true });
+    const r = await service.run('l', DOMAIN, CANDIDATES, dsCaps, { performEnrichment: true });
     expect(r.outcome).toBe('VERIFIED');
     expect(r.accepted?.fullName).toBe('Shaimil Patel');
     expect(r.accepted?.email).toBe(`shaimil@${DOMAIN}`);
     const dsProv = (r.provenance as { domainSearch?: { peopleCount?: number } }).domainSearch;
     expect(dsProv?.peopleCount).toBe(1);
+    // 3 Finder NOT_FOUND (0 credit each) + Domain Search returning 1 email (1-10 tier -> 1 credit).
+    expect(r.creditsEstimated).toBe(1);
   });
 
   it('unrelated-person rejection: Domain Search returns only people who match none of our candidates -> stays NOT_FOUND, still only ONE Domain Search call', async () => {
@@ -315,7 +321,7 @@ describe('Hunter as fallback provider #2 — full pipeline via ContactEnrichment
       },
     });
     const service = new ContactEnrichmentService({ provider: provider(fetchImpl), store: new MemStore(), logger });
-    const r = await service.run('l', DOMAIN, CANDIDATES, caps, { performEnrichment: true });
+    const r = await service.run('l', DOMAIN, CANDIDATES, dsCaps, { performEnrichment: true });
     expect(r.outcome).toBe('NOT_FOUND');
     expect(r.accepted).toBeNull();
   });
@@ -332,20 +338,79 @@ describe('Hunter as fallback provider #2 — full pipeline via ContactEnrichment
       },
     });
     const service = new ContactEnrichmentService({ provider: provider(fetchImpl), store: new MemStore(), logger });
-    const r = await service.run('l', DOMAIN, CANDIDATES, caps, { performEnrichment: true });
+    const r = await service.run('l', DOMAIN, CANDIDATES, dsCaps, { performEnrichment: true });
     expect(r.outcome).toBe('NOT_FOUND');
     expect(r.accepted).toBeNull();
     const dsProv = (r.provenance as { domainSearch?: { attempts?: Array<{ reason?: string }> } }).domainSearch;
     expect(dsProv?.attempts?.some((a) => a.reason === 'generic_mailbox_rejected')).toBe(true);
   });
 
-  it('no-result fail-closed: Domain Search returns zero emails -> NOT_FOUND, zero extra credit, no crash', async () => {
+  it('Domain Search empty result -> 0 estimated credits (no-result fail-closed, no crash)', async () => {
     const fetchImpl = allFinderMiss({ url: '/domain-search', body: { data: { domain: DOMAIN, accept_all: false, emails: [] } } });
     const service = new ContactEnrichmentService({ provider: provider(fetchImpl), store: new MemStore(), logger });
-    const r = await service.run('l', DOMAIN, CANDIDATES, caps, { performEnrichment: true });
+    const r = await service.run('l', DOMAIN, CANDIDATES, dsCaps, { performEnrichment: true });
     expect(r.outcome).toBe('NOT_FOUND');
     // 3 Finder misses (0 credit each) + Domain Search with 0 results (0 credit) = 0 total.
     expect(r.creditsEstimated).toBe(0);
+  });
+
+  it('Domain Search returning 1-10 emails -> 1 estimated credit (Hunter pricing tier)', async () => {
+    const fetchImpl = allFinderMiss({
+      url: '/domain-search',
+      body: {
+        data: {
+          domain: DOMAIN, accept_all: false,
+          emails: [
+            { value: `a1@${DOMAIN}`, type: 'generic' },
+            { value: `a2@${DOMAIN}`, type: 'generic' },
+            { value: `a3@${DOMAIN}`, type: 'generic' },
+          ],
+        },
+      },
+    });
+    const service = new ContactEnrichmentService({ provider: provider(fetchImpl), store: new MemStore(), logger });
+    const r = await service.run('l', DOMAIN, CANDIDATES, dsCaps, { performEnrichment: true });
+    expect(r.outcome).toBe('NOT_FOUND'); // none of these are personal-typed / match a candidate
+    expect(r.creditsEstimated).toBe(1); // 3 emails returned -> still within the 1-10 tier -> 1 credit
+  });
+
+  it('estimateDomainSearchCredits: 0 for no results, 1 for the 1-10 tier, 2 once past 10', () => {
+    expect(estimateDomainSearchCredits(0)).toBe(0);
+    expect(estimateDomainSearchCredits(1)).toBe(1);
+    expect(estimateDomainSearchCredits(10)).toBe(1);
+    expect(estimateDomainSearchCredits(11)).toBe(2);
+  });
+
+  it('Domain Search still executes under a 2-credit cap when the 3 Finder attempts spent 0 credits', async () => {
+    const twoCreditCaps: EnrichmentRunCaps = { maxRequests: 4, maxCredits: 2, minCreditsPerLookup: 1 };
+    let domainSearchCalled = false;
+    const fetchImpl = ((url: string) => {
+      if (url.includes('/email-finder')) return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(JSON.stringify({ data: { email: null } })) } as unknown as Response);
+      if (url.includes('/domain-search')) {
+        domainSearchCalled = true;
+        return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(JSON.stringify({ data: { domain: DOMAIN, accept_all: false, emails: [] } })) } as unknown as Response);
+      }
+      throw new Error(`unexpected Hunter call: ${url}`);
+    }) as unknown as FetchLike;
+    const service = new ContactEnrichmentService({ provider: provider(fetchImpl), store: new MemStore(), logger });
+    const r = await service.run('l', DOMAIN, CANDIDATES, twoCreditCaps, { performEnrichment: true });
+    expect(domainSearchCalled).toBe(true);
+    expect(r.outcome).toBe('NOT_FOUND'); // reached and completed Domain Search, found nothing — not capped
+  });
+
+  it('3 Finder NOT_FOUND calls consume exactly 3 requests / 0 estimated credits, and the request cap stops before Domain Search when fewer than 4 HTTP requests are allowed', async () => {
+    let domainSearchCalled = false;
+    const fetchImpl = ((url: string) => {
+      if (url.includes('/email-finder')) return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(JSON.stringify({ data: { email: null } })) } as unknown as Response);
+      if (url.includes('/domain-search')) { domainSearchCalled = true; }
+      throw new Error(`unexpected Hunter call: ${url}`);
+    }) as unknown as FetchLike;
+    const service = new ContactEnrichmentService({ provider: provider(fetchImpl), store: new MemStore(), logger });
+    const r = await service.run('l', DOMAIN, CANDIDATES, caps, { performEnrichment: true }); // caps.maxRequests = 3
+    expect(r.outcome).toBe('CAPPED'); // blocked at the Domain Search request gate, not any Finder failure
+    expect(r.creditsEstimated).toBe(0); // all 3 Finder attempts were NOT_FOUND (0 credit each)
+    expect(domainSearchCalled).toBe(false);
+    expect((r.provenance as { requestsUsed?: number }).requestsUsed).toBe(3);
   });
 
   it('idempotency: repeating the exact same ENRICH run does not call Domain Search (or Finder) again', async () => {
@@ -360,8 +425,8 @@ describe('Hunter as fallback provider #2 — full pipeline via ContactEnrichment
     }) as unknown as FetchLike;
     const store = new MemStore();
     const service = new ContactEnrichmentService({ provider: provider(fetchImpl), store, logger });
-    const r1 = await service.run('l', DOMAIN, CANDIDATES, caps, { performEnrichment: true });
-    const r2 = await service.run('l', DOMAIN, CANDIDATES, caps, { performEnrichment: true });
+    const r1 = await service.run('l', DOMAIN, CANDIDATES, dsCaps, { performEnrichment: true });
+    const r2 = await service.run('l', DOMAIN, CANDIDATES, dsCaps, { performEnrichment: true });
     expect(r2.id).toBe(r1.id);
     expect(domainSearchCalls).toBe(1); // only the first run actually reached Domain Search
   });
@@ -370,7 +435,7 @@ describe('Hunter as fallback provider #2 — full pipeline via ContactEnrichment
     const store = new MemStore();
     const staleFetch = allFinderMiss({ url: '/domain-search', body: { data: { domain: DOMAIN, accept_all: false, emails: [] } } });
     const staleService = new ContactEnrichmentService({ provider: provider(staleFetch), store, logger });
-    const stale = await staleService.run('l', DOMAIN, CANDIDATES, caps, { performEnrichment: true });
+    const stale = await staleService.run('l', DOMAIN, CANDIDATES, dsCaps, { performEnrichment: true });
     expect(stale.outcome).toBe('NOT_FOUND');
 
     let domainSearchCalls = 0;
@@ -385,7 +450,7 @@ describe('Hunter as fallback provider #2 — full pipeline via ContactEnrichment
       throw new Error(`unexpected Hunter call: ${url}`);
     }) as unknown as FetchLike;
     const freshService = new ContactEnrichmentService({ provider: provider(freshFetch), store, logger });
-    const fresh = await freshService.run('l', DOMAIN, CANDIDATES, caps, { performEnrichment: true, forceRefresh: true });
+    const fresh = await freshService.run('l', DOMAIN, CANDIDATES, dsCaps, { performEnrichment: true, forceRefresh: true });
     expect(fresh.outcome).toBe('VERIFIED');
     expect(fresh.accepted?.email).toBe(`shaimil@${DOMAIN}`);
     expect(domainSearchCalls).toBe(1);

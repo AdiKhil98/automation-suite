@@ -17,6 +17,7 @@ import {
   buildEmailFinderParams,
   buildEmailVerifierParams,
   classifyFinderVerification,
+  estimateDomainSearchCredits,
   extractDomainSearchPeople,
   extractFinderResult,
   hunterDomainSearchResponseSchema,
@@ -183,8 +184,8 @@ export class HunterContactEnrichmentProvider implements ContactEnrichmentProvide
       domain,
       people,
       creditsReported: null,
-      // Hunter counts a query toward billing only when it returns at least one result.
-      creditsUsed: people.length > 0 ? 1 : 0,
+      // Hunter's pricing model: roughly 1 search credit per 1–10 emails returned, 0 on an empty result.
+      creditsUsed: estimateDomainSearchCredits(people.length),
       endpoint: HUNTER_ENDPOINTS.domainSearch,
       rawDigest: sha256(text),
     };

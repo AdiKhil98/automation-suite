@@ -242,6 +242,15 @@ export function classifyDomainSearchEmail(domainAcceptAll: boolean | null, email
   return 'UNKNOWN';
 }
 
+/**
+ * Estimate Domain Search's credit cost per Hunter's own pricing model: roughly 1 search credit per
+ * 1–10 emails returned (0 when the call returns nothing). Never treated as provider-reported truth —
+ * Hunter's response carries no credit-count field, so this stays an internal estimate only.
+ */
+export function estimateDomainSearchCredits(resultCount: number): number {
+  return resultCount <= 0 ? 0 : Math.ceil(resultCount / 10);
+}
+
 /** Extract the domain-search people, already fully verification-normalized (see classifyDomainSearchEmail). */
 export function extractDomainSearchPeople(parsed: HunterDomainSearchResponse, domain: string): DomainSearchPerson[] {
   const d = (parsed.data ?? {}) as Record<string, unknown>;
