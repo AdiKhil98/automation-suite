@@ -199,8 +199,11 @@ export class ContactEnrichmentService {
         this.deps.logger.error({ leadId, person: person.fullName }, 'contact-enrichment: enrich error (no retry)');
         break;
       }
-      requestsUsed += 1;
-      creditsEstimated += 1;
+      // Providers report actual operation/credit counts (e.g. Hunter: 1 for Finder alone, 2 when a
+      // secondary Verifier call was genuinely needed); default to 1 for a provider that is always a
+      // single logical operation per attempt.
+      requestsUsed += outcome.requestsUsed ?? 1;
+      creditsEstimated += outcome.creditsUsed ?? 1;
       addReported(outcome.creditsReported);
       endpoint = outcome.endpoint;
       if (outcome.resourceId) resourceId = outcome.resourceId;

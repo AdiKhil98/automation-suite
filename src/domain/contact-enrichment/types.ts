@@ -77,6 +77,20 @@ export interface ProviderEnrichmentOutcome {
   endpoint: string;
   /** SHA-256 of the raw provider response body (no PII/secret retained verbatim). */
   rawDigest: string;
+  /**
+   * Actual HTTP/provider operations this ONE enrich() call performed (e.g. 1 for a single round-trip,
+   * 2 when a provider needed a secondary confirmation call). The service's request cap counts this
+   * instead of assuming exactly one operation per attempt. Omit (defaults to 1) for a provider whose
+   * enrich() is always a single logical operation.
+   */
+  requestsUsed?: number;
+  /**
+   * Our internal ESTIMATE of credits this ONE enrich() call spent (e.g. 0 when nothing was found and
+   * the provider doesn't charge for a miss, 2 when two separate credit-charging calls were made).
+   * Distinct from `creditsReported` (provider-declared truth). Omit (defaults to 1) for a provider that
+   * always spends exactly one estimated credit per attempt.
+   */
+  creditsUsed?: number;
 }
 
 /** Pre-spend availability estimate for one query (plan/dry-run; never charges). */

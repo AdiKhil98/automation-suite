@@ -5,11 +5,17 @@ import { type EnrichmentQuery, type EnrichmentVerificationStatus, type ReturnedI
  * Hunter API v2 — Email Finder + Email Verifier contract (fallback provider #2, used only after
  * Instantly preview/enrich have been tried). Verified against the current official docs:
  *
- *   1. GET /v2/email-finder    { domain, first_name, last_name } -> { data: { email, score, ... } }
- *      Free when no email is found; charges one credit only on a successful match.
- *   2. GET /v2/email-verifier  { email }                          -> { status, result, accept_all, ... }
- *      Called independently for whatever email Finder returned, before it is ever accepted. Always
- *      charges when it returns a result.
+ *   1. GET /v2/email-finder    { domain, first_name, last_name }
+ *      -> { data: { email, score, accept_all, verification: { status: valid|accept_all|unknown }, ... } }
+ *      Free when no email is found; charges one credit only when an email is returned. The returned
+ *      `verification` is ALREADY INCLUDED in that same credit — Finder's own bundled verification is
+ *      the primary signal, not a separate step.
+ *   2. GET /v2/email-verifier  { email }  -> { status, result, accept_all, block, disposable, ... }
+ *      A SEPARATE credit-charging call, made ONLY when Finder's own verification is genuinely
+ *      ambiguous/stale (its `verification.status` is `unknown`, or missing) — never automatically
+ *      after every successful Finder match. When Finder's own verification is unambiguous (`valid`
+ *      with accept_all=false, or `accept_all`), that signal is trusted directly and Verifier is
+ *      skipped, saving the extra credit.
  *
  * The two calls are never mixed with a third "preview" endpoint: Hunter has no free domain-wide
  * search in this integration, so HunterContactEnrichmentProvider.preview() is a zero-network echo of
@@ -51,6 +57,11 @@ export const hunterFinderResponseSchema = z
         position: z.string().nullable().optional(),
         company: z.string().nullable().optional(),
         accept_all: z.boolean().nullable().optional(),
+        verification: z
+          .object({ status: z.string().nullable().optional(), date: z.string().nullable().optional() })
+          .passthrough()
+          .nullable()
+          .optional(),
       })
       .passthrough()
       .optional(),
@@ -130,11 +141,15 @@ export interface ExtractedFinderResult {
   email: string | null;
   identity: ReturnedIdentity;
   finderScore: number | null;
+  /** Finder's OWN bundled verification status, already included in the Finder credit: valid|accept_all|unknown (or null if absent). */
+  finderVerificationStatus: string | null;
+  acceptAll: boolean | null;
 }
 
-/** Extract the candidate email + returned identity from ONE Finder response (never throws — a miss is a normal, free outcome). */
+/** Extract the candidate email + returned identity + Finder's bundled verification from ONE Finder response (never throws — a miss is a normal, free outcome). */
 export function extractFinderResult(parsed: HunterFinderResponse): ExtractedFinderResult {
   const d = (parsed.data ?? {}) as Record<string, unknown>;
+  const verification = (d['verification'] && typeof d['verification'] === 'object') ? (d['verification'] as Record<string, unknown>) : {};
   return {
     email: str(d['email']),
     identity: {
@@ -145,5 +160,25 @@ export function extractFinderResult(parsed: HunterFinderResponse): ExtractedFind
       title: str(d['position']),
     },
     finderScore: numv(d['score']),
+    finderVerificationStatus: str(verification['status']),
+    acceptAll: boolv(d['accept_all']),
   };
+}
+
+export type FinderVerificationDecision =
+  | { kind: 'accepted'; status: 'VERIFIED' }
+  | { kind: 'rejected'; status: 'CATCH_ALL' }
+  | { kind: 'ambiguous' };
+
+/**
+ * Decide whether Finder's OWN bundled verification is clear enough to trust directly (no extra
+ * Verifier credit), or is genuinely ambiguous/stale and needs a fresh Email Verifier call. Finder's
+ * verification vocabulary is coarser than Verifier's (only valid|accept_all|unknown), so `unknown` or
+ * a missing verification object is the ONLY case that triggers the extra call — fail-closed by
+ * routing anything not unambiguously good or unambiguously bad through the dedicated Verifier.
+ */
+export function classifyFinderVerification(f: Pick<ExtractedFinderResult, 'finderVerificationStatus' | 'acceptAll'>): FinderVerificationDecision {
+  if (f.acceptAll === true || f.finderVerificationStatus === 'accept_all') return { kind: 'rejected', status: 'CATCH_ALL' };
+  if (f.finderVerificationStatus === 'valid' && f.acceptAll === false) return { kind: 'accepted', status: 'VERIFIED' };
+  return { kind: 'ambiguous' };
 }

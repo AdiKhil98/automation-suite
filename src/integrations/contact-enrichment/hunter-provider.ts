@@ -14,6 +14,7 @@ import {
   HUNTER_ENDPOINTS,
   buildEmailFinderParams,
   buildEmailVerifierParams,
+  classifyFinderVerification,
   extractFinderResult,
   hunterFinderResponseSchema,
   hunterVerifierResponseSchema,
@@ -40,13 +41,19 @@ const sha256 = (s: string): string => createHash('sha256').update(s).digest('hex
  * Hunter API v2 provider — fallback #2, tried only after Instantly preview/enrich have been tried.
  * Hunter has no free domain-wide search step in this integration, so preview() is a zero-network echo
  * of the already-known candidates (see ContactEnrichmentProvider.preview doc). All real network I/O
- * happens in enrich(): Email Finder for one known person, then an INDEPENDENT Email Verifier call on
- * whatever email Finder returned, before anything is accepted.
+ * happens in enrich(): Email Finder for one known person first. Finder's OWN bundled verification
+ * (already included in the Finder credit) is trusted directly when it is unambiguous — VERIFIED when
+ * clearly valid, CATCH_ALL when clearly accept-all — and only a genuinely ambiguous/stale Finder
+ * verification (its `unknown` status, or a missing verification object) triggers a SEPARATE Email
+ * Verifier call for a fresh determination. Verifier is never called automatically after every
+ * successful Finder match — only when Finder's own signal isn't trustworthy on its own.
  *
  * Isolated HTTP surface: Bearer auth (key only in the header, never a query param, never logged),
  * per-request timeout, NO auto-retry, no polling (both calls are synchronous). Every response is
  * Zod-validated. Credits are never fabricated — Hunter's responses carry no credit-count field, so
- * creditsReported is always null; the service's own per-attempt estimate is the only spend tracking.
+ * creditsReported is always null; `requestsUsed`/`creditsUsed` report the ACTUAL number of HTTP calls
+ * this one enrich() performed (1 for Finder alone, 2 when Verifier was also genuinely needed), so the
+ * service's request/credit caps reflect real operations rather than assuming one call per attempt.
  */
 export class HunterContactEnrichmentProvider implements ContactEnrichmentProvider {
   readonly name = 'hunter';
@@ -108,15 +115,32 @@ export class HunterContactEnrichmentProvider implements ContactEnrichmentProvide
     const finder = extractFinderResult(finderParsed);
 
     if (!finder.email) {
-      // Free per Hunter's docs (no credit charged when no email is found) — no verifier call needed.
+      // Free per Hunter's docs (no credit charged when no email is found) — one HTTP call, zero credits.
       return {
         query, email: null, returnedIdentity: null, verificationStatus: 'NOT_FOUND',
         dataQuality: null, confidence: null, creditsReported: null, resourceId: null,
         endpoint: HUNTER_ENDPOINTS.emailFinder, rawDigest: sha256(finderText),
+        requestsUsed: 1, creditsUsed: 0,
       };
     }
 
-    // Independent verification — never accept a Finder guess on its own.
+    // Finder found an email — that credit is already spent regardless of what happens next.
+    const finderConfidence = finder.finderScore !== null ? finder.finderScore / 100 : null;
+    const decision = classifyFinderVerification(finder);
+
+    if (decision.kind !== 'ambiguous') {
+      // Finder's own bundled verification is unambiguous (valid, or clearly accept-all) — trust it
+      // directly rather than spending a second Verifier credit to confirm what is already clear.
+      return {
+        query, email: finder.email, returnedIdentity: finder.identity, verificationStatus: decision.status,
+        dataQuality: null, confidence: finderConfidence, creditsReported: null, resourceId: null,
+        endpoint: HUNTER_ENDPOINTS.emailFinder, rawDigest: sha256(finderText),
+        requestsUsed: 1, creditsUsed: 1,
+      };
+    }
+
+    // Finder's verification is genuinely ambiguous/stale (unknown or missing) — a fresh, independent
+    // Verifier call is needed before this email can ever be accepted.
     const verifierText = await this.request(HUNTER_ENDPOINTS.emailVerifier, buildEmailVerifierParams(finder.email));
     const verifierParsed = hunterVerifierResponseSchema.parse(JSON.parse(verifierText));
     const verifierFields = readVerifierFields(verifierParsed);
@@ -128,11 +152,13 @@ export class HunterContactEnrichmentProvider implements ContactEnrichmentProvide
       returnedIdentity: finder.identity,
       verificationStatus,
       dataQuality: null,
-      confidence: verifierFields.score !== null ? verifierFields.score / 100 : (finder.finderScore !== null ? finder.finderScore / 100 : null),
+      confidence: verifierFields.score !== null ? verifierFields.score / 100 : finderConfidence,
       creditsReported: null,
       resourceId: null,
       endpoint: HUNTER_ENDPOINTS.emailVerifier,
       rawDigest: sha256(`${finderText}|${verifierText}`),
+      requestsUsed: 2,
+      creditsUsed: 2,
     };
   }
 }
