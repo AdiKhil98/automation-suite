@@ -353,3 +353,22 @@ describe('buildContactEnrichmentProvider gating + DRY_RUN kill switch', () => {
     expect(() => buildContactEnrichmentProvider(ctx({ INSTANTLY_API_KEY: undefined }))).toThrow(/INSTANTLY_API_KEY/);
   });
 });
+
+describe('buildContactEnrichmentProvider — Hunter (fallback provider #2) gating + DRY_RUN kill switch', () => {
+  const base = {
+    DRY_RUN: false, CONTACT_ENRICHMENT_PROVIDER: 'hunter', CONTACT_ENRICHMENT_ENABLED: true, ALLOW_PAID_ENRICHMENT_CALLS: true,
+    HUNTER_API_KEY: 'k', HUNTER_API_BASE_URL: 'https://api.hunter.io/v2', HUNTER_TIMEOUT_MS: 30000,
+  };
+  const ctx = (over: Partial<typeof base>) => ({ config: { ...base, ...over }, logger } as unknown as Parameters<typeof buildContactEnrichmentProvider>[0]);
+
+  it('DRY_RUN=true blocks live Hunter even with all paid flags + key (fail closed before network)', () => {
+    expect(() => buildContactEnrichmentProvider(ctx({ DRY_RUN: true }))).toThrow(/DRY_RUN=true blocks/);
+  });
+  it('constructs live Hunter provider when DRY_RUN=false + enabled + key (preview needs no paid flag — it is a zero-network echo)', () => {
+    expect(buildContactEnrichmentProvider(ctx({ ALLOW_PAID_ENRICHMENT_CALLS: false })).name).toBe('hunter');
+  });
+  it('fails closed without enable flag / without key', () => {
+    expect(() => buildContactEnrichmentProvider(ctx({ CONTACT_ENRICHMENT_ENABLED: false }))).toThrow(/CONTACT_ENRICHMENT_ENABLED/);
+    expect(() => buildContactEnrichmentProvider(ctx({ HUNTER_API_KEY: undefined }))).toThrow(/HUNTER_API_KEY/);
+  });
+});

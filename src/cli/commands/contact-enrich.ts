@@ -4,6 +4,7 @@ import { ContactEnrichmentRepository } from '../../persistence/repositories/cont
 import { ContactEnrichmentService, computeInputHash, type EnrichmentRunCaps } from '../../domain/contact-enrichment/service.js';
 import { type CandidatePerson } from '../../domain/contact-enrichment/types.js';
 import { INSTANTLY_ENDPOINTS, INSTANTLY_SCOPES } from '../../integrations/contact-enrichment/instantly-schema.js';
+import { HUNTER_ENDPOINTS } from '../../integrations/contact-enrichment/hunter-schema.js';
 import { buildContactEnrichmentProvider } from './contact-enrich-build.js';
 import { type CliContext } from '../context.js';
 
@@ -81,6 +82,11 @@ export async function contactEnrichCommand(ctx: CliContext, opts: ContactEnrichC
       console.log(`  preview endpoint: POST ${INSTANTLY_ENDPOINTS.previewLeads}`);
       console.log(`  enrich endpoints: POST ${INSTANTLY_ENDPOINTS.enrich} → GET ${INSTANTLY_ENDPOINTS.enrich}/{resource_id} → POST ${INSTANTLY_ENDPOINTS.leadsList}`);
       console.log(`  required scopes: ${INSTANTLY_SCOPES.enrich} + ${INSTANTLY_SCOPES.read} + ${INSTANTLY_SCOPES.leadsRead}`);
+    }
+    if (providerName === 'hunter') {
+      console.log(`  flow:            [--preview] zero-network echo of known candidates (0 credits) → [--confirm] Finder + independent Verifier, stop at first VERIFIED`);
+      console.log(`  finder endpoint:  GET ${HUNTER_ENDPOINTS.emailFinder}`);
+      console.log(`  verifier endpoint: GET ${HUNTER_ENDPOINTS.emailVerifier} (called only when Finder returns an email)`);
     }
     console.log(`  idempotency (PREVIEW): ${existingPreview ? `EXISTING ${existingPreview.outcome} (re-run would NOT spend)` : 'none yet'}`);
     console.log(`  idempotency (ENRICH):  ${existingEnrich ? `EXISTING ${existingEnrich.outcome} (re-run would NOT spend)` : 'none yet'}`);
