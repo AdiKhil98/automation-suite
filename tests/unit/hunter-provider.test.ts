@@ -61,8 +61,8 @@ describe('Hunter provider — preview (zero-network echo)', () => {
   });
 });
 
-describe('Hunter provider — enrich (Finder -> independent Verifier)', () => {
-  it('Finder returns no email -> NOT_FOUND, Verifier is NEVER called (stays free)', async () => {
+describe('Hunter provider — enrich (Finder first; Verifier only when genuinely ambiguous)', () => {
+  it('Finder returns no email -> NOT_FOUND, Verifier is NEVER called, 0 credits (free per Hunter docs)', async () => {
     const { fetchImpl, calls } = fakeFetch([{ body: { data: { email: null } } }]);
     const r = await provider(fetchImpl).enrich(q);
     expect(r.verificationStatus).toBe('NOT_FOUND');
@@ -70,10 +70,37 @@ describe('Hunter provider — enrich (Finder -> independent Verifier)', () => {
     expect(calls).toHaveLength(1);
     expect(calls[0].url).toContain('/email-finder');
     expect(calls[0].headers.Authorization).toBe('Bearer hunter-secret-key');
+    expect(r.requestsUsed).toBe(1);
+    expect(r.creditsUsed).toBe(0);
   });
-  it('Finder returns an email -> Verifier IS called independently for that email', async () => {
+  it('Finder verification is clearly valid -> VERIFIED directly, Verifier NEVER called (saves the extra credit)', async () => {
     const { fetchImpl, calls } = fakeFetch([
-      { body: { data: { email: `shyam@${DOMAIN}`, first_name: 'Shyam', last_name: 'Shastri', domain: DOMAIN, position: 'Principal Dentist', score: 90 } } },
+      { body: { data: { email: `shyam@${DOMAIN}`, first_name: 'Shyam', last_name: 'Shastri', domain: DOMAIN, position: 'Principal Dentist', score: 90, accept_all: false, verification: { status: 'valid' } } } },
+    ]);
+    const r = await provider(fetchImpl).enrich(q);
+    expect(calls).toHaveLength(1); // Finder alone — Verifier never called
+    expect(calls[0].url).toContain('/email-finder');
+    expect(r.verificationStatus).toBe('VERIFIED');
+    expect(r.email).toBe(`shyam@${DOMAIN}`);
+    expect(r.returnedIdentity).toMatchObject({ firstName: 'Shyam', lastName: 'Shastri', title: 'Principal Dentist' });
+    expect(r.confidence).toBeCloseTo(0.9);
+    expect(r.creditsReported).toBeNull(); // Hunter responses carry no credit-count field — never fabricated
+    expect(r.requestsUsed).toBe(1);
+    expect(r.creditsUsed).toBe(1);
+  });
+  it('Finder verification is clearly accept_all -> CATCH_ALL directly, Verifier NEVER called', async () => {
+    const { fetchImpl, calls } = fakeFetch([
+      { body: { data: { email: `info@${DOMAIN}`, accept_all: true, verification: { status: 'accept_all' } } } },
+    ]);
+    const r = await provider(fetchImpl).enrich(q);
+    expect(calls).toHaveLength(1);
+    expect(r.verificationStatus).toBe('CATCH_ALL');
+    expect(r.requestsUsed).toBe(1);
+    expect(r.creditsUsed).toBe(1);
+  });
+  it('Finder verification is ambiguous (unknown) -> a SEPARATE Verifier call is genuinely needed', async () => {
+    const { fetchImpl, calls } = fakeFetch([
+      { body: { data: { email: `shyam@${DOMAIN}`, first_name: 'Shyam', last_name: 'Shastri', domain: DOMAIN, position: 'Principal Dentist', score: 80, accept_all: false, verification: { status: 'unknown' } } } },
       { body: { data: { status: 'valid', result: 'deliverable', accept_all: false, block: false } } },
     ]);
     const r = await provider(fetchImpl).enrich(q);
@@ -81,12 +108,21 @@ describe('Hunter provider — enrich (Finder -> independent Verifier)', () => {
     expect(calls[1].url).toContain('/email-verifier');
     expect(calls[1].url).toContain(encodeURIComponent(`shyam@${DOMAIN}`));
     expect(r.verificationStatus).toBe('VERIFIED');
-    expect(r.email).toBe(`shyam@${DOMAIN}`);
-    expect(r.returnedIdentity).toMatchObject({ firstName: 'Shyam', lastName: 'Shastri', title: 'Principal Dentist' });
-    expect(r.confidence).toBeCloseTo(0.9);
-    expect(r.creditsReported).toBeNull(); // Hunter responses carry no credit-count field — never fabricated
+    expect(r.requestsUsed).toBe(2);
+    expect(r.creditsUsed).toBe(2);
   });
-  it('rejects fail-closed on every non-clean verifier signal', async () => {
+  it('Finder verification missing entirely -> treated as ambiguous, Verifier is called', async () => {
+    const { fetchImpl, calls } = fakeFetch([
+      { body: { data: { email: `shyam@${DOMAIN}`, accept_all: false } } }, // no `verification` object at all
+      { body: { data: { status: 'invalid', result: 'undeliverable', accept_all: false } } },
+    ]);
+    const r = await provider(fetchImpl).enrich(q);
+    expect(calls).toHaveLength(2);
+    expect(r.verificationStatus).toBe('INVALID');
+    expect(r.requestsUsed).toBe(2);
+    expect(r.creditsUsed).toBe(2);
+  });
+  it('rejects fail-closed on every non-clean Verifier signal, reached via an ambiguous Finder verification', async () => {
     const cases: Array<[Record<string, unknown>, string]> = [
       [{ status: 'accept_all', result: 'deliverable', accept_all: true }, 'CATCH_ALL'],
       [{ status: 'unknown', result: 'risky', accept_all: false }, 'RISKY'],
@@ -98,7 +134,7 @@ describe('Hunter provider — enrich (Finder -> independent Verifier)', () => {
     ];
     for (const [verifierBody, expected] of cases) {
       const { fetchImpl } = fakeFetch([
-        { body: { data: { email: `shyam@${DOMAIN}` } } },
+        { body: { data: { email: `shyam@${DOMAIN}`, accept_all: false, verification: { status: 'unknown' } } } },
         { body: { data: verifierBody } },
       ]);
       const r = await provider(fetchImpl).enrich(q);
@@ -130,18 +166,15 @@ describe('Hunter as fallback provider #2 — full pipeline via ContactEnrichment
     expect(r.creditsEstimated).toBe(0);
     expect(calls).toHaveLength(0);
   });
-  it('ENRICH mode: stops at the first VERIFIED candidate in priority order (Shastri has no email, Patel is verified, Doyley never attempted)', async () => {
+  it('ENRICH mode: stops at the first VERIFIED candidate; Finder-only accept never spends a Verifier credit (Shastri has no email, Patel is verified by Finder alone, Doyley never attempted)', async () => {
     const fetchImpl = ((url: string) => {
       if (url.includes('first_name=Shyam')) {
         return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(JSON.stringify({ data: { email: null } })) } as unknown as Response);
       }
       if (url.includes('first_name=Shaimil') && url.includes('/email-finder')) {
-        return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(JSON.stringify({ data: { email: `shaimil@${DOMAIN}`, first_name: 'Shaimil', last_name: 'Patel', domain: DOMAIN, position: 'Clinical Director', score: 95 } })) } as unknown as Response);
+        return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(JSON.stringify({ data: { email: `shaimil@${DOMAIN}`, first_name: 'Shaimil', last_name: 'Patel', domain: DOMAIN, position: 'Clinical Director', score: 95, accept_all: false, verification: { status: 'valid' } } })) } as unknown as Response);
       }
-      if (url.includes('/email-verifier')) {
-        return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(JSON.stringify({ data: { status: 'valid', result: 'deliverable', accept_all: false, block: false } })) } as unknown as Response);
-      }
-      throw new Error(`unexpected Hunter call for Kymya Doyley — should have stopped at Patel: ${url}`);
+      throw new Error(`unexpected Hunter call (expected only 2 Finder calls, no Verifier, no Doyley call): ${url}`);
     }) as unknown as FetchLike;
     const service = new ContactEnrichmentService({ provider: provider(fetchImpl), store: new MemStore(), logger });
     const r = await service.run('l', DOMAIN, CANDIDATES, caps, { performEnrichment: true });
@@ -149,6 +182,29 @@ describe('Hunter as fallback provider #2 — full pipeline via ContactEnrichment
     expect(r.mode).toBe('ENRICH');
     expect(r.accepted?.fullName).toBe('Shaimil Patel');
     expect(r.accepted?.email).toBe(`shaimil@${DOMAIN}`);
-    expect(r.creditsEstimated).toBe(2); // Shastri attempt (no email) + Patel attempt (verified) — Doyley never tried
+    // Shastri: 1 Finder call, 0 credit (no email). Patel: 1 Finder call, 1 credit (Finder-only accept, no Verifier).
+    expect(r.creditsEstimated).toBe(1);
+    expect((r.provenance as { requestsUsed?: number }).requestsUsed).toBe(2);
+  });
+  it('ENRICH mode: request/credit caps reflect actual HTTP calls, not one-per-attempt — an ambiguous Finder verification costs 2', async () => {
+    const fetchImpl = ((url: string) => {
+      if (url.includes('first_name=Shyam') && url.includes('/email-finder')) {
+        return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(JSON.stringify({ data: { email: null } })) } as unknown as Response);
+      }
+      if (url.includes('first_name=Shaimil') && url.includes('/email-finder')) {
+        return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(JSON.stringify({ data: { email: `shaimil@${DOMAIN}`, first_name: 'Shaimil', last_name: 'Patel', domain: DOMAIN, position: 'Clinical Director', score: 70, accept_all: false, verification: { status: 'unknown' } } })) } as unknown as Response);
+      }
+      if (url.includes('/email-verifier')) {
+        return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(JSON.stringify({ data: { status: 'valid', result: 'deliverable', accept_all: false, block: false } })) } as unknown as Response);
+      }
+      throw new Error(`unexpected Hunter call: ${url}`);
+    }) as unknown as FetchLike;
+    const service = new ContactEnrichmentService({ provider: provider(fetchImpl), store: new MemStore(), logger });
+    const r = await service.run('l', DOMAIN, CANDIDATES, caps, { performEnrichment: true });
+    expect(r.outcome).toBe('VERIFIED');
+    expect(r.accepted?.fullName).toBe('Shaimil Patel');
+    // Shastri: 1 request, 0 credit. Patel: Finder (ambiguous) + Verifier = 2 requests, 2 credits.
+    expect(r.creditsEstimated).toBe(2);
+    expect((r.provenance as { requestsUsed?: number }).requestsUsed).toBe(3);
   });
 });
