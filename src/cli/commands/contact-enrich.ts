@@ -114,7 +114,13 @@ export async function contactEnrichCommand(ctx: CliContext, opts: ContactEnrichC
   console.log(`  domain:          ${result.requestedDomain}`);
   console.log(`  outcome:         ${result.outcome}`);
   console.log(`  credits:         estimated=${String(result.creditsEstimated)}  provider-reported=${result.creditsReported === null ? 'none reported' : String(result.creditsReported)}`);
-  console.log(`  domain coverage: ${String(prov.previewPeopleCount ?? 0)} people returned by preview/search`);
+  if (providerName === 'hunter') {
+    // Hunter's preview() is a zero-network echo of the candidates WE already know from the website —
+    // never label this as Hunter having discovered/confirmed domain coverage.
+    console.log(`  known candidates (local echo, NOT Hunter-discovered coverage): ${String(prov.previewPeopleCount ?? 0)}`);
+  } else {
+    console.log(`  domain coverage: ${String(prov.previewPeopleCount ?? 0)} people returned by preview/search`);
+  }
   const matches = prov.matches ?? [];
   console.log(`  matched people:  ${matches.length}`);
   for (const m of matches) console.log(`    - ${m.candidate} (requested: ${m.title}; provider title: ${m.matchedTitle ?? '—'})`);
