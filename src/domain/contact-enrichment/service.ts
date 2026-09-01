@@ -147,7 +147,7 @@ export class ContactEnrichmentService {
     // ---- Step 1: NON-ENRICHING preview/search (no credit) ----
     let preview;
     try {
-      preview = await this.deps.provider.preview(domain);
+      preview = await this.deps.provider.preview(domain, ordered);
     } catch (err) {
       this.deps.logger.error({ leadId, err: err instanceof Error ? err.message : String(err) }, 'contact-enrichment: preview error (no retry)');
       return finish('ERROR', null, 0, null, null, { stage: 'preview', error: err instanceof Error ? err.message : String(err) });

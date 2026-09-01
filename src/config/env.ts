@@ -42,13 +42,13 @@ const envSchema = z.object({
   MAX_MODEL_COST_USD_PER_LEAD: z.coerce.number().nonnegative().default(0.5),
 
   // --- Contact enrichment (decision-maker work-email discovery) ---
-  // Provider-abstracted (mock default). `instantly` is the first external provider. Paid calls are
-  // hard-gated by ALLOW_PAID_ENRICHMENT_CALLS + CONTACT_ENRICHMENT_ENABLED; both default OFF so no
-  // credits can be spent unless explicitly enabled. Hunter/Apollo can be added later behind the same
-  // provider interface; they are NOT integrated now.
+  // Provider-abstracted (mock default). `instantly` is the primary external provider; `hunter` is
+  // fallback provider #2 (Email Finder + Email Verifier), same interface. Paid calls are hard-gated by
+  // ALLOW_PAID_ENRICHMENT_CALLS + CONTACT_ENRICHMENT_ENABLED; both default OFF so no credits can be
+  // spent unless explicitly enabled. Apollo can be added later behind the same provider interface.
   CONTACT_ENRICHMENT_ENABLED: boolString(false),
   ALLOW_PAID_ENRICHMENT_CALLS: boolString(false),
-  CONTACT_ENRICHMENT_PROVIDER: z.enum(['mock', 'instantly']).default('mock'),
+  CONTACT_ENRICHMENT_PROVIDER: z.enum(['mock', 'instantly', 'hunter']).default('mock'),
   // Bounded spend controls for a single enrichment run (preferred + a small number of fallbacks).
   CONTACT_ENRICHMENT_MAX_REQUESTS_PER_RUN: z.coerce.number().int().min(1).max(10).default(3),
   CONTACT_ENRICHMENT_MAX_CREDITS_PER_RUN: z.coerce.number().int().min(1).max(20).default(3),
@@ -61,6 +61,11 @@ const envSchema = z.object({
   // Async SuperSearch enrichment result polling (bounded; no unbounded waits).
   INSTANTLY_POLL_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(30).default(8),
   INSTANTLY_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(2_000),
+  // Hunter API v2 (fallback provider #2: Email Finder + Email Verifier). Key is a secret read only
+  // from env, never hard-coded, never logged, and never placed in a request URL (Bearer header only).
+  HUNTER_API_KEY: z.string().optional(),
+  HUNTER_API_BASE_URL: z.string().url().default('https://api.hunter.io/v2'),
+  HUNTER_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
 
   // LLM provider config (abstraction-first; concrete provider chosen in Phase 5).
   LLM_PROVIDER: z.string().default('mock'),
