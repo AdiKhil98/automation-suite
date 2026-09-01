@@ -4,6 +4,7 @@ import { AppError } from '../../utils/errors.js';
 import { type ContactEnrichmentProvider, EnrichmentProviderNotAllowedError } from '../../domain/contact-enrichment/provider.js';
 import {
   type CandidatePerson,
+  type DomainSearchResult,
   type EnrichmentEstimate,
   type EnrichmentQuery,
   type PreviewPerson,
@@ -12,10 +13,13 @@ import {
 } from '../../domain/contact-enrichment/types.js';
 import {
   HUNTER_ENDPOINTS,
+  buildDomainSearchParams,
   buildEmailFinderParams,
   buildEmailVerifierParams,
   classifyFinderVerification,
+  extractDomainSearchPeople,
   extractFinderResult,
+  hunterDomainSearchResponseSchema,
   hunterFinderResponseSchema,
   hunterVerifierResponseSchema,
   normalizeHunterVerification,
@@ -159,6 +163,30 @@ export class HunterContactEnrichmentProvider implements ContactEnrichmentProvide
       rawDigest: sha256(`${finderText}|${verifierText}`),
       requestsUsed: 2,
       creditsUsed: 2,
+    };
+  }
+
+  /**
+   * FINAL Hunter fallback: a single domain-wide Domain Search call, used by the service AT MOST ONCE
+   * per run, only after every per-candidate Finder attempt has failed. Returns raw people with email
+   * (already verification-normalized — see classifyDomainSearchEmail) for the service to match against
+   * the known candidates through the same decideAcceptance trust boundary as everything else.
+   */
+  async domainSearch(domain: string): Promise<DomainSearchResult> {
+    if (!this.deps.allowPaidEnrichment) {
+      throw new EnrichmentProviderNotAllowedError('Hunter Domain Search requires ALLOW_PAID_ENRICHMENT_CALLS=true (paid enrichment is off).');
+    }
+    const text = await this.request(HUNTER_ENDPOINTS.domainSearch, buildDomainSearchParams(domain));
+    const parsed = hunterDomainSearchResponseSchema.parse(JSON.parse(text));
+    const people = extractDomainSearchPeople(parsed, domain);
+    return {
+      domain,
+      people,
+      creditsReported: null,
+      // Hunter counts a query toward billing only when it returns at least one result.
+      creditsUsed: people.length > 0 ? 1 : 0,
+      endpoint: HUNTER_ENDPOINTS.domainSearch,
+      rawDigest: sha256(text),
     };
   }
 }

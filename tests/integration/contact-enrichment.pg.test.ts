@@ -79,6 +79,25 @@ describe('contact enrichment persistence (PostgreSQL)', () => {
     expect(previewRow?.outcome).toBe('PREVIEW_NO_MATCH');
   });
 
+  it('save with { overwrite: true } replaces the existing row in place (force-refresh) instead of throwing a duplicate-key error', async () => {
+    const leadId = await seedLead();
+    const repo = new ContactEnrichmentRepository(handle.db);
+    await repo.save(baseResult(leadId, { inputHash: 'force-refresh-hash', outcome: 'NOT_FOUND' }));
+    const before = await repo.findByInputHash(leadId, 'mock', 'ENRICH', 'force-refresh-hash');
+    await repo.save(
+      baseResult(leadId, {
+        inputHash: 'force-refresh-hash', outcome: 'VERIFIED', creditsEstimated: 2, creditsReported: null,
+        accepted: { fullName: 'Shaimil Patel', title: 'Clinical Director', email: `shaimil@${DOMAIN}`, verificationStatus: 'VERIFIED', dataQuality: null, confidence: 0.9 },
+      }),
+      { overwrite: true },
+    );
+    const after = await repo.findByInputHash(leadId, 'mock', 'ENRICH', 'force-refresh-hash');
+    expect(before?.outcome).toBe('NOT_FOUND');
+    expect(after?.outcome).toBe('VERIFIED');
+    expect(after?.accepted?.email).toBe(`shaimil@${DOMAIN}`);
+    expect(after?.id).toBe(before?.id); // the original row's id is preserved; only its other columns changed
+  });
+
   it('CHECK rejects a VERIFIED row without an email', async () => {
     const leadId = await seedLead();
     const repo = new ContactEnrichmentRepository(handle.db);

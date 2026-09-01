@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { type EnrichmentQuery, type EnrichmentVerificationStatus, type ReturnedIdentity } from '../../domain/contact-enrichment/types.js';
+import { type DomainSearchPerson, type EnrichmentQuery, type EnrichmentVerificationStatus, type ReturnedIdentity } from '../../domain/contact-enrichment/types.js';
 
 /**
  * Hunter API v2 — Email Finder + Email Verifier contract (fallback provider #2, used only after
@@ -28,6 +28,7 @@ import { type EnrichmentQuery, type EnrichmentVerificationStatus, type ReturnedI
 export const HUNTER_ENDPOINTS = {
   emailFinder: '/email-finder',
   emailVerifier: '/email-verifier',
+  domainSearch: '/domain-search',
 } as const;
 
 /** Build the email-finder query params for ONE known person at ONE company domain. */
@@ -38,6 +39,11 @@ export function buildEmailFinderParams(q: EnrichmentQuery): URLSearchParams {
 /** Build the email-verifier query params for ONE email address. */
 export function buildEmailVerifierParams(email: string): URLSearchParams {
   return new URLSearchParams({ email });
+}
+
+/** Build the domain-search query params — domain-wide, no name/title filter. */
+export function buildDomainSearchParams(domain: string): URLSearchParams {
+  return new URLSearchParams({ domain });
 }
 
 const str = (v: unknown): string | null => (typeof v === 'string' && v.trim() !== '' ? v : null);
@@ -181,4 +187,84 @@ export function classifyFinderVerification(f: Pick<ExtractedFinderResult, 'finde
   if (f.acceptAll === true || f.finderVerificationStatus === 'accept_all') return { kind: 'rejected', status: 'CATCH_ALL' };
   if (f.finderVerificationStatus === 'valid' && f.acceptAll === false) return { kind: 'accepted', status: 'VERIFIED' };
   return { kind: 'ambiguous' };
+}
+
+/**
+ * Domain Search response — the FINAL Hunter fallback (after every per-candidate Finder attempt has
+ * failed), used AT MOST ONCE per domain per run. Unlike Finder (per-person), this is domain-wide and
+ * returns several people with email directly. Each email carries its own bundled `verification.status`
+ * (the SAME valid|accept_all|unknown vocabulary as Finder), plus a domain-LEVEL `accept_all` flag
+ * (whether the whole domain is a catch-all domain) that is NOT per-email.
+ */
+export const hunterDomainSearchResponseSchema = z
+  .object({
+    data: z
+      .object({
+        domain: z.string().nullable().optional(),
+        accept_all: z.boolean().nullable().optional(),
+        emails: z
+          .array(
+            z
+              .object({
+                value: z.string().nullable().optional(),
+                type: z.string().nullable().optional(),
+                confidence: z.number().nullable().optional(),
+                first_name: z.string().nullable().optional(),
+                last_name: z.string().nullable().optional(),
+                position: z.string().nullable().optional(),
+                verification: z
+                  .object({ status: z.string().nullable().optional(), date: z.string().nullable().optional() })
+                  .passthrough()
+                  .nullable()
+                  .optional(),
+              })
+              .passthrough(),
+          )
+          .optional(),
+      })
+      .passthrough()
+      .optional(),
+  })
+  .passthrough();
+export type HunterDomainSearchResponse = z.infer<typeof hunterDomainSearchResponseSchema>;
+
+/**
+ * Map ONE domain-search email + the domain-level catch-all flag to our normalized status. Fail-closed:
+ * a whole-domain catch-all rejects EVERY email on it regardless of that email's own bundled
+ * verification (Hunter itself cannot reliably distinguish real mailboxes on such a domain); otherwise
+ * the per-email bundled verification is trusted directly (same coarse vocabulary as Finder — `unknown`
+ * rejects here rather than chaining a further Verifier call, keeping this final tier simple).
+ */
+export function classifyDomainSearchEmail(domainAcceptAll: boolean | null, emailVerificationStatus: string | null): EnrichmentVerificationStatus {
+  if (domainAcceptAll === true) return 'CATCH_ALL';
+  if (emailVerificationStatus === 'valid') return 'VERIFIED';
+  if (emailVerificationStatus === 'accept_all') return 'CATCH_ALL';
+  return 'UNKNOWN';
+}
+
+/** Extract the domain-search people, already fully verification-normalized (see classifyDomainSearchEmail). */
+export function extractDomainSearchPeople(parsed: HunterDomainSearchResponse, domain: string): DomainSearchPerson[] {
+  const d = (parsed.data ?? {}) as Record<string, unknown>;
+  const domainAcceptAll = boolv(d['accept_all']);
+  const emails = Array.isArray(d['emails']) ? (d['emails'] as Array<Record<string, unknown>>) : [];
+  const people: DomainSearchPerson[] = [];
+  for (const e of emails) {
+    const email = str(e['value']);
+    if (!email) continue; // an entry without an email is not a usable candidate
+    const verification = (e['verification'] && typeof e['verification'] === 'object') ? (e['verification'] as Record<string, unknown>) : {};
+    const type = str(e['type']);
+    people.push({
+      email,
+      emailType: type === 'personal' || type === 'generic' ? type : null,
+      name: null,
+      firstName: str(e['first_name']),
+      lastName: str(e['last_name']),
+      domain,
+      title: str(e['position']),
+      confidence: numv(e['confidence']),
+      verificationStatus: classifyDomainSearchEmail(domainAcceptAll, str(verification['status'])),
+      providerLeadId: null,
+    });
+  }
+  return people;
 }
