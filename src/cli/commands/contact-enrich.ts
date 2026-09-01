@@ -63,8 +63,10 @@ export async function contactEnrichCommand(ctx: CliContext, opts: ContactEnrichC
 
   // ---- PLAN / DRY-RUN (default): pure projection. No provider constructed, no network, no spend. ----
   if (!opts.preview && !opts.confirm) {
-    const inputHash = computeInputHash(providerName, domain, candidates);
-    const existing = await repo.findByInputHash(leadId, providerName, inputHash).catch(() => null);
+    const previewHash = computeInputHash('PREVIEW', providerName, domain, candidates);
+    const enrichHash = computeInputHash('ENRICH', providerName, domain, candidates);
+    const existingPreview = await repo.findByInputHash(leadId, providerName, 'PREVIEW', previewHash).catch(() => null);
+    const existingEnrich = await repo.findByInputHash(leadId, providerName, 'ENRICH', enrichHash).catch(() => null);
     console.log(`\n=== contact-enrich PLAN (dry-run — no spend) ===`);
     console.log(`  lead:            ${leadId}`);
     console.log(`  domain:          ${domain}`);
@@ -79,7 +81,8 @@ export async function contactEnrichCommand(ctx: CliContext, opts: ContactEnrichC
       console.log(`  endpoints:       POST ${INSTANTLY_ENDPOINTS.enrich} → GET ${INSTANTLY_ENDPOINTS.enrich}/{resource_id} → POST ${INSTANTLY_ENDPOINTS.leadsList}`);
       console.log(`  required scopes: ${INSTANTLY_SCOPES.enrich} + ${INSTANTLY_SCOPES.read} + ${INSTANTLY_SCOPES.leadsRead}`);
     }
-    console.log(`  idempotency:     ${existing ? `EXISTING ${existing.outcome} (re-run would NOT spend)` : 'none yet'}`);
+    console.log(`  idempotency (PREVIEW): ${existingPreview ? `EXISTING ${existingPreview.outcome} (re-run would NOT spend)` : 'none yet'}`);
+    console.log(`  idempotency (ENRICH):  ${existingEnrich ? `EXISTING ${existingEnrich.outcome} (re-run would NOT spend)` : 'none yet'}`);
     console.log(`\n  --preview = live non-paid search + match (no credits). --confirm = full run (paid enrich of a match).`);
     return;
   }

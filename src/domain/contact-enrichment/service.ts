@@ -5,6 +5,7 @@ import { decideAcceptance, matchPreviewPerson } from './verification.js';
 import {
   type CandidatePerson,
   type ContactEnrichmentResult,
+  type EnrichmentMode,
   type EnrichmentQuery,
   type PreviewPerson,
   type VerifiedContact,
@@ -12,7 +13,7 @@ import {
 
 /** Persistence port. Kept minimal so the service is unit-testable without a database. */
 export interface ContactEnrichmentStore {
-  findByInputHash(leadId: string, provider: string, inputHash: string): Promise<ContactEnrichmentResult | null>;
+  findByInputHash(leadId: string, provider: string, mode: EnrichmentMode, inputHash: string): Promise<ContactEnrichmentResult | null>;
   save(result: ContactEnrichmentResult): Promise<void>;
 }
 
@@ -38,21 +39,30 @@ export interface EnrichmentPlan {
   leadId: string;
   provider: string;
   domain: string;
-  inputHash: string;
+  previewInputHash: string;
+  enrichInputHash: string;
   orderedCandidates: CandidatePerson[];
   projectedMaxRequests: number;
   projectedMaxCredits: number;
-  alreadyResolved: ContactEnrichmentResult | null;
+  /** Existing idempotent row keyed to the PREVIEW mode's input hash, if any. */
+  previewAlreadyResolved: ContactEnrichmentResult | null;
+  /** Existing idempotent row keyed to the ENRICH mode's input hash, if any. */
+  enrichAlreadyResolved: ContactEnrichmentResult | null;
 }
 
 function queryFor(domain: string, p: CandidatePerson): EnrichmentQuery {
   return { domain, fullName: p.fullName, firstName: p.firstName, lastName: p.lastName, title: p.title };
 }
 
-/** Stable idempotency key over provider + domain + the ordered (name|title) candidate list. */
-export function computeInputHash(provider: string, domain: string, candidates: CandidatePerson[]): string {
+/**
+ * Stable idempotency key over MODE + provider + domain + the ordered (name|title) candidate list.
+ * Mode is part of the identity: a non-paid PREVIEW and a paid ENRICH for the same lead/domain/
+ * candidates are distinct operations and must never satisfy each other's idempotency check.
+ */
+export function computeInputHash(mode: EnrichmentMode, provider: string, domain: string, candidates: CandidatePerson[]): string {
   const ordered = [...candidates].sort((a, b) => a.priority - b.priority || a.fullName.localeCompare(b.fullName));
   const material = JSON.stringify({
+    mode,
     provider,
     domain: domain.trim().toLowerCase(),
     people: ordered.map((c) => ({ name: c.fullName.trim().toLowerCase(), title: c.title.trim().toLowerCase() })),
@@ -77,16 +87,21 @@ function safePreviewView(p: PreviewPerson): Record<string, unknown> {
 export class ContactEnrichmentService {
   constructor(private readonly deps: ContactEnrichmentServiceDeps) {}
 
-  plan(leadId: string, domain: string, candidates: CandidatePerson[], caps: EnrichmentRunCaps): Promise<EnrichmentPlan> {
+  async plan(leadId: string, domain: string, candidates: CandidatePerson[], caps: EnrichmentRunCaps): Promise<EnrichmentPlan> {
     const provider = this.deps.provider.name;
-    const inputHash = computeInputHash(provider, domain, candidates);
+    const previewInputHash = computeInputHash('PREVIEW', provider, domain, candidates);
+    const enrichInputHash = computeInputHash('ENRICH', provider, domain, candidates);
     const ordered = [...candidates].sort((a, b) => a.priority - b.priority || a.fullName.localeCompare(b.fullName));
-    return this.deps.store.findByInputHash(leadId, provider, inputHash).then((existing) => ({
-      leadId, provider, domain, inputHash, orderedCandidates: ordered,
+    const [previewAlreadyResolved, enrichAlreadyResolved] = await Promise.all([
+      this.deps.store.findByInputHash(leadId, provider, 'PREVIEW', previewInputHash),
+      this.deps.store.findByInputHash(leadId, provider, 'ENRICH', enrichInputHash),
+    ]);
+    return {
+      leadId, provider, domain, previewInputHash, enrichInputHash, orderedCandidates: ordered,
       projectedMaxRequests: Math.min(caps.maxRequests, ordered.length),
       projectedMaxCredits: Math.min(caps.maxCredits, ordered.length * Math.max(1, caps.minCreditsPerLookup)),
-      alreadyResolved: existing,
-    }));
+      previewAlreadyResolved, enrichAlreadyResolved,
+    };
   }
 
   async run(
@@ -97,11 +112,12 @@ export class ContactEnrichmentService {
     opts: EnrichmentRunOptions,
   ): Promise<ContactEnrichmentResult> {
     const provider = this.deps.provider.name;
-    const inputHash = computeInputHash(provider, domain, candidates);
+    const mode: EnrichmentMode = opts.performEnrichment ? 'ENRICH' : 'PREVIEW';
+    const inputHash = computeInputHash(mode, provider, domain, candidates);
 
-    const existing = await this.deps.store.findByInputHash(leadId, provider, inputHash);
+    const existing = await this.deps.store.findByInputHash(leadId, provider, mode, inputHash);
     if (existing) {
-      this.deps.logger.info({ leadId, provider, outcome: existing.outcome }, 'contact-enrichment: idempotent hit; no spend');
+      this.deps.logger.info({ leadId, provider, mode, outcome: existing.outcome }, 'contact-enrichment: idempotent hit; no spend');
       return existing;
     }
 
@@ -118,7 +134,7 @@ export class ContactEnrichmentService {
       provenance: Record<string, unknown>,
     ): Promise<ContactEnrichmentResult> => {
       const result: ContactEnrichmentResult = {
-        id: randomUUID(), leadId, provider, inputHash, requestedDomain: domain, candidates: ordered,
+        id: randomUUID(), leadId, provider, mode, inputHash, requestedDomain: domain, candidates: ordered,
         outcome, accepted, creditsEstimated, creditsReported: reportedCredits, providerResourceId: resourceId,
         endpoint, provenance, createdAt: new Date(), completedAt: new Date(),
       };

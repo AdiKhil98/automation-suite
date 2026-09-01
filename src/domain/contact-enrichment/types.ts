@@ -93,6 +93,13 @@ export const CONTACT_ENRICHMENT_OUTCOMES = [
 ] as const;
 export type ContactEnrichmentOutcome = (typeof CONTACT_ENRICHMENT_OUTCOMES)[number];
 
+/**
+ * Operation mode — part of the idempotency identity. A non-paid PREVIEW and a paid ENRICH request
+ * for the same lead/domain/candidates are distinct operations and must never suppress each other.
+ */
+export const ENRICHMENT_MODES = ['PREVIEW', 'ENRICH'] as const;
+export type EnrichmentMode = (typeof ENRICHMENT_MODES)[number];
+
 /** The accepted, verified decision-maker contact — the ONLY shape allowed to reach outreach. */
 export interface VerifiedContact {
   fullName: string;
@@ -108,6 +115,7 @@ export interface ContactEnrichmentResult {
   id: string;
   leadId: string;
   provider: string;
+  mode: EnrichmentMode;
   inputHash: string;
   requestedDomain: string;
   candidates: CandidatePerson[];
