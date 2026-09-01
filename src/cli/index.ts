@@ -558,6 +558,7 @@ program
   .option('--max-requests <n>', 'per-run request cap (default from CONTACT_ENRICHMENT_MAX_REQUESTS_PER_RUN)')
   .option('--preview', 'live NON-PAID preview/search + local identity match only (no credits, no enrichment)')
   .option('--confirm', 'full run: preview → match → paid work-email enrichment of a matched person (needs ALLOW_PAID_ENRICHMENT_CALLS)')
+  .option('--force-refresh', 'explicit one-shot bypass of the idempotency cache lookup — use ONLY when a provider capability has genuinely changed since the cached row was written; overwrites that row with the fresh result')
   .action((opts: ContactEnrichCliOptions) => withContext((ctx) => contactEnrichCommand(ctx, opts)));
 
 program

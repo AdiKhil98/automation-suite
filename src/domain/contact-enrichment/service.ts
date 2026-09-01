@@ -8,13 +8,15 @@ import {
   type EnrichmentMode,
   type EnrichmentQuery,
   type PreviewPerson,
+  type ProviderEnrichmentOutcome,
   type VerifiedContact,
 } from './types.js';
 
 /** Persistence port. Kept minimal so the service is unit-testable without a database. */
 export interface ContactEnrichmentStore {
   findByInputHash(leadId: string, provider: string, mode: EnrichmentMode, inputHash: string): Promise<ContactEnrichmentResult | null>;
-  save(result: ContactEnrichmentResult): Promise<void>;
+  /** `overwrite: true` replaces an existing (lead_id, provider, mode, input_hash) row instead of inserting — used only for an explicit, operator-requested `forceRefresh` run. */
+  save(result: ContactEnrichmentResult, opts?: { overwrite?: boolean }): Promise<void>;
 }
 
 export interface EnrichmentRunCaps {
@@ -27,6 +29,13 @@ export interface EnrichmentRunCaps {
 export interface EnrichmentRunOptions {
   /** When false, run preview + local match only and STOP before any paid enrichment (no credits). */
   performEnrichment: boolean;
+  /**
+   * Explicit, operator-requested, one-shot bypass of the idempotency cache lookup — used ONLY when a
+   * provider's capability has genuinely changed since a prior run was cached (e.g. a new fallback tier
+   * added) and a fresh attempt is deliberately wanted. Does NOT change the idempotency identity/hash;
+   * it only skips the read and overwrites the existing row with the fresh result. Never set by default.
+   */
+  forceRefresh?: boolean;
 }
 
 export interface ContactEnrichmentServiceDeps {
@@ -115,10 +124,14 @@ export class ContactEnrichmentService {
     const mode: EnrichmentMode = opts.performEnrichment ? 'ENRICH' : 'PREVIEW';
     const inputHash = computeInputHash(mode, provider, domain, candidates);
 
-    const existing = await this.deps.store.findByInputHash(leadId, provider, mode, inputHash);
-    if (existing) {
-      this.deps.logger.info({ leadId, provider, mode, outcome: existing.outcome }, 'contact-enrichment: idempotent hit; no spend');
-      return existing;
+    if (opts.forceRefresh) {
+      this.deps.logger.warn({ leadId, provider, mode }, 'contact-enrichment: force-refresh — bypassing idempotency cache lookup (explicit operator request)');
+    } else {
+      const existing = await this.deps.store.findByInputHash(leadId, provider, mode, inputHash);
+      if (existing) {
+        this.deps.logger.info({ leadId, provider, mode, outcome: existing.outcome }, 'contact-enrichment: idempotent hit; no spend');
+        return existing;
+      }
     }
 
     const ordered = [...candidates].sort((a, b) => a.priority - b.priority || a.fullName.localeCompare(b.fullName));
@@ -138,7 +151,7 @@ export class ContactEnrichmentService {
         outcome, accepted, creditsEstimated, creditsReported: reportedCredits, providerResourceId: resourceId,
         endpoint, provenance, createdAt: new Date(), completedAt: new Date(),
       };
-      return this.deps.store.save(result).then(() => {
+      return this.deps.store.save(result, { overwrite: opts.forceRefresh }).then(() => {
         this.deps.logger.info({ leadId, provider, outcome, creditsEstimated, creditsReported: reportedCredits }, 'contact-enrichment: run complete');
         return result;
       });
@@ -216,7 +229,52 @@ export class ContactEnrichmentService {
       if (decision.accepted && decision.contact) { accepted = decision.contact; break; }
     }
 
+    // ---- Step 4: OPTIONAL final domain-wide fallback (e.g. Hunter Domain Search), AT MOST ONCE ----
+    // Only reached once every matched candidate has been tried via enrich() with none accepted, and
+    // only for a provider that implements this capability at all.
+    let domainSearchProvenance: Record<string, unknown> | undefined;
+    if (!accepted && !errored && !capped && this.deps.provider.domainSearch) {
+      // Gated by the CREDITS cap only, not the request cap: the per-candidate loop above already
+      // consumes one "request" per known candidate (so with N candidates and maxRequests=N — the
+      // common default — requestsUsed is exactly at the request cap by the time every candidate has
+      // been tried), but this is a single domain-wide lookup, not another per-person attempt, so it
+      // is not itself a "request" in that same budget.
+      if (creditsEstimated + Math.max(1, caps.minCreditsPerLookup) > caps.maxCredits) {
+        capped = true;
+      } else {
+        try {
+          const ds = await this.deps.provider.domainSearch(domain);
+          requestsUsed += 1;
+          creditsEstimated += ds.creditsUsed;
+          addReported(ds.creditsReported);
+          endpoint = ds.endpoint;
+          const personalPeople = ds.people.filter((p) => p.emailType === 'personal');
+          const dsAttempts: Array<Record<string, unknown>> = [];
+          for (const person of ordered) {
+            const match = personalPeople.find((p) => matchPreviewPerson(p, person, domain).isMatch);
+            if (!match) { dsAttempts.push({ person: person.fullName, found: false }); continue; }
+            const syntheticOutcome: ProviderEnrichmentOutcome = {
+              query: queryFor(domain, person), email: match.email, returnedIdentity: match,
+              verificationStatus: match.verificationStatus, dataQuality: null, confidence: match.confidence,
+              creditsReported: null, resourceId: null, endpoint: ds.endpoint, rawDigest: ds.rawDigest,
+            };
+            const decision = decideAcceptance(syntheticOutcome, person, domain);
+            dsAttempts.push({
+              person: person.fullName, title: person.title, verificationStatus: match.verificationStatus,
+              accepted: decision.accepted, reason: decision.reason, match: decision.match,
+            });
+            if (decision.accepted && decision.contact) { accepted = decision.contact; break; }
+          }
+          domainSearchProvenance = { peopleCount: ds.people.length, personalCount: personalPeople.length, attempts: dsAttempts, endpoint: ds.endpoint, rawDigest: ds.rawDigest };
+        } catch (err) {
+          errored = true;
+          domainSearchProvenance = { error: err instanceof Error ? err.message : String(err) };
+          this.deps.logger.error({ leadId, err: err instanceof Error ? err.message : String(err) }, 'contact-enrichment: domain-search error (no retry)');
+        }
+      }
+    }
+
     const outcome = accepted ? 'VERIFIED' : errored ? 'ERROR' : capped ? 'CAPPED' : 'NOT_FOUND';
-    return finish(outcome, accepted, creditsEstimated, resourceId, endpoint, { ...previewProvenance, stage: 'enrich', attempts, requestsUsed, caps });
+    return finish(outcome, accepted, creditsEstimated, resourceId, endpoint, { ...previewProvenance, stage: 'enrich', attempts, requestsUsed, caps, domainSearch: domainSearchProvenance });
   }
 }

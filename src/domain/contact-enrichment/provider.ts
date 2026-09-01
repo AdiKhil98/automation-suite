@@ -1,4 +1,4 @@
-import { type CandidatePerson, type EnrichmentEstimate, type EnrichmentQuery, type PreviewResult, type ProviderEnrichmentOutcome } from './types.js';
+import { type CandidatePerson, type DomainSearchResult, type EnrichmentEstimate, type EnrichmentQuery, type PreviewResult, type ProviderEnrichmentOutcome } from './types.js';
 
 /**
  * Provider abstraction for decision-maker work-email discovery. Every concrete provider (Instantly,
@@ -34,6 +34,16 @@ export interface ContactEnrichmentProvider {
    * and MUST fail closed if their paid kill-switch is off.
    */
   enrich(query: EnrichmentQuery): Promise<ProviderEnrichmentOutcome>;
+
+  /**
+   * OPTIONAL final domain-wide fallback (e.g. Hunter Domain Search) for a provider whose ordinary
+   * per-candidate enrich() loop found nothing. Called by the service AT MOST ONCE per run — only after
+   * every matched candidate has been tried via enrich() and none was accepted, with no error/cap hit.
+   * Returns raw, NOT-yet-accepted people with email; the service matches them against the known
+   * candidates and runs each through the SAME decideAcceptance trust boundary as every other path (the
+   * provider never decides acceptance itself). A provider without this capability simply omits it.
+   */
+  domainSearch?(domain: string): Promise<DomainSearchResult>;
 }
 
 /** Thrown by a paid provider constructed while its paid kill-switch/credentials are missing. */

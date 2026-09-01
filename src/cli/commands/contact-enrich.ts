@@ -16,6 +16,7 @@ export interface ContactEnrichCliOptions {
   confirm?: boolean;
   maxCredits?: string;
   maxRequests?: string;
+  forceRefresh?: boolean;
 }
 
 const HONORIFICS = new Set(['dr', 'dr.', 'mr', 'mr.', 'mrs', 'mrs.', 'ms', 'ms.', 'prof', 'prof.', 'miss']);
@@ -84,13 +85,15 @@ export async function contactEnrichCommand(ctx: CliContext, opts: ContactEnrichC
       console.log(`  required scopes: ${INSTANTLY_SCOPES.enrich} + ${INSTANTLY_SCOPES.read} + ${INSTANTLY_SCOPES.leadsRead}`);
     }
     if (providerName === 'hunter') {
-      console.log(`  flow:            [--preview] zero-network echo of known candidates (0 credits) → [--confirm] Finder + independent Verifier, stop at first VERIFIED`);
+      console.log(`  flow:            [--preview] zero-network echo of known candidates (0 credits) → [--confirm] per-candidate Finder (+ Verifier if ambiguous) → all fail → one Domain Search fallback, stop at first VERIFIED`);
       console.log(`  finder endpoint:  GET ${HUNTER_ENDPOINTS.emailFinder}`);
-      console.log(`  verifier endpoint: GET ${HUNTER_ENDPOINTS.emailVerifier} (called only when Finder returns an email)`);
+      console.log(`  verifier endpoint: GET ${HUNTER_ENDPOINTS.emailVerifier} (called only when Finder's own verification is ambiguous)`);
+      console.log(`  domain-search endpoint: GET ${HUNTER_ENDPOINTS.domainSearch} (called at most once, only if every Finder attempt fails)`);
     }
     console.log(`  idempotency (PREVIEW): ${existingPreview ? `EXISTING ${existingPreview.outcome} (re-run would NOT spend)` : 'none yet'}`);
     console.log(`  idempotency (ENRICH):  ${existingEnrich ? `EXISTING ${existingEnrich.outcome} (re-run would NOT spend)` : 'none yet'}`);
     console.log(`\n  --preview = live non-paid search + match (no credits). --confirm = full run (paid enrich of a match).`);
+    console.log(`  --force-refresh = explicit one-shot bypass of the idempotency cache above (overwrites the existing row) — use only when a provider capability has genuinely changed.`);
     return;
   }
 
@@ -99,9 +102,13 @@ export async function contactEnrichCommand(ctx: CliContext, opts: ContactEnrichC
   const service = new ContactEnrichmentService({ provider, store: repo, logger: ctx.logger });
   // --preview => never enrich. --confirm => enrich only if the paid kill switch is on.
   const performEnrichment = Boolean(opts.confirm) && c.ALLOW_PAID_ENRICHMENT_CALLS;
-  const result = await service.run(leadId, domain, candidates, caps, { performEnrichment });
+  const result = await service.run(leadId, domain, candidates, caps, { performEnrichment, forceRefresh: Boolean(opts.forceRefresh) });
 
-  const prov = result.provenance as { previewPeopleCount?: number; matches?: Array<{ candidate: string; title: string; matchedTitle: string | null }> };
+  const prov = result.provenance as {
+    previewPeopleCount?: number;
+    matches?: Array<{ candidate: string; title: string; matchedTitle: string | null }>;
+    domainSearch?: { peopleCount?: number; personalCount?: number; error?: string };
+  };
   console.log(`\n=== contact-enrich ${opts.preview && !opts.confirm ? 'PREVIEW' : 'RESULT'} (provider=${result.provider}) ===`);
   console.log(`  lead:            ${result.leadId}`);
   console.log(`  domain:          ${result.requestedDomain}`);
@@ -115,6 +122,9 @@ export async function contactEnrichCommand(ctx: CliContext, opts: ContactEnrichC
     console.log(`  paid enrichment: JUSTIFIED for the matched person(s) above — not performed (${opts.confirm ? 'ALLOW_PAID_ENRICHMENT_CALLS is off' : 'preview mode'}).`);
   } else if (result.outcome === 'PREVIEW_NO_MATCH') {
     console.log(`  paid enrichment: NOT justified — ${(prov.previewPeopleCount ?? 0) === 0 ? 'domain has no coverage in this provider' : 'no requested candidate matched'}. Do not spend; consider Hunter next.`);
+  }
+  if (prov.domainSearch) {
+    console.log(`  domain-search:   ${prov.domainSearch.error ? `ERROR: ${prov.domainSearch.error}` : `${String(prov.domainSearch.peopleCount ?? 0)} people found (${String(prov.domainSearch.personalCount ?? 0)} personal)`}`);
   }
   if (result.accepted) {
     console.log(`  decision-maker:  ${result.accepted.fullName} — ${result.accepted.title}`);

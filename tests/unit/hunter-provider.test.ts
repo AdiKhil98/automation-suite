@@ -3,7 +3,15 @@ import { type Logger } from 'pino';
 import { ContactEnrichmentService, type ContactEnrichmentStore, type EnrichmentRunCaps } from '../../src/domain/contact-enrichment/service.js';
 import { type CandidatePerson, type ContactEnrichmentResult, type EnrichmentMode } from '../../src/domain/contact-enrichment/types.js';
 import { HunterContactEnrichmentProvider, type FetchLike } from '../../src/integrations/contact-enrichment/hunter-provider.js';
-import { buildEmailFinderParams, buildEmailVerifierParams, normalizeHunterVerification } from '../../src/integrations/contact-enrichment/hunter-schema.js';
+import {
+  buildDomainSearchParams,
+  buildEmailFinderParams,
+  buildEmailVerifierParams,
+  classifyDomainSearchEmail,
+  extractDomainSearchPeople,
+  hunterDomainSearchResponseSchema,
+  normalizeHunterVerification,
+} from '../../src/integrations/contact-enrichment/hunter-schema.js';
 
 const logger = { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} } as unknown as Logger;
 const caps: EnrichmentRunCaps = { maxRequests: 3, maxCredits: 3, minCreditsPerLookup: 1 };
@@ -24,7 +32,14 @@ class MemStore implements ContactEnrichmentStore {
   findByInputHash(leadId: string, provider: string, mode: EnrichmentMode, inputHash: string): Promise<ContactEnrichmentResult | null> {
     return Promise.resolve(this.rows.find((r) => r.leadId === leadId && r.provider === provider && r.mode === mode && r.inputHash === inputHash) ?? null);
   }
-  save(result: ContactEnrichmentResult): Promise<void> { this.rows.push(result); return Promise.resolve(); }
+  save(result: ContactEnrichmentResult, opts?: { overwrite?: boolean }): Promise<void> {
+    if (opts?.overwrite) {
+      const i = this.rows.findIndex((r) => r.leadId === result.leadId && r.provider === result.provider && r.mode === result.mode && r.inputHash === result.inputHash);
+      if (i >= 0) { this.rows[i] = result; return Promise.resolve(); }
+    }
+    this.rows.push(result);
+    return Promise.resolve();
+  }
 }
 
 function fakeFetch(seq: Array<{ ok?: boolean; status?: number; body: unknown }>) {
@@ -156,6 +171,56 @@ describe('Hunter provider — enrich (Finder first; Verifier only when genuinely
   });
 });
 
+describe('Hunter provider — domainSearch (final fallback, at most once, after all Finder attempts fail)', () => {
+  it('builds domain-search params from domain alone (no name/title filter)', () => {
+    expect(Object.fromEntries(buildDomainSearchParams(DOMAIN))).toEqual({ domain: DOMAIN });
+  });
+  it('parses the official response shape: personal vs generic type, bundled per-email verification', async () => {
+    const { fetchImpl, calls } = fakeFetch([{
+      body: {
+        data: {
+          domain: DOMAIN, accept_all: false,
+          emails: [
+            { value: `shaimil@${DOMAIN}`, type: 'personal', confidence: 92, first_name: 'Shaimil', last_name: 'Patel', position: 'Clinical Director', verification: { status: 'valid' } },
+            { value: `info@${DOMAIN}`, type: 'generic', confidence: 50, verification: { status: 'unknown' } },
+          ],
+        },
+      },
+    }]);
+    const r = await provider(fetchImpl).domainSearch(DOMAIN);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toContain('/domain-search');
+    expect(calls[0].url).toContain(`domain=${DOMAIN}`);
+    expect(r.people).toHaveLength(2);
+    expect(r.people[0]).toMatchObject({ email: `shaimil@${DOMAIN}`, emailType: 'personal', firstName: 'Shaimil', lastName: 'Patel', title: 'Clinical Director', verificationStatus: 'VERIFIED' });
+    expect(r.people[1]).toMatchObject({ email: `info@${DOMAIN}`, emailType: 'generic', verificationStatus: 'UNKNOWN' });
+    expect(r.creditsUsed).toBe(1); // at least one result was returned
+    expect(r.creditsReported).toBeNull();
+  });
+  it('a whole-domain catch-all flag rejects EVERY email on it regardless of its own bundled verification', () => {
+    expect(classifyDomainSearchEmail(true, 'valid')).toBe('CATCH_ALL');
+    expect(classifyDomainSearchEmail(false, 'valid')).toBe('VERIFIED');
+    expect(classifyDomainSearchEmail(false, 'accept_all')).toBe('CATCH_ALL');
+    expect(classifyDomainSearchEmail(false, 'unknown')).toBe('UNKNOWN');
+    expect(classifyDomainSearchEmail(null, null)).toBe('UNKNOWN');
+  });
+  it('zero results -> 0 credits, empty people, fail-closed (no crash)', async () => {
+    const { fetchImpl } = fakeFetch([{ body: { data: { domain: DOMAIN, accept_all: false, emails: [] } } }]);
+    const r = await provider(fetchImpl).domainSearch(DOMAIN);
+    expect(r.people).toHaveLength(0);
+    expect(r.creditsUsed).toBe(0);
+  });
+  it('fails closed without ALLOW_PAID_ENRICHMENT_CALLS — before any fetch call', async () => {
+    const { fetchImpl, calls } = fakeFetch([{ body: {} }]);
+    await expect(provider(fetchImpl, false).domainSearch(DOMAIN)).rejects.toMatchObject({ code: 'ENRICHMENT_PROVIDER_NOT_ALLOWED' });
+    expect(calls).toHaveLength(0);
+  });
+  it('extractDomainSearchPeople skips an entry with no email value', () => {
+    const parsed = hunterDomainSearchResponseSchema.parse({ data: { accept_all: false, emails: [{ type: 'personal' }, { value: `a@${DOMAIN}`, type: 'personal' }] } });
+    expect(extractDomainSearchPeople(parsed, DOMAIN)).toHaveLength(1);
+  });
+});
+
 describe('Hunter as fallback provider #2 — full pipeline via ContactEnrichmentService', () => {
   it('PREVIEW mode: zero network calls, all 3 candidates trivially matched (already known from the website)', async () => {
     const { fetchImpl, calls } = fakeFetch([{ body: {} }]);
@@ -206,5 +271,124 @@ describe('Hunter as fallback provider #2 — full pipeline via ContactEnrichment
     // Shastri: 1 request, 0 credit. Patel: Finder (ambiguous) + Verifier = 2 requests, 2 credits.
     expect(r.creditsEstimated).toBe(2);
     expect((r.provenance as { requestsUsed?: number }).requestsUsed).toBe(3);
+  });
+
+  function allFinderMiss(extra?: { url: string; body: unknown }) {
+    return ((url: string) => {
+      if (url.includes('/email-finder')) {
+        return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(JSON.stringify({ data: { email: null } })) } as unknown as Response);
+      }
+      if (extra && url.includes(extra.url)) {
+        return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(JSON.stringify(extra.body)) } as unknown as Response);
+      }
+      throw new Error(`unexpected Hunter call: ${url}`);
+    }) as unknown as FetchLike;
+  }
+
+  it('Finder fails for all 3 candidates -> Domain Search runs ONCE -> exact-match acceptance', async () => {
+    const fetchImpl = allFinderMiss({
+      url: '/domain-search',
+      body: {
+        data: {
+          domain: DOMAIN, accept_all: false,
+          emails: [{ value: `shaimil@${DOMAIN}`, type: 'personal', confidence: 92, first_name: 'Shaimil', last_name: 'Patel', position: 'Clinical Director', verification: { status: 'valid' } }],
+        },
+      },
+    });
+    const service = new ContactEnrichmentService({ provider: provider(fetchImpl), store: new MemStore(), logger });
+    const r = await service.run('l', DOMAIN, CANDIDATES, caps, { performEnrichment: true });
+    expect(r.outcome).toBe('VERIFIED');
+    expect(r.accepted?.fullName).toBe('Shaimil Patel');
+    expect(r.accepted?.email).toBe(`shaimil@${DOMAIN}`);
+    const dsProv = (r.provenance as { domainSearch?: { peopleCount?: number } }).domainSearch;
+    expect(dsProv?.peopleCount).toBe(1);
+  });
+
+  it('unrelated-person rejection: Domain Search returns only people who match none of our candidates -> stays NOT_FOUND, still only ONE Domain Search call', async () => {
+    const fetchImpl = allFinderMiss({
+      url: '/domain-search',
+      body: {
+        data: {
+          domain: DOMAIN, accept_all: false,
+          emails: [{ value: `someone.else@${DOMAIN}`, type: 'personal', first_name: 'Someone', last_name: 'Else', position: 'Receptionist', verification: { status: 'valid' } }],
+        },
+      },
+    });
+    const service = new ContactEnrichmentService({ provider: provider(fetchImpl), store: new MemStore(), logger });
+    const r = await service.run('l', DOMAIN, CANDIDATES, caps, { performEnrichment: true });
+    expect(r.outcome).toBe('NOT_FOUND');
+    expect(r.accepted).toBeNull();
+  });
+
+  it('generic-email rejection: Domain Search matches a candidate by name but the email is generic (info@) -> rejected, stays NOT_FOUND', async () => {
+    const fetchImpl = allFinderMiss({
+      url: '/domain-search',
+      body: {
+        data: {
+          domain: DOMAIN, accept_all: false,
+          // Matches Shyam Shastri by name/title, but the email itself is a generic role mailbox.
+          emails: [{ value: `info@${DOMAIN}`, type: 'personal', first_name: 'Shyam', last_name: 'Shastri', position: 'Principal Dentist', verification: { status: 'valid' } }],
+        },
+      },
+    });
+    const service = new ContactEnrichmentService({ provider: provider(fetchImpl), store: new MemStore(), logger });
+    const r = await service.run('l', DOMAIN, CANDIDATES, caps, { performEnrichment: true });
+    expect(r.outcome).toBe('NOT_FOUND');
+    expect(r.accepted).toBeNull();
+    const dsProv = (r.provenance as { domainSearch?: { attempts?: Array<{ reason?: string }> } }).domainSearch;
+    expect(dsProv?.attempts?.some((a) => a.reason === 'generic_mailbox_rejected')).toBe(true);
+  });
+
+  it('no-result fail-closed: Domain Search returns zero emails -> NOT_FOUND, zero extra credit, no crash', async () => {
+    const fetchImpl = allFinderMiss({ url: '/domain-search', body: { data: { domain: DOMAIN, accept_all: false, emails: [] } } });
+    const service = new ContactEnrichmentService({ provider: provider(fetchImpl), store: new MemStore(), logger });
+    const r = await service.run('l', DOMAIN, CANDIDATES, caps, { performEnrichment: true });
+    expect(r.outcome).toBe('NOT_FOUND');
+    // 3 Finder misses (0 credit each) + Domain Search with 0 results (0 credit) = 0 total.
+    expect(r.creditsEstimated).toBe(0);
+  });
+
+  it('idempotency: repeating the exact same ENRICH run does not call Domain Search (or Finder) again', async () => {
+    let domainSearchCalls = 0;
+    const fetchImpl = ((url: string) => {
+      if (url.includes('/email-finder')) return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(JSON.stringify({ data: { email: null } })) } as unknown as Response);
+      if (url.includes('/domain-search')) {
+        domainSearchCalls += 1;
+        return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(JSON.stringify({ data: { domain: DOMAIN, accept_all: false, emails: [] } })) } as unknown as Response);
+      }
+      throw new Error(`unexpected Hunter call: ${url}`);
+    }) as unknown as FetchLike;
+    const store = new MemStore();
+    const service = new ContactEnrichmentService({ provider: provider(fetchImpl), store, logger });
+    const r1 = await service.run('l', DOMAIN, CANDIDATES, caps, { performEnrichment: true });
+    const r2 = await service.run('l', DOMAIN, CANDIDATES, caps, { performEnrichment: true });
+    expect(r2.id).toBe(r1.id);
+    expect(domainSearchCalls).toBe(1); // only the first run actually reached Domain Search
+  });
+
+  it('force-refresh bypasses a stale cached NOT_FOUND row and actually re-runs (including Domain Search)', async () => {
+    const store = new MemStore();
+    const staleFetch = allFinderMiss({ url: '/domain-search', body: { data: { domain: DOMAIN, accept_all: false, emails: [] } } });
+    const staleService = new ContactEnrichmentService({ provider: provider(staleFetch), store, logger });
+    const stale = await staleService.run('l', DOMAIN, CANDIDATES, caps, { performEnrichment: true });
+    expect(stale.outcome).toBe('NOT_FOUND');
+
+    let domainSearchCalls = 0;
+    const freshFetch = ((url: string) => {
+      if (url.includes('/email-finder')) return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(JSON.stringify({ data: { email: null } })) } as unknown as Response);
+      if (url.includes('/domain-search')) {
+        domainSearchCalls += 1;
+        return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(JSON.stringify({
+          data: { domain: DOMAIN, accept_all: false, emails: [{ value: `shaimil@${DOMAIN}`, type: 'personal', first_name: 'Shaimil', last_name: 'Patel', position: 'Clinical Director', verification: { status: 'valid' } }] },
+        })) } as unknown as Response);
+      }
+      throw new Error(`unexpected Hunter call: ${url}`);
+    }) as unknown as FetchLike;
+    const freshService = new ContactEnrichmentService({ provider: provider(freshFetch), store, logger });
+    const fresh = await freshService.run('l', DOMAIN, CANDIDATES, caps, { performEnrichment: true, forceRefresh: true });
+    expect(fresh.outcome).toBe('VERIFIED');
+    expect(fresh.accepted?.email).toBe(`shaimil@${DOMAIN}`);
+    expect(domainSearchCalls).toBe(1);
+    expect(store.rows).toHaveLength(1); // overwritten in place, not appended as a second row
   });
 });

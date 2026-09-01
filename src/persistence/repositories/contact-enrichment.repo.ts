@@ -71,8 +71,15 @@ export class ContactEnrichmentRepository implements ContactEnrichmentStore {
     return row ? toDomain(row) : null;
   }
 
-  async save(result: ContactEnrichmentResult): Promise<void> {
-    await this.db.insert(contactEnrichmentResults).values({
+  /**
+   * `overwrite: true` upserts on the (lead_id, provider, mode, input_hash) idempotency index instead of
+   * a plain insert — used ONLY for an explicit, operator-requested `forceRefresh` run (e.g. a
+   * provider's capability grew since the cached row was written). The existing row's `id` is preserved;
+   * every other column is replaced with the fresh result. The ordinary (non-overwrite) path is
+   * unchanged: a plain insert that still fails loudly on an unexpected duplicate.
+   */
+  async save(result: ContactEnrichmentResult, opts?: { overwrite?: boolean }): Promise<void> {
+    const values = {
       id: result.id,
       leadId: result.leadId,
       provider: result.provider,
@@ -94,6 +101,16 @@ export class ContactEnrichmentRepository implements ContactEnrichmentStore {
       provenance: result.provenance,
       createdAt: result.createdAt,
       completedAt: result.completedAt,
+    };
+    const insert = this.db.insert(contactEnrichmentResults).values(values);
+    if (!opts?.overwrite) {
+      await insert;
+      return;
+    }
+    const { id: _preserveExistingId, ...updateSet } = values;
+    await insert.onConflictDoUpdate({
+      target: [contactEnrichmentResults.leadId, contactEnrichmentResults.provider, contactEnrichmentResults.mode, contactEnrichmentResults.inputHash],
+      set: updateSet,
     });
   }
 }

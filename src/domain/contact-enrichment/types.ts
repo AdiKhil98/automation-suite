@@ -114,6 +114,35 @@ export type ContactEnrichmentOutcome = (typeof CONTACT_ENRICHMENT_OUTCOMES)[numb
 export const ENRICHMENT_MODES = ['PREVIEW', 'ENRICH'] as const;
 export type EnrichmentMode = (typeof ENRICHMENT_MODES)[number];
 
+/**
+ * One person found by an OPTIONAL final domain-wide fallback (e.g. Hunter Domain Search) — unlike
+ * PreviewPerson, this already includes an email, because such a fallback IS the paid, credit-charging
+ * lookup itself (not a free preview). `verificationStatus` is already fully normalized by the provider
+ * (accounting for any provider-specific nuance, e.g. a whole-domain catch-all flag) before the service
+ * ever sees it, so it can be fed straight into the same decideAcceptance trust boundary as every other
+ * path. `emailType` is the provider's own personal-vs-generic classification, used as an extra,
+ * defense-in-depth filter alongside (never instead of) the existing generic-mailbox rejection rule.
+ */
+export interface DomainSearchPerson extends ReturnedIdentity {
+  email: string;
+  emailType: 'personal' | 'generic' | null;
+  verificationStatus: EnrichmentVerificationStatus;
+  confidence: number | null;
+  providerLeadId: string | null;
+}
+
+/** Result of ONE domain-wide fallback call. Run AT MOST ONCE per domain per run — never repeated. */
+export interface DomainSearchResult {
+  domain: string;
+  people: DomainSearchPerson[];
+  /** Credits the PROVIDER reported charging. `null` = provider reported nothing. */
+  creditsReported: number | null;
+  /** Our internal ESTIMATE (e.g. 0 when the call returned no results, per Hunter's own credit model). */
+  creditsUsed: number;
+  endpoint: string;
+  rawDigest: string;
+}
+
 /** The accepted, verified decision-maker contact — the ONLY shape allowed to reach outreach. */
 export interface VerifiedContact {
   fullName: string;
