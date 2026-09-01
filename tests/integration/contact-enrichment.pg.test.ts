@@ -21,7 +21,7 @@ const CANDIDATES: CandidatePerson[] = [
 
 function baseResult(leadId: string, over: Partial<ContactEnrichmentResult>): ContactEnrichmentResult {
   return {
-    id: randomUUID(), leadId, provider: 'mock', inputHash: randomUUID(), requestedDomain: DOMAIN,
+    id: randomUUID(), leadId, provider: 'mock', mode: 'ENRICH', inputHash: randomUUID(), requestedDomain: DOMAIN,
     candidates: CANDIDATES, outcome: 'NOT_FOUND', accepted: null, creditsEstimated: 0, creditsReported: null,
     providerResourceId: null, endpoint: null, provenance: {}, createdAt: new Date(), completedAt: new Date(), ...over,
   };
@@ -45,7 +45,7 @@ describe('contact enrichment persistence (PostgreSQL)', () => {
       inputHash: 'h1', outcome: 'VERIFIED', creditsEstimated: 1, creditsReported: 1, endpoint: '/supersearch-enrichment/enrich-leads-from-supersearch',
       accepted: { fullName: 'Shyam Shastri', title: 'Principal Dentist', email: `shyam@${DOMAIN}`, verificationStatus: 'VERIFIED', dataQuality: 'high', confidence: 0.98 },
     }));
-    const found = await repo.findByInputHash(leadId, 'mock', 'h1');
+    const found = await repo.findByInputHash(leadId, 'mock', 'ENRICH', 'h1');
     expect(found?.outcome).toBe('VERIFIED');
     expect(found?.accepted?.email).toBe(`shyam@${DOMAIN}`);
     expect(found?.creditsEstimated).toBe(1);
@@ -55,23 +55,40 @@ describe('contact enrichment persistence (PostgreSQL)', () => {
   it('persists a PREVIEW_MATCHED row with NO reported credits (migration 0040 outcomes + honest credits)', async () => {
     const leadId = await seedLead();
     const repo = new ContactEnrichmentRepository(handle.db);
-    await repo.save(baseResult(leadId, { inputHash: 'h2', outcome: 'PREVIEW_MATCHED', creditsEstimated: 0, creditsReported: null }));
-    const found = await repo.findByInputHash(leadId, 'mock', 'h2');
+    await repo.save(baseResult(leadId, { inputHash: 'h2', mode: 'PREVIEW', outcome: 'PREVIEW_MATCHED', creditsEstimated: 0, creditsReported: null }));
+    const found = await repo.findByInputHash(leadId, 'mock', 'PREVIEW', 'h2');
     expect(found?.outcome).toBe('PREVIEW_MATCHED');
     expect(found?.creditsReported).toBeNull();
   });
 
-  it('enforces idempotency on (lead, provider, input_hash)', async () => {
+  it('enforces idempotency on (lead, provider, mode, input_hash)', async () => {
     const leadId = await seedLead();
     const repo = new ContactEnrichmentRepository(handle.db);
     await repo.save(baseResult(leadId, { inputHash: 'dup' }));
     await expect(repo.save(baseResult(leadId, { inputHash: 'dup' }))).rejects.toThrow();
   });
 
+  it('mode is part of the idempotency key: same input_hash but different mode is NOT a duplicate', async () => {
+    const leadId = await seedLead();
+    const repo = new ContactEnrichmentRepository(handle.db);
+    await repo.save(baseResult(leadId, { inputHash: 'same-hash', mode: 'ENRICH', outcome: 'NOT_FOUND' }));
+    await expect(repo.save(baseResult(leadId, { inputHash: 'same-hash', mode: 'PREVIEW', outcome: 'PREVIEW_NO_MATCH' }))).resolves.not.toThrow();
+    const enrichRow = await repo.findByInputHash(leadId, 'mock', 'ENRICH', 'same-hash');
+    const previewRow = await repo.findByInputHash(leadId, 'mock', 'PREVIEW', 'same-hash');
+    expect(enrichRow?.outcome).toBe('NOT_FOUND');
+    expect(previewRow?.outcome).toBe('PREVIEW_NO_MATCH');
+  });
+
   it('CHECK rejects a VERIFIED row without an email', async () => {
     const leadId = await seedLead();
     const repo = new ContactEnrichmentRepository(handle.db);
     await expect(repo.save(baseResult(leadId, { inputHash: 'bad', outcome: 'VERIFIED', accepted: null }))).rejects.toThrow();
+  });
+
+  it('CHECK rejects a PREVIEW-mode row with an ENRICH-only outcome', async () => {
+    const leadId = await seedLead();
+    const repo = new ContactEnrichmentRepository(handle.db);
+    await expect(repo.save(baseResult(leadId, { inputHash: 'mode-bad', mode: 'PREVIEW', outcome: 'NOT_FOUND' }))).rejects.toThrow();
   });
 
   it('service preview→match→enrich persists VERIFIED and is idempotent against the real DB', async () => {
@@ -91,6 +108,25 @@ describe('contact enrichment persistence (PostgreSQL)', () => {
     expect(r1.outcome).toBe('VERIFIED');
     expect(r1.creditsReported).toBe(1);
     expect(r2.id).toBe(r1.id);
-    expect((await repo.findByInputHash(leadId, 'mock', computeInputHash('mock', DOMAIN, CANDIDATES)))?.id).toBe(r1.id);
+    expect((await repo.findByInputHash(leadId, 'mock', 'ENRICH', computeInputHash('ENRICH', 'mock', DOMAIN, CANDIDATES)))?.id).toBe(r1.id);
+  });
+
+  it('ENRICH then PREVIEW against the real DB are distinct: a stale ENRICH NOT_FOUND never suppresses a later PREVIEW', async () => {
+    const leadId = await seedLead();
+    const repo = new ContactEnrichmentRepository(handle.db);
+    const previewPerson: PreviewPerson = { name: 'Shyam Shastri', firstName: 'Shyam', lastName: 'Shastri', domain: DOMAIN, title: 'Principal Dentist', providerLeadId: 'L' };
+    const preview = (): PreviewResult => ({ domain: DOMAIN, people: [previewPerson], creditsReported: null, resourceId: 'prev', endpoint: 'mock://preview', rawDigest: 'd' });
+    const noEnrich = (q: EnrichmentQuery): ProviderEnrichmentOutcome => ({
+      query: q, email: null, returnedIdentity: null, verificationStatus: 'NOT_FOUND', dataQuality: null, confidence: null,
+      creditsReported: null, resourceId: 'job', endpoint: '/supersearch-enrichment/enrich-leads-from-supersearch', rawDigest: 'd',
+    });
+    const service = new ContactEnrichmentService({ provider: new MockContactEnrichmentProvider(noEnrich, preview), store: repo, logger });
+    const enrichResult = await service.run(leadId, DOMAIN, CANDIDATES, caps, { performEnrichment: true });
+    expect(enrichResult.outcome).toBe('NOT_FOUND');
+    const previewResult = await service.run(leadId, DOMAIN, CANDIDATES, caps, { performEnrichment: false });
+    expect(previewResult.id).not.toBe(enrichResult.id);
+    expect(previewResult.mode).toBe('PREVIEW');
+    expect(previewResult.outcome).toBe('PREVIEW_MATCHED');
+    expect(previewResult.creditsEstimated).toBe(0);
   });
 });

@@ -3,6 +3,7 @@ import {
   type CandidatePerson,
   type ContactEnrichmentOutcome,
   type ContactEnrichmentResult,
+  type EnrichmentMode,
   type VerifiedContact,
 } from '../../domain/contact-enrichment/types.js';
 import { type ContactEnrichmentStore } from '../../domain/contact-enrichment/service.js';
@@ -27,6 +28,7 @@ function toDomain(row: Row): ContactEnrichmentResult {
     id: row.id,
     leadId: row.leadId,
     provider: row.provider,
+    mode: row.mode as EnrichmentMode,
     inputHash: row.inputHash,
     requestedDomain: row.requestedDomain,
     candidates: row.candidates as CandidatePerson[],
@@ -44,13 +46,15 @@ function toDomain(row: Row): ContactEnrichmentResult {
 
 /**
  * Persistence for contact enrichment runs. The idempotency unique index on
- * (lead_id, provider, input_hash) backs {@link findByInputHash}; the service consults it before any
- * spend. This repo never touches lead_facts, so no manual contact fact can be overwritten.
+ * (lead_id, provider, mode, input_hash) backs {@link findByInputHash}; the service consults it before
+ * any spend. Mode (PREVIEW vs ENRICH) is part of the identity so a non-paid preview and a paid
+ * enrichment for the same lead/domain/candidates never suppress each other. This repo never touches
+ * lead_facts, so no manual contact fact can be overwritten.
  */
 export class ContactEnrichmentRepository implements ContactEnrichmentStore {
   constructor(private readonly db: DbExecutor) {}
 
-  async findByInputHash(leadId: string, provider: string, inputHash: string): Promise<ContactEnrichmentResult | null> {
+  async findByInputHash(leadId: string, provider: string, mode: EnrichmentMode, inputHash: string): Promise<ContactEnrichmentResult | null> {
     const rows = await this.db
       .select()
       .from(contactEnrichmentResults)
@@ -58,6 +62,7 @@ export class ContactEnrichmentRepository implements ContactEnrichmentStore {
         and(
           eq(contactEnrichmentResults.leadId, leadId),
           eq(contactEnrichmentResults.provider, provider),
+          eq(contactEnrichmentResults.mode, mode),
           eq(contactEnrichmentResults.inputHash, inputHash),
         ),
       )
@@ -71,6 +76,7 @@ export class ContactEnrichmentRepository implements ContactEnrichmentStore {
       id: result.id,
       leadId: result.leadId,
       provider: result.provider,
+      mode: result.mode,
       inputHash: result.inputHash,
       requestedDomain: result.requestedDomain,
       candidates: result.candidates,

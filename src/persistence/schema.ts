@@ -2823,6 +2823,8 @@ export const contactEnrichmentResults = pgTable(
     id: text('id').primaryKey(),
     leadId: text('lead_id').notNull().references(() => leads.id, { onDelete: 'cascade' }),
     provider: text('provider').notNull(),
+    // Idempotency identity dimension: a non-paid PREVIEW and a paid ENRICH are distinct operations.
+    mode: text('mode').notNull(),
     inputHash: text('input_hash').notNull(),
     requestedDomain: text('requested_domain').notNull(),
     candidates: jsonb('candidates').notNull(),
@@ -2844,8 +2846,15 @@ export const contactEnrichmentResults = pgTable(
   },
   (t) => ({
     leadIdx: index('contact_enrichment_results_lead_idx').on(t.leadId),
-    idempotencyUk: uniqueIndex('contact_enrichment_results_idempotency_uk').on(t.leadId, t.provider, t.inputHash),
+    idempotencyUk: uniqueIndex('contact_enrichment_results_idempotency_uk').on(t.leadId, t.provider, t.mode, t.inputHash),
+    modeCk: check('contact_enrichment_mode_ck', sql`${t.mode} IN ('PREVIEW','ENRICH')`),
     outcomeCk: check('contact_enrichment_outcome_ck', sql`${t.outcome} IN ('VERIFIED','NOT_FOUND','CAPPED','ERROR','PREVIEW_MATCHED','PREVIEW_NO_MATCH')`),
+    // PREVIEW mode never reaches the paid loop (VERIFIED/NOT_FOUND/CAPPED are ENRICH-only outcomes).
+    modeOutcomeCk: check(
+      'contact_enrichment_mode_outcome_ck',
+      sql`(${t.mode} = 'PREVIEW' AND ${t.outcome} IN ('PREVIEW_MATCHED','PREVIEW_NO_MATCH','ERROR'))
+          OR (${t.mode} = 'ENRICH' AND ${t.outcome} IN ('VERIFIED','NOT_FOUND','CAPPED','ERROR','PREVIEW_NO_MATCH'))`,
+    ),
     creditsCk: check('contact_enrichment_credits_ck', sql`${t.creditsUsed} >= 0 AND (${t.creditsReported} IS NULL OR ${t.creditsReported} >= 0)`),
     // A VERIFIED row MUST carry an accepted email + VERIFIED status; a non-VERIFIED row MUST NOT.
     acceptedCk: check(

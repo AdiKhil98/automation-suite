@@ -9,6 +9,7 @@ import {
 import {
   type CandidatePerson,
   type ContactEnrichmentResult,
+  type EnrichmentMode,
   type EnrichmentQuery,
   type EnrichmentVerificationStatus,
   type PreviewPerson,
@@ -57,8 +58,8 @@ function enrichVerified(forLast: string): MockEnrichmentResponder {
 
 class MemStore implements ContactEnrichmentStore {
   rows: ContactEnrichmentResult[] = [];
-  findByInputHash(leadId: string, provider: string, inputHash: string): Promise<ContactEnrichmentResult | null> {
-    return Promise.resolve(this.rows.find((r) => r.leadId === leadId && r.provider === provider && r.inputHash === inputHash) ?? null);
+  findByInputHash(leadId: string, provider: string, mode: EnrichmentMode, inputHash: string): Promise<ContactEnrichmentResult | null> {
+    return Promise.resolve(this.rows.find((r) => r.leadId === leadId && r.provider === provider && r.mode === mode && r.inputHash === inputHash) ?? null);
   }
   save(result: ContactEnrichmentResult): Promise<void> { this.rows.push(result); return Promise.resolve(); }
 }
@@ -107,6 +108,9 @@ describe('service: preview-first strategy', () => {
     expect(r.outcome).toBe('PREVIEW_MATCHED');
     expect(enrichSpy).not.toHaveBeenCalled();
     expect((r.provenance as { matches: unknown[] }).matches).toHaveLength(1);
+    expect(r.mode).toBe('PREVIEW');
+    expect(r.creditsEstimated).toBe(0); // preview never estimates a spend
+    expect(r.creditsReported).toBeNull(); // no real preview charge reported by the provider
   });
   it('preview match → paid enrich → VERIFIED (only the matched person is enriched)', async () => {
     const { service, previewSpy, enrichSpy } = svc(previewResponder(previewPersonFor(CANDIDATES[0], DOMAIN)), enrichVerified('Shastri'));
@@ -138,14 +142,59 @@ describe('service: preview-first strategy', () => {
     expect(r.creditsEstimated).toBe(1); // one attempt
     expect(r.creditsReported).toBeNull(); // provider reported nothing → not a fabricated 1
   });
-  it('is idempotent (no re-preview, no re-spend)', async () => {
+  it('ENRICH → same ENRICH is idempotent (no re-preview, no re-spend)', async () => {
     const store = new MemStore();
     const { service, previewSpy, enrichSpy } = svc(previewResponder(previewPersonFor(CANDIDATES[0], DOMAIN)), enrichVerified('Shastri'), store);
     const r1 = await service.run('l', DOMAIN, CANDIDATES, caps, FULL);
     const r2 = await service.run('l', DOMAIN, CANDIDATES, caps, FULL);
     expect(r2.id).toBe(r1.id);
+    expect(r1.mode).toBe('ENRICH');
     expect(previewSpy).toHaveBeenCalledTimes(1);
     expect(enrichSpy).toHaveBeenCalledTimes(1);
+  });
+  it('PREVIEW → same PREVIEW is idempotent (zero additional network calls)', async () => {
+    const store = new MemStore();
+    const { service, previewSpy, enrichSpy } = svc(previewResponder(previewPersonFor(CANDIDATES[0], DOMAIN)), enrichVerified('Shastri'), store);
+    const r1 = await service.run('l', DOMAIN, CANDIDATES, caps, PREVIEW_ONLY);
+    const r2 = await service.run('l', DOMAIN, CANDIDATES, caps, PREVIEW_ONLY);
+    expect(r2.id).toBe(r1.id);
+    expect(r1.mode).toBe('PREVIEW');
+    expect(previewSpy).toHaveBeenCalledTimes(1);
+    expect(enrichSpy).not.toHaveBeenCalled();
+  });
+  it('ENRICH then PREVIEW are distinct operations: a stale ENRICH result never suppresses a later PREVIEW', async () => {
+    const store = new MemStore();
+    // First: a real ENRICH run that results in NOT_FOUND (no candidate accepted).
+    const { service, previewSpy, enrichSpy } = svc(previewResponder(previewPersonFor(CANDIDATES[0], DOMAIN)), () => outcome({ domain: DOMAIN, fullName: '', firstName: '', lastName: '', title: '' }, {}), store);
+    const enrichResult = await service.run('l', DOMAIN, CANDIDATES, caps, FULL);
+    expect(enrichResult.outcome).toBe('NOT_FOUND');
+    expect(enrichResult.mode).toBe('ENRICH');
+    expect(previewSpy).toHaveBeenCalledTimes(1);
+    expect(enrichSpy).toHaveBeenCalledTimes(1);
+
+    // Then: a PREVIEW for the identical lead/domain/candidates must run its OWN preview, not replay the ENRICH row.
+    const previewResult = await service.run('l', DOMAIN, CANDIDATES, caps, PREVIEW_ONLY);
+    expect(previewResult.id).not.toBe(enrichResult.id);
+    expect(previewResult.mode).toBe('PREVIEW');
+    expect(previewResult.outcome).toBe('PREVIEW_MATCHED');
+    expect(previewSpy).toHaveBeenCalledTimes(2); // preview ran again — NOT suppressed by the cached ENRICH NOT_FOUND
+    expect(enrichSpy).toHaveBeenCalledTimes(1); // still only the one paid call from the earlier ENRICH run
+  });
+  it('PREVIEW then ENRICH are distinct operations: a stale PREVIEW never suppresses a later paid ENRICH', async () => {
+    const store = new MemStore();
+    const { service, previewSpy, enrichSpy } = svc(previewResponder(previewPersonFor(CANDIDATES[0], DOMAIN)), enrichVerified('Shastri'), store);
+    const previewResult = await service.run('l', DOMAIN, CANDIDATES, caps, PREVIEW_ONLY);
+    expect(previewResult.outcome).toBe('PREVIEW_MATCHED');
+    expect(previewResult.mode).toBe('PREVIEW');
+    expect(previewSpy).toHaveBeenCalledTimes(1);
+    expect(enrichSpy).not.toHaveBeenCalled();
+
+    const enrichResult = await service.run('l', DOMAIN, CANDIDATES, caps, FULL);
+    expect(enrichResult.id).not.toBe(previewResult.id);
+    expect(enrichResult.mode).toBe('ENRICH');
+    expect(enrichResult.outcome).toBe('VERIFIED');
+    expect(previewSpy).toHaveBeenCalledTimes(2); // the ENRICH run performed its own preview, not reused from the cached PREVIEW row
+    expect(enrichSpy).toHaveBeenCalledTimes(1); // the paid call actually happened — was NOT suppressed by the cached preview
   });
   it('never retries a preview error (ERROR, fail closed)', async () => {
     const provider = new MockContactEnrichmentProvider();
@@ -154,7 +203,10 @@ describe('service: preview-first strategy', () => {
     expect(r.outcome).toBe('ERROR');
   });
   it('computeInputHash stable regardless of order', () => {
-    expect(computeInputHash('instantly', DOMAIN, CANDIDATES)).toBe(computeInputHash('instantly', 'DIAMOND-SMILE.com', [...CANDIDATES].reverse()));
+    expect(computeInputHash('ENRICH', 'instantly', DOMAIN, CANDIDATES)).toBe(computeInputHash('ENRICH', 'instantly', 'DIAMOND-SMILE.com', [...CANDIDATES].reverse()));
+  });
+  it('computeInputHash differs by mode for identical provider/domain/candidates', () => {
+    expect(computeInputHash('PREVIEW', 'instantly', DOMAIN, CANDIDATES)).not.toBe(computeInputHash('ENRICH', 'instantly', DOMAIN, CANDIDATES));
   });
 });
 
