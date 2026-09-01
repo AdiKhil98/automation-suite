@@ -3,12 +3,21 @@ import { AppError } from '../../utils/errors.js';
 import { type EnrichmentQuery, type EnrichmentVerificationStatus, type PreviewPerson, type ReturnedIdentity } from '../../domain/contact-enrichment/types.js';
 
 /**
- * Instantly API v2 — SuperSearch enrichment + leads retrieval contract (the ONLY external surface we
- * depend on). Verified against the current official docs:
+ * Instantly API v2 — SuperSearch preview + enrichment + leads retrieval contract (the ONLY external
+ * surface we depend on). Verified against the current official docs:
  *
- *   1. POST /api/v2/supersearch-enrichment/enrich-leads-from-supersearch   -> { resource_id }
- *   2. GET  /api/v2/supersearch-enrichment/{resource_id}                    -> poll until in_progress=false
- *   3. POST /api/v2/leads/list   { list_id: resource_id }                   -> the enriched contact(s)
+ *   PREVIEW (non-enriching, synchronous, no credit):
+ *     POST /api/v2/supersearch-enrichment/preview-leads-from-supersearch
+ *       -> { number_of_leads, number_of_redacted_results, leads: [{ firstName, lastName, fullName,
+ *           jobTitle, companyName, ... }] }
+ *
+ *   ENRICH (paid, async job):
+ *     1. POST /api/v2/supersearch-enrichment/enrich-leads-from-supersearch   -> { resource_id }
+ *     2. GET  /api/v2/supersearch-enrichment/{resource_id}                    -> poll until in_progress=false
+ *     3. POST /api/v2/leads/list   { list_id: resource_id }                   -> the enriched contact(s)
+ *
+ * The two flows are never mixed: preview always hits preview-leads-from-supersearch and NEVER the
+ * enrich/poll/leads-list job flow; enrich always hits the job flow and NEVER the preview endpoint.
  *
  * Auth: `Authorization: Bearer <INSTANTLY_API_KEY>`, `Content-Type: application/json`.
  * Base URL: config INSTANTLY_API_BASE_URL (default https://api.instantly.ai/api/v2).
@@ -18,6 +27,8 @@ import { type EnrichmentQuery, type EnrichmentVerificationStatus, type PreviewPe
  */
 
 export const INSTANTLY_ENDPOINTS = {
+  /** Synchronous, NON-ENRICHING preview/search over a domain. No credit, no email revealed. */
+  previewLeads: '/supersearch-enrichment/preview-leads-from-supersearch',
   /** Async: run a SuperSearch + work-email enrichment. Returns the generated list resource_id. */
   enrich: '/supersearch-enrichment/enrich-leads-from-supersearch',
   /** Poll the enrichment job by resource_id until in_progress=false. */
@@ -57,23 +68,27 @@ export function buildLeadsListRequestBody(resourceId: string): Record<string, un
 }
 
 /**
- * Build a NON-ENRICHING preview/search over a domain: work_email_enrichment=false so no email is
- * revealed and (by design) no enrichment credit is spent. No title restriction — we match the
- * returned people locally. `limit` bounds how many domain contacts to inspect.
+ * Build the preview-leads-from-supersearch request body: domain-first, NO title filter (title
+ * matching happens locally against the returned people, not in the Instantly query). This is the
+ * dedicated non-enriching preview endpoint — it never reveals an email and never spends a credit.
  */
-export function buildPreviewRequestBody(domain: string, limit: number): Record<string, unknown> {
-  return {
-    limit,
-    work_email_enrichment: false,
-    skip_rows_without_email: false,
-    search_filters: { domains: [domain] },
-  };
+export function buildPreviewLeadsFromSupersearchRequestBody(domain: string, limit: number): Record<string, unknown> {
+  return { limit, search_filters: { domains: [domain] } };
 }
 
-/** Build a leads/list body for a preview list (more than one row). */
-export function buildPreviewLeadsListRequestBody(resourceId: string, limit: number): Record<string, unknown> {
-  return { list_id: resourceId, limit };
-}
+/**
+ * POST preview-leads-from-supersearch response — synchronous, no job/resource_id. `leads[]` rows use
+ * the provider's preview vocabulary (firstName/lastName/fullName/jobTitle/companyName), distinct from
+ * the enrich/leads-list row vocabulary (first_name/last_name/company_domain/title).
+ */
+export const previewLeadsResponseSchema = z
+  .object({
+    number_of_leads: z.number().optional(),
+    number_of_redacted_results: z.number().optional(),
+    leads: z.array(z.record(z.string(), z.unknown())).optional(),
+  })
+  .passthrough();
+export type PreviewLeadsResponse = z.infer<typeof previewLeadsResponseSchema>;
 
 /** POST enrich response — the generated/list resource id. */
 export const enrichResponseSchema = z
@@ -170,14 +185,21 @@ export function extractLead(lead: Record<string, unknown>): ExtractedLead {
   };
 }
 
-/** Map ONE preview/search row to a PreviewPerson (identity only — preview never reveals an email). */
+/**
+ * Map ONE preview-leads-from-supersearch row to a PreviewPerson (identity only — preview never
+ * reveals an email). The preview endpoint's vocabulary is camelCase (fullName/jobTitle/companyName);
+ * snake_case keys are also accepted defensively in case the API returns either convention. Preview
+ * rows carry no per-person domain field (the search itself is already domain-scoped via
+ * search_filters.domains), so `domain` is left null when absent — matchPreviewPerson treats a missing
+ * preview domain as satisfied for exactly that reason.
+ */
 export function extractPreviewPerson(lead: Record<string, unknown>): PreviewPerson {
   return {
-    name: str(lead['name']) ?? str(lead['full_name']),
-    firstName: str(lead['first_name']),
-    lastName: str(lead['last_name']),
-    domain: str(lead['company_domain']) ?? str(lead['organization_domain']) ?? str(lead['domain']),
-    title: str(lead['title']) ?? str(lead['job_title']) ?? str(lead['headline']),
+    name: str(lead['fullName']) ?? str(lead['full_name']) ?? str(lead['name']),
+    firstName: str(lead['firstName']) ?? str(lead['first_name']),
+    lastName: str(lead['lastName']) ?? str(lead['last_name']),
+    domain: str(lead['companyDomain']) ?? str(lead['company_domain']) ?? str(lead['organization_domain']) ?? str(lead['domain']),
+    title: str(lead['jobTitle']) ?? str(lead['job_title']) ?? str(lead['title']) ?? str(lead['headline']),
     providerLeadId: str(lead['id']) ?? str(lead['lead_id']),
   };
 }

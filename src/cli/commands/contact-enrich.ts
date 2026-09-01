@@ -78,7 +78,8 @@ export async function contactEnrichCommand(ctx: CliContext, opts: ContactEnrichC
     for (const p of candidates) console.log(`    ${String(p.priority)}. ${p.fullName} — ${p.title}  (${p.firstName} ${p.lastName})`);
     if (providerName === 'instantly') {
       console.log(`  flow:            [--preview] non-enriching search (0 credits) → local match → [--confirm] paid enrich of a matched person only`);
-      console.log(`  endpoints:       POST ${INSTANTLY_ENDPOINTS.enrich} → GET ${INSTANTLY_ENDPOINTS.enrich}/{resource_id} → POST ${INSTANTLY_ENDPOINTS.leadsList}`);
+      console.log(`  preview endpoint: POST ${INSTANTLY_ENDPOINTS.previewLeads}`);
+      console.log(`  enrich endpoints: POST ${INSTANTLY_ENDPOINTS.enrich} → GET ${INSTANTLY_ENDPOINTS.enrich}/{resource_id} → POST ${INSTANTLY_ENDPOINTS.leadsList}`);
       console.log(`  required scopes: ${INSTANTLY_SCOPES.enrich} + ${INSTANTLY_SCOPES.read} + ${INSTANTLY_SCOPES.leadsRead}`);
     }
     console.log(`  idempotency (PREVIEW): ${existingPreview ? `EXISTING ${existingPreview.outcome} (re-run would NOT spend)` : 'none yet'}`);
