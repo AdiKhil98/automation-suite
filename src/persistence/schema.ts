@@ -2847,13 +2847,16 @@ export const contactEnrichmentResults = pgTable(
   (t) => ({
     leadIdx: index('contact_enrichment_results_lead_idx').on(t.leadId),
     idempotencyUk: uniqueIndex('contact_enrichment_results_idempotency_uk').on(t.leadId, t.provider, t.mode, t.inputHash),
-    modeCk: check('contact_enrichment_mode_ck', sql`${t.mode} IN ('PREVIEW','ENRICH')`),
+    modeCk: check('contact_enrichment_mode_ck', sql`${t.mode} IN ('PREVIEW','ENRICH','DOMAIN_SEARCH_ONLY')`),
     outcomeCk: check('contact_enrichment_outcome_ck', sql`${t.outcome} IN ('VERIFIED','NOT_FOUND','CAPPED','ERROR','PREVIEW_MATCHED','PREVIEW_NO_MATCH')`),
     // PREVIEW mode never reaches the paid loop (VERIFIED/NOT_FOUND/CAPPED are ENRICH-only outcomes).
+    // DOMAIN_SEARCH_ONLY (the guarded Hunter-only Finder-tier bypass) reaches the same paid outcomes as
+    // ENRICH minus PREVIEW_NO_MATCH, since it never runs a preview/local-match step at all.
     modeOutcomeCk: check(
       'contact_enrichment_mode_outcome_ck',
       sql`(${t.mode} = 'PREVIEW' AND ${t.outcome} IN ('PREVIEW_MATCHED','PREVIEW_NO_MATCH','ERROR'))
-          OR (${t.mode} = 'ENRICH' AND ${t.outcome} IN ('VERIFIED','NOT_FOUND','CAPPED','ERROR','PREVIEW_NO_MATCH'))`,
+          OR (${t.mode} = 'ENRICH' AND ${t.outcome} IN ('VERIFIED','NOT_FOUND','CAPPED','ERROR','PREVIEW_NO_MATCH'))
+          OR (${t.mode} = 'DOMAIN_SEARCH_ONLY' AND ${t.outcome} IN ('VERIFIED','NOT_FOUND','CAPPED','ERROR'))`,
     ),
     creditsCk: check('contact_enrichment_credits_ck', sql`${t.creditsUsed} >= 0 AND (${t.creditsReported} IS NULL OR ${t.creditsReported} >= 0)`),
     // A VERIFIED row MUST carry an accepted email + VERIFIED status; a non-VERIFIED row MUST NOT.

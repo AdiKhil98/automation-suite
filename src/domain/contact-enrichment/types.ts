@@ -110,8 +110,11 @@ export type ContactEnrichmentOutcome = (typeof CONTACT_ENRICHMENT_OUTCOMES)[numb
 /**
  * Operation mode — part of the idempotency identity. A non-paid PREVIEW and a paid ENRICH request
  * for the same lead/domain/candidates are distinct operations and must never suppress each other.
+ * DOMAIN_SEARCH_ONLY is a guarded, Hunter-only operator bypass of the per-candidate Finder tier that
+ * goes straight to one Domain Search call — also distinct, so it never suppresses or is suppressed by
+ * a PREVIEW/ENRICH run for the same lead/domain/candidates.
  */
-export const ENRICHMENT_MODES = ['PREVIEW', 'ENRICH'] as const;
+export const ENRICHMENT_MODES = ['PREVIEW', 'ENRICH', 'DOMAIN_SEARCH_ONLY'] as const;
 export type EnrichmentMode = (typeof ENRICHMENT_MODES)[number];
 
 /**

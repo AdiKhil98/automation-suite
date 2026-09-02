@@ -20,6 +20,7 @@ import { MockContactEnrichmentProvider, type MockEnrichmentResponder, type MockP
 import { InstantlyContactEnrichmentProvider, type FetchLike } from '../../src/integrations/contact-enrichment/instantly-provider.js';
 import { buildEnrichLeadsRequestBody, buildPreviewLeadsFromSupersearchRequestBody, normalizeInstantlyVerification } from '../../src/integrations/contact-enrichment/instantly-schema.js';
 import { buildContactEnrichmentProvider } from '../../src/cli/commands/contact-enrich-build.js';
+import { validateDomainSearchOnlyFlags, type ContactEnrichCliOptions } from '../../src/cli/commands/contact-enrich.js';
 
 const logger = { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} } as unknown as Logger;
 const caps: EnrichmentRunCaps = { maxRequests: 3, maxCredits: 3, minCreditsPerLookup: 1 };
@@ -370,5 +371,25 @@ describe('buildContactEnrichmentProvider — Hunter (fallback provider #2) gatin
   it('fails closed without enable flag / without key', () => {
     expect(() => buildContactEnrichmentProvider(ctx({ CONTACT_ENRICHMENT_ENABLED: false }))).toThrow(/CONTACT_ENRICHMENT_ENABLED/);
     expect(() => buildContactEnrichmentProvider(ctx({ HUNTER_API_KEY: undefined }))).toThrow(/HUNTER_API_KEY/);
+  });
+});
+
+describe('validateDomainSearchOnlyFlags — CLI guard for --domain-search-only', () => {
+  it('is a no-op when the flag is not set, regardless of provider/confirm', () => {
+    expect(() => validateDomainSearchOnlyFlags({} as ContactEnrichCliOptions, 'instantly')).not.toThrow();
+    expect(() => validateDomainSearchOnlyFlags({ confirm: false } as ContactEnrichCliOptions, 'mock')).not.toThrow();
+  });
+  it('rejects a non-Hunter provider', () => {
+    expect(() => validateDomainSearchOnlyFlags({ domainSearchOnly: true, confirm: true } as ContactEnrichCliOptions, 'instantly'))
+      .toThrow(/CONTACT_ENRICHMENT_PROVIDER=hunter/);
+    expect(() => validateDomainSearchOnlyFlags({ domainSearchOnly: true, confirm: true } as ContactEnrichCliOptions, 'mock'))
+      .toThrow(/CONTACT_ENRICHMENT_PROVIDER=hunter/);
+  });
+  it('rejects Hunter without --confirm', () => {
+    expect(() => validateDomainSearchOnlyFlags({ domainSearchOnly: true } as ContactEnrichCliOptions, 'hunter'))
+      .toThrow(/requires --confirm/);
+  });
+  it('passes for hunter + confirm', () => {
+    expect(() => validateDomainSearchOnlyFlags({ domainSearchOnly: true, confirm: true } as ContactEnrichCliOptions, 'hunter')).not.toThrow();
   });
 });

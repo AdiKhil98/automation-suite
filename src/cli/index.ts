@@ -559,6 +559,7 @@ program
   .option('--preview', 'live NON-PAID preview/search + local identity match only (no credits, no enrichment)')
   .option('--confirm', 'full run: preview → match → paid work-email enrichment of a matched person (needs ALLOW_PAID_ENRICHMENT_CALLS)')
   .option('--force-refresh', 'explicit one-shot bypass of the idempotency cache lookup — use ONLY when a provider capability has genuinely changed since the cached row was written; overwrites that row with the fresh result')
+  .option('--domain-search-only', 'Hunter-only: skip the per-candidate Finder tier and try exactly one Domain Search call against the known --candidate list (requires --confirm)')
   .action((opts: ContactEnrichCliOptions) => withContext((ctx) => contactEnrichCommand(ctx, opts)));
 
 program

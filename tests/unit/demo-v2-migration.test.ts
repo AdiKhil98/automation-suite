@@ -25,10 +25,11 @@ describe('migration 0023 Demo Engine V2 foundation', () => {
     // 0034 (deterministic outreach-finding bridge), 0035 (email authorship),
     // 0036 (reply email finalization), 0037 (outreach message gmail idempotency),
     // 0038 (scheduled send automation), 0039 (contact enrichment),
-    // 0040 (contact enrichment preview), and 0041 (contact enrichment mode) as the tail.
+    // 0040 (contact enrichment preview), 0041 (contact enrichment mode), and
+    // 0042 (contact enrichment domain-search-only mode) as the tail.
     const demoV2Entries = journal.entries.filter((entry) => entry.tag.startsWith('00') && entry.tag.includes('demo_v2'));
     expect(demoV2Entries.at(-1)?.tag).toBe('0025_demo_v2_visual_reviews');
-    expect(journal.entries.at(-1)?.tag).toBe('0041_contact_enrichment_mode');
+    expect(journal.entries.at(-1)?.tag).toBe('0042_contact_enrichment_domain_search_only_mode');
   });
 
   it('creates exactly the 21 isolated approved V2 tables and changes no V1 table', () => {

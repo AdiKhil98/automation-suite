@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { type Logger } from 'pino';
+import { AppError } from '../../utils/errors.js';
 import { type ContactEnrichmentProvider } from './provider.js';
 import { decideAcceptance, matchPreviewPerson } from './verification.js';
 import {
@@ -234,46 +235,137 @@ export class ContactEnrichmentService {
     // only for a provider that implements this capability at all.
     let domainSearchProvenance: Record<string, unknown> | undefined;
     if (!accepted && !errored && !capped && this.deps.provider.domainSearch) {
-      // Gated by BOTH caps, same as every other HTTP call this run makes: the request cap counts this
-      // as one more actual HTTP call (so reaching it requires sizing maxRequests for candidates + 1,
-      // e.g. 3 known candidates + 1 domain-wide call = maxRequests >= 4), and the credit cap still
-      // applies to its own estimated spend on top of whatever the per-candidate loop already used.
-      if (requestsUsed >= caps.maxRequests || creditsEstimated + Math.max(1, caps.minCreditsPerLookup) > caps.maxCredits) {
-        capped = true;
-      } else {
-        try {
-          const ds = await this.deps.provider.domainSearch(domain);
-          requestsUsed += 1;
-          creditsEstimated += ds.creditsUsed;
-          addReported(ds.creditsReported);
-          endpoint = ds.endpoint;
-          const personalPeople = ds.people.filter((p) => p.emailType === 'personal');
-          const dsAttempts: Array<Record<string, unknown>> = [];
-          for (const person of ordered) {
-            const match = personalPeople.find((p) => matchPreviewPerson(p, person, domain).isMatch);
-            if (!match) { dsAttempts.push({ person: person.fullName, found: false }); continue; }
-            const syntheticOutcome: ProviderEnrichmentOutcome = {
-              query: queryFor(domain, person), email: match.email, returnedIdentity: match,
-              verificationStatus: match.verificationStatus, dataQuality: null, confidence: match.confidence,
-              creditsReported: null, resourceId: null, endpoint: ds.endpoint, rawDigest: ds.rawDigest,
-            };
-            const decision = decideAcceptance(syntheticOutcome, person, domain);
-            dsAttempts.push({
-              person: person.fullName, title: person.title, verificationStatus: match.verificationStatus,
-              accepted: decision.accepted, reason: decision.reason, match: decision.match,
-            });
-            if (decision.accepted && decision.contact) { accepted = decision.contact; break; }
-          }
-          domainSearchProvenance = { peopleCount: ds.people.length, personalCount: personalPeople.length, attempts: dsAttempts, endpoint: ds.endpoint, rawDigest: ds.rawDigest };
-        } catch (err) {
-          errored = true;
-          domainSearchProvenance = { error: err instanceof Error ? err.message : String(err) };
-          this.deps.logger.error({ leadId, err: err instanceof Error ? err.message : String(err) }, 'contact-enrichment: domain-search error (no retry)');
-        }
-      }
+      const ds = await this.attemptDomainSearch(leadId, domain, ordered, caps, requestsUsed, creditsEstimated, addReported);
+      requestsUsed = ds.requestsUsed;
+      creditsEstimated = ds.creditsEstimated;
+      capped = ds.capped;
+      errored = ds.errored;
+      if (ds.endpoint) endpoint = ds.endpoint;
+      if (ds.resourceId) resourceId = ds.resourceId;
+      accepted = ds.accepted;
+      domainSearchProvenance = ds.domainSearchProvenance;
     }
 
     const outcome = accepted ? 'VERIFIED' : errored ? 'ERROR' : capped ? 'CAPPED' : 'NOT_FOUND';
     return finish(outcome, accepted, creditsEstimated, resourceId, endpoint, { ...previewProvenance, stage: 'enrich', attempts, requestsUsed, caps, domainSearch: domainSearchProvenance });
+  }
+
+  /**
+   * OPTIONAL final domain-wide fallback (e.g. Hunter Domain Search), AT MOST ONCE — the shared trust
+   * boundary/parsing used by both run() Step 4 and runDomainSearchOnly(). Cap-checks BOTH requests and
+   * credits before ever calling provider.domainSearch(); on success, filters to emailType === 'personal'
+   * and runs every match through the SAME decideAcceptance trust boundary as every other enrichment path.
+   */
+  private async attemptDomainSearch(
+    leadId: string,
+    domain: string,
+    ordered: CandidatePerson[],
+    caps: EnrichmentRunCaps,
+    requestsUsedIn: number,
+    creditsEstimatedIn: number,
+    addReported: (v: number | null) => void,
+  ): Promise<{
+    accepted: VerifiedContact | null;
+    requestsUsed: number;
+    creditsEstimated: number;
+    capped: boolean;
+    errored: boolean;
+    endpoint: string | null;
+    resourceId: string | null;
+    domainSearchProvenance: Record<string, unknown> | undefined;
+  }> {
+    let requestsUsed = requestsUsedIn;
+    let creditsEstimated = creditsEstimatedIn;
+    let accepted: VerifiedContact | null = null;
+    let endpoint: string | null = null;
+    const resourceId: string | null = null;
+    let domainSearchProvenance: Record<string, unknown> | undefined;
+
+    // Gated by BOTH caps, same as every other HTTP call this run makes: the request cap counts this as
+    // one more actual HTTP call (so a run() call sizing maxRequests for candidates + 1 leaves room for
+    // it, e.g. 3 known candidates + 1 domain-wide call = maxRequests >= 4; a domain-search-only run
+    // starts both counters at 0, so any maxRequests/maxCredits >= 1 leaves room for its single call).
+    if (requestsUsed >= caps.maxRequests || creditsEstimated + Math.max(1, caps.minCreditsPerLookup) > caps.maxCredits) {
+      return { accepted, requestsUsed, creditsEstimated, capped: true, errored: false, endpoint, resourceId, domainSearchProvenance };
+    }
+
+    try {
+      const ds = await this.deps.provider.domainSearch!(domain);
+      requestsUsed += 1;
+      creditsEstimated += ds.creditsUsed;
+      addReported(ds.creditsReported);
+      endpoint = ds.endpoint;
+      const personalPeople = ds.people.filter((p) => p.emailType === 'personal');
+      const dsAttempts: Array<Record<string, unknown>> = [];
+      for (const person of ordered) {
+        const match = personalPeople.find((p) => matchPreviewPerson(p, person, domain).isMatch);
+        if (!match) { dsAttempts.push({ person: person.fullName, found: false }); continue; }
+        const syntheticOutcome: ProviderEnrichmentOutcome = {
+          query: queryFor(domain, person), email: match.email, returnedIdentity: match,
+          verificationStatus: match.verificationStatus, dataQuality: null, confidence: match.confidence,
+          creditsReported: null, resourceId: null, endpoint: ds.endpoint, rawDigest: ds.rawDigest,
+        };
+        const decision = decideAcceptance(syntheticOutcome, person, domain);
+        dsAttempts.push({
+          person: person.fullName, title: person.title, verificationStatus: match.verificationStatus,
+          accepted: decision.accepted, reason: decision.reason, match: decision.match,
+        });
+        if (decision.accepted && decision.contact) { accepted = decision.contact; break; }
+      }
+      domainSearchProvenance = { peopleCount: ds.people.length, personalCount: personalPeople.length, attempts: dsAttempts, endpoint: ds.endpoint, rawDigest: ds.rawDigest };
+      return { accepted, requestsUsed, creditsEstimated, capped: false, errored: false, endpoint, resourceId, domainSearchProvenance };
+    } catch (err) {
+      domainSearchProvenance = { error: err instanceof Error ? err.message : String(err) };
+      this.deps.logger.error({ leadId, err: err instanceof Error ? err.message : String(err) }, 'contact-enrichment: domain-search error (no retry)');
+      return { accepted, requestsUsed, creditsEstimated, capped: false, errored: true, endpoint, resourceId, domainSearchProvenance };
+    }
+  }
+
+  /**
+   * Guarded, Hunter-only operator bypass: skip the per-candidate Finder tier entirely and try exactly
+   * ONE Domain Search call against the given (already-known) candidates. Reuses the same caps,
+   * idempotency, and decideAcceptance trust boundary as run() — only the Finder loop is skipped. Fails
+   * closed for any provider that does not implement domainSearch (e.g. mock/instantly).
+   */
+  async runDomainSearchOnly(
+    leadId: string,
+    domain: string,
+    candidates: CandidatePerson[],
+    caps: EnrichmentRunCaps,
+    opts: { forceRefresh?: boolean },
+  ): Promise<ContactEnrichmentResult> {
+    if (!this.deps.provider.domainSearch) {
+      throw new AppError('DOMAIN_SEARCH_NOT_SUPPORTED', `Provider "${this.deps.provider.name}" does not implement Domain Search.`);
+    }
+    const provider = this.deps.provider.name;
+    const mode: EnrichmentMode = 'DOMAIN_SEARCH_ONLY';
+    const inputHash = computeInputHash(mode, provider, domain, candidates);
+
+    if (opts.forceRefresh) {
+      this.deps.logger.warn({ leadId, provider, mode }, 'contact-enrichment: force-refresh — bypassing idempotency cache lookup (explicit operator request)');
+    } else {
+      const existing = await this.deps.store.findByInputHash(leadId, provider, mode, inputHash);
+      if (existing) {
+        this.deps.logger.info({ leadId, provider, mode, outcome: existing.outcome }, 'contact-enrichment: idempotent hit; no spend');
+        return existing;
+      }
+    }
+
+    const ordered = [...candidates].sort((a, b) => a.priority - b.priority || a.fullName.localeCompare(b.fullName));
+    let reportedCredits: number | null = null;
+    const addReported = (v: number | null): void => { if (v !== null) reportedCredits = (reportedCredits ?? 0) + v; };
+
+    const ds = await this.attemptDomainSearch(leadId, domain, ordered, caps, 0, 0, addReported);
+    const outcome: ContactEnrichmentResult['outcome'] = ds.accepted ? 'VERIFIED' : ds.errored ? 'ERROR' : ds.capped ? 'CAPPED' : 'NOT_FOUND';
+    const result: ContactEnrichmentResult = {
+      id: randomUUID(), leadId, provider, mode, inputHash, requestedDomain: domain, candidates: ordered,
+      outcome, accepted: ds.accepted, creditsEstimated: ds.creditsEstimated, creditsReported: reportedCredits,
+      providerResourceId: ds.resourceId, endpoint: ds.endpoint,
+      provenance: { stage: 'domain-search-only', requestsUsed: ds.requestsUsed, caps, domainSearch: ds.domainSearchProvenance },
+      createdAt: new Date(), completedAt: new Date(),
+    };
+    await this.deps.store.save(result, { overwrite: opts.forceRefresh });
+    this.deps.logger.info({ leadId, provider, outcome, creditsEstimated: ds.creditsEstimated, creditsReported: reportedCredits }, 'contact-enrichment: domain-search-only run complete');
+    return result;
   }
 }

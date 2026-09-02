@@ -17,6 +17,22 @@ export interface ContactEnrichCliOptions {
   maxCredits?: string;
   maxRequests?: string;
   forceRefresh?: boolean;
+  domainSearchOnly?: boolean;
+}
+
+/**
+ * Guard for `--domain-search-only`: a Hunter-only, --confirm-only bypass of the per-candidate Finder
+ * tier. Checked as soon as the provider is known (both in plan mode and live mode) so an operator gets
+ * an immediate, clear rejection rather than a silent no-op or an unrelated downstream error.
+ */
+export function validateDomainSearchOnlyFlags(opts: ContactEnrichCliOptions, providerName: string): void {
+  if (!opts.domainSearchOnly) return;
+  if (providerName !== 'hunter') {
+    throw new AppError('DOMAIN_SEARCH_ONLY_HUNTER_ONLY', '--domain-search-only requires CONTACT_ENRICHMENT_PROVIDER=hunter.');
+  }
+  if (!opts.confirm) {
+    throw new AppError('DOMAIN_SEARCH_ONLY_REQUIRES_CONFIRM', '--domain-search-only requires --confirm (there is no dry/preview form of this bypass).');
+  }
 }
 
 const HONORIFICS = new Set(['dr', 'dr.', 'mr', 'mr.', 'mrs', 'mrs.', 'ms', 'ms.', 'prof', 'prof.', 'miss']);
@@ -62,6 +78,7 @@ export async function contactEnrichCommand(ctx: CliContext, opts: ContactEnrichC
   };
   const repo = new ContactEnrichmentRepository(ctx.db);
   const providerName = c.CONTACT_ENRICHMENT_PROVIDER;
+  validateDomainSearchOnlyFlags(opts, providerName);
 
   // ---- PLAN / DRY-RUN (default): pure projection. No provider constructed, no network, no spend. ----
   if (!opts.preview && !opts.confirm) {
@@ -97,9 +114,27 @@ export async function contactEnrichCommand(ctx: CliContext, opts: ContactEnrichC
     return;
   }
 
-  // ---- LIVE: build provider (Instantly hard-gated incl. DRY_RUN kill switch). ----
+  // ---- LIVE: build provider (Instantly/Hunter hard-gated incl. DRY_RUN kill switch). ----
   const provider = buildContactEnrichmentProvider(ctx);
   const service = new ContactEnrichmentService({ provider, store: repo, logger: ctx.logger });
+
+  if (opts.domainSearchOnly) {
+    // Guarded bypass: skip the per-candidate Finder tier entirely, try exactly ONE Domain Search call.
+    const result = await service.runDomainSearchOnly(leadId, domain, candidates, caps, { forceRefresh: Boolean(opts.forceRefresh) });
+    const dsProv = (result.provenance as { requestsUsed?: number; domainSearch?: { peopleCount?: number; attempts?: Array<{ found?: boolean }>; error?: string } }) ?? {};
+    const ds = dsProv.domainSearch;
+    console.log(`\n=== contact-enrich DOMAIN-SEARCH-ONLY RESULT (provider=${result.provider}) ===`);
+    console.log(`  lead:                  ${result.leadId}`);
+    console.log(`  domain:                ${result.requestedDomain}`);
+    console.log(`  outcome:               ${result.outcome}${ds?.error ? ` (ERROR: ${ds.error})` : ''}`);
+    console.log(`  emails returned:       ${String(ds?.peopleCount ?? 0)}`);
+    console.log(`  known-person matches:  ${String((ds?.attempts ?? []).filter((a) => a.found !== false).length)}`);
+    console.log(`  accepted contact:      ${result.accepted ? `${result.accepted.fullName} <${result.accepted.email}>` : 'none'}`);
+    console.log(`  requests used:         ${String(dsProv.requestsUsed ?? 0)}`);
+    console.log(`  credits:               estimated=${String(result.creditsEstimated)}  provider-reported=${result.creditsReported === null ? 'none reported' : String(result.creditsReported)}`);
+    return;
+  }
+
   // --preview => never enrich. --confirm => enrich only if the paid kill switch is on.
   const performEnrichment = Boolean(opts.confirm) && c.ALLOW_PAID_ENRICHMENT_CALLS;
   const result = await service.run(leadId, domain, candidates, caps, { performEnrichment, forceRefresh: Boolean(opts.forceRefresh) });

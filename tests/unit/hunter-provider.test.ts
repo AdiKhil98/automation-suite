@@ -3,6 +3,7 @@ import { type Logger } from 'pino';
 import { ContactEnrichmentService, type ContactEnrichmentStore, type EnrichmentRunCaps } from '../../src/domain/contact-enrichment/service.js';
 import { type CandidatePerson, type ContactEnrichmentResult, type EnrichmentMode } from '../../src/domain/contact-enrichment/types.js';
 import { HunterContactEnrichmentProvider, type FetchLike } from '../../src/integrations/contact-enrichment/hunter-provider.js';
+import { MockContactEnrichmentProvider } from '../../src/integrations/contact-enrichment/mock-provider.js';
 import {
   buildDomainSearchParams,
   buildEmailFinderParams,
@@ -455,5 +456,152 @@ describe('Hunter as fallback provider #2 — full pipeline via ContactEnrichment
     expect(fresh.accepted?.email).toBe(`shaimil@${DOMAIN}`);
     expect(domainSearchCalls).toBe(1);
     expect(store.rows).toHaveLength(1); // overwritten in place, not appended as a second row
+  });
+});
+
+describe('ContactEnrichmentService.runDomainSearchOnly — guarded Hunter-only canary (bypasses the Finder tier entirely)', () => {
+  const dsOnlyCaps: EnrichmentRunCaps = { maxRequests: 1, maxCredits: 2, minCreditsPerLookup: 1 };
+
+  it('accepts a matching candidate on the single Domain Search call; Finder is NEVER called', async () => {
+    const fetchImpl = ((url: string) => {
+      if (url.includes('/email-finder')) throw new Error(`Finder must never be called in domain-search-only mode: ${url}`);
+      if (url.includes('/domain-search')) {
+        return Promise.resolve({
+          ok: true, status: 200,
+          text: () => Promise.resolve(JSON.stringify({
+            data: { domain: DOMAIN, accept_all: false, emails: [{ value: `shaimil@${DOMAIN}`, type: 'personal', first_name: 'Shaimil', last_name: 'Patel', position: 'Clinical Director', verification: { status: 'valid' } }] },
+          })),
+        } as unknown as Response);
+      }
+      throw new Error(`unexpected Hunter call: ${url}`);
+    }) as unknown as FetchLike;
+    const service = new ContactEnrichmentService({ provider: provider(fetchImpl), store: new MemStore(), logger });
+    const r = await service.runDomainSearchOnly('l', DOMAIN, CANDIDATES, dsOnlyCaps, {});
+    expect(r.mode).toBe('DOMAIN_SEARCH_ONLY');
+    expect(r.outcome).toBe('VERIFIED');
+    expect(r.accepted?.fullName).toBe('Shaimil Patel');
+    expect(r.accepted?.email).toBe(`shaimil@${DOMAIN}`);
+    expect((r.provenance as { requestsUsed?: number }).requestsUsed).toBe(1);
+  });
+
+  it('none of the known candidates match -> NOT_FOUND, still exactly one HTTP call', async () => {
+    let calls = 0;
+    const fetchImpl = ((url: string) => {
+      if (url.includes('/email-finder')) throw new Error('Finder must never be called');
+      calls += 1;
+      return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(JSON.stringify({ data: { domain: DOMAIN, accept_all: false, emails: [] } })) } as unknown as Response);
+    }) as unknown as FetchLike;
+    const service = new ContactEnrichmentService({ provider: provider(fetchImpl), store: new MemStore(), logger });
+    const r = await service.runDomainSearchOnly('l', DOMAIN, CANDIDATES, dsOnlyCaps, {});
+    expect(r.outcome).toBe('NOT_FOUND');
+    expect(r.accepted).toBeNull();
+    expect(calls).toBe(1);
+  });
+
+  it('rejects a matched generic mailbox (info@) even though the name/title matches', async () => {
+    const fetchImpl = ((url: string) => {
+      if (url.includes('/domain-search')) {
+        return Promise.resolve({
+          ok: true, status: 200,
+          text: () => Promise.resolve(JSON.stringify({
+            data: { domain: DOMAIN, accept_all: false, emails: [{ value: `info@${DOMAIN}`, type: 'personal', first_name: 'Shyam', last_name: 'Shastri', position: 'Principal Dentist', verification: { status: 'valid' } }] },
+          })),
+        } as unknown as Response);
+      }
+      throw new Error(`unexpected Hunter call: ${url}`);
+    }) as unknown as FetchLike;
+    const service = new ContactEnrichmentService({ provider: provider(fetchImpl), store: new MemStore(), logger });
+    const r = await service.runDomainSearchOnly('l', DOMAIN, CANDIDATES, dsOnlyCaps, {});
+    expect(r.outcome).toBe('NOT_FOUND');
+    const attempts = (r.provenance as { domainSearch?: { attempts?: Array<{ reason?: string }> } }).domainSearch?.attempts;
+    expect(attempts?.some((a) => a.reason === 'generic_mailbox_rejected')).toBe(true);
+  });
+
+  it('rejects an unrelated person even when their email is verified and personal-typed', async () => {
+    const fetchImpl = ((url: string) => {
+      if (url.includes('/domain-search')) {
+        return Promise.resolve({
+          ok: true, status: 200,
+          text: () => Promise.resolve(JSON.stringify({
+            data: { domain: DOMAIN, accept_all: false, emails: [{ value: `someone.else@${DOMAIN}`, type: 'personal', first_name: 'Someone', last_name: 'Else', position: 'Receptionist', verification: { status: 'valid' } }] },
+          })),
+        } as unknown as Response);
+      }
+      throw new Error(`unexpected Hunter call: ${url}`);
+    }) as unknown as FetchLike;
+    const service = new ContactEnrichmentService({ provider: provider(fetchImpl), store: new MemStore(), logger });
+    const r = await service.runDomainSearchOnly('l', DOMAIN, CANDIDATES, dsOnlyCaps, {});
+    expect(r.outcome).toBe('NOT_FOUND');
+    expect(r.accepted).toBeNull();
+  });
+
+  it('idempotency: repeating the exact same run does not call Domain Search again', async () => {
+    let calls = 0;
+    const fetchImpl = ((_url: string) => {
+      calls += 1;
+      return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(JSON.stringify({ data: { domain: DOMAIN, accept_all: false, emails: [] } })) } as unknown as Response);
+    }) as unknown as FetchLike;
+    const store = new MemStore();
+    const service = new ContactEnrichmentService({ provider: provider(fetchImpl), store, logger });
+    const r1 = await service.runDomainSearchOnly('l', DOMAIN, CANDIDATES, dsOnlyCaps, {});
+    const r2 = await service.runDomainSearchOnly('l', DOMAIN, CANDIDATES, dsOnlyCaps, {});
+    expect(r2.id).toBe(r1.id);
+    expect(calls).toBe(1);
+  });
+
+  it('a DOMAIN_SEARCH_ONLY row never satisfies (or is satisfied by) an ENRICH/PREVIEW idempotency check for the same lead/domain/candidates', async () => {
+    const store = new MemStore();
+    const fetchImpl = ((_url: string) => Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(JSON.stringify({ data: { domain: DOMAIN, accept_all: false, emails: [] } })) } as unknown as Response)) as unknown as FetchLike;
+    const service = new ContactEnrichmentService({ provider: provider(fetchImpl), store, logger });
+    const dsOnly = await service.runDomainSearchOnly('l', DOMAIN, CANDIDATES, dsOnlyCaps, {});
+    expect(dsOnly.mode).toBe('DOMAIN_SEARCH_ONLY');
+    const found = await store.findByInputHash('l', 'hunter', 'ENRICH', dsOnly.inputHash);
+    expect(found).toBeNull();
+  });
+
+  it('caps: maxRequests=0 blocks the call before any fetch (fail-closed pre-check, CAPPED)', async () => {
+    const { fetchImpl, calls } = fakeFetch([{ body: {} }]);
+    const service = new ContactEnrichmentService({ provider: provider(fetchImpl), store: new MemStore(), logger });
+    const r = await service.runDomainSearchOnly('l', DOMAIN, CANDIDATES, { maxRequests: 0, maxCredits: 2, minCreditsPerLookup: 1 }, {});
+    expect(r.outcome).toBe('CAPPED');
+    expect(calls).toHaveLength(0);
+  });
+
+  it('caps: maxCredits=0 blocks the call before any fetch (fail-closed pre-check, CAPPED)', async () => {
+    const { fetchImpl, calls } = fakeFetch([{ body: {} }]);
+    const service = new ContactEnrichmentService({ provider: provider(fetchImpl), store: new MemStore(), logger });
+    const r = await service.runDomainSearchOnly('l', DOMAIN, CANDIDATES, { maxRequests: 1, maxCredits: 0, minCreditsPerLookup: 1 }, {});
+    expect(r.outcome).toBe('CAPPED');
+    expect(calls).toHaveLength(0);
+  });
+
+  it('fails closed for a provider that does not implement domainSearch (e.g. mock), zero calls', async () => {
+    const mock = new MockContactEnrichmentProvider();
+    const service = new ContactEnrichmentService({ provider: mock, store: new MemStore(), logger });
+    await expect(service.runDomainSearchOnly('l', DOMAIN, CANDIDATES, dsOnlyCaps, {})).rejects.toMatchObject({ code: 'DOMAIN_SEARCH_NOT_SUPPORTED' });
+  });
+
+  it('force-refresh bypasses a stale cached row and re-runs (still exactly one HTTP call)', async () => {
+    const store = new MemStore();
+    const staleFetch = ((_url: string) => Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(JSON.stringify({ data: { domain: DOMAIN, accept_all: false, emails: [] } })) } as unknown as Response)) as unknown as FetchLike;
+    const staleService = new ContactEnrichmentService({ provider: provider(staleFetch), store, logger });
+    const stale = await staleService.runDomainSearchOnly('l', DOMAIN, CANDIDATES, dsOnlyCaps, {});
+    expect(stale.outcome).toBe('NOT_FOUND');
+
+    let freshCalls = 0;
+    const freshFetch = ((_url: string) => {
+      freshCalls += 1;
+      return Promise.resolve({
+        ok: true, status: 200,
+        text: () => Promise.resolve(JSON.stringify({
+          data: { domain: DOMAIN, accept_all: false, emails: [{ value: `shaimil@${DOMAIN}`, type: 'personal', first_name: 'Shaimil', last_name: 'Patel', position: 'Clinical Director', verification: { status: 'valid' } }] },
+        })),
+      } as unknown as Response);
+    }) as unknown as FetchLike;
+    const freshService = new ContactEnrichmentService({ provider: provider(freshFetch), store, logger });
+    const fresh = await freshService.runDomainSearchOnly('l', DOMAIN, CANDIDATES, dsOnlyCaps, { forceRefresh: true });
+    expect(fresh.outcome).toBe('VERIFIED');
+    expect(freshCalls).toBe(1);
+    expect(store.rows).toHaveLength(1);
   });
 });
