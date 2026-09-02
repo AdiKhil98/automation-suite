@@ -3,6 +3,7 @@ import { LeadFactsRepository } from '../../persistence/repositories/lead-facts.r
 import { ContactEnrichmentRepository } from '../../persistence/repositories/contact-enrichment.repo.js';
 import { ContactEnrichmentService, computeInputHash, type EnrichmentRunCaps } from '../../domain/contact-enrichment/service.js';
 import { type CandidatePerson } from '../../domain/contact-enrichment/types.js';
+import { buildCandidatePerson } from '../../domain/contact-enrichment/candidate-parsing.js';
 import { INSTANTLY_ENDPOINTS, INSTANTLY_SCOPES } from '../../integrations/contact-enrichment/instantly-schema.js';
 import { HUNTER_ENDPOINTS } from '../../integrations/contact-enrichment/hunter-schema.js';
 import { APOLLO_ENDPOINTS } from '../../integrations/contact-enrichment/apollo-schema.js';
@@ -36,8 +37,6 @@ export function validateDomainSearchOnlyFlags(opts: ContactEnrichCliOptions, pro
   }
 }
 
-const HONORIFICS = new Set(['dr', 'dr.', 'mr', 'mr.', 'mrs', 'mrs.', 'ms', 'ms.', 'prof', 'prof.', 'miss']);
-
 /** Parse `"Full Name|Title"` specs into priority-ordered candidates (order given = priority). */
 export function parseCandidates(specs: string[]): CandidatePerson[] {
   return specs.map((spec, i) => {
@@ -45,11 +44,7 @@ export function parseCandidates(specs: string[]): CandidatePerson[] {
     const fullName = (namePart ?? '').trim();
     const title = (titlePart ?? '').trim();
     if (!fullName || !title) throw new AppError('BAD_CANDIDATE', `--candidate must be "Full Name|Title" (got "${spec}").`);
-    const tokens = fullName.split(/\s+/).filter((t) => !HONORIFICS.has(t.toLowerCase()));
-    const firstName = tokens[0] ?? fullName;
-    const lastName = tokens.length > 1 ? tokens[tokens.length - 1] ?? '' : '';
-    if (!lastName) throw new AppError('BAD_CANDIDATE', `Cannot derive a last name from "${fullName}".`);
-    return { fullName, firstName, lastName, title, priority: i + 1 };
+    return buildCandidatePerson(fullName, title, i + 1);
   });
 }
 

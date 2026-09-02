@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { eq } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import { type AuditPersist, type AuditRunStore } from '../../domain/audit/audit-service.js';
 import { type DbExecutor } from '../db.js';
 import {
@@ -96,5 +96,24 @@ export class AuditRepository implements AuditRunStore {
         record.modelCalls.map((m) => ({ ...m, auditRunId: run.id, leadId: run.leadId })),
       );
     }
+  }
+
+  /**
+   * The HIGHEST `overall_score` ever recorded for each lead (across every audit run, not just the
+   * latest) — used by `contact-resolve-batch` to prioritize leads with the strongest existing audit
+   * evidence first. A lead absent from the returned map has no opportunity assessment on record.
+   */
+  async maxOpportunityScores(leadIds: string[]): Promise<Map<string, number>> {
+    if (leadIds.length === 0) return new Map();
+    const rows = await this.db
+      .select({ leadId: opportunityAssessments.leadId, overallScore: opportunityAssessments.overallScore })
+      .from(opportunityAssessments)
+      .where(inArray(opportunityAssessments.leadId, leadIds));
+    const scores = new Map<string, number>();
+    for (const row of rows) {
+      const current = scores.get(row.leadId);
+      if (current === undefined || row.overallScore > current) scores.set(row.leadId, row.overallScore);
+    }
+    return scores;
   }
 }

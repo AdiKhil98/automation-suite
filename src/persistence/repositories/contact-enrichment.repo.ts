@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import {
   type CandidatePerson,
   type ContactEnrichmentOutcome,
@@ -69,6 +69,22 @@ export class ContactEnrichmentRepository implements ContactEnrichmentStore {
       .limit(1);
     const row = rows[0];
     return row ? toDomain(row) : null;
+  }
+
+  /**
+   * Every existing row for one lead, newest first — across every provider/mode/candidate-set ever
+   * tried. Used by `contact-resolve-batch` to determine which cascade steps are already resolved
+   * (idempotent) for a lead's CURRENT candidate list, and whether the lead already holds a VERIFIED
+   * contact from any past attempt. There is deliberately no narrower query: a batch run needs the
+   * lead's whole history, not one exact-hash lookup.
+   */
+  async listByLead(leadId: string): Promise<ContactEnrichmentResult[]> {
+    const rows = await this.db
+      .select()
+      .from(contactEnrichmentResults)
+      .where(eq(contactEnrichmentResults.leadId, leadId))
+      .orderBy(desc(contactEnrichmentResults.createdAt));
+    return rows.map(toDomain);
   }
 
   /**

@@ -72,6 +72,12 @@ const envSchema = z.object({
   APOLLO_API_KEY: z.string().optional(),
   APOLLO_API_BASE_URL: z.string().url().default('https://api.apollo.io/api/v1'),
   APOLLO_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
+  // Bounded multi-lead resolver (contact-resolve-batch): Instantly -> Hunter cascade across the
+  // qualified-lead book. Apollo is intentionally never a cascade member (unavailable on the current
+  // Apollo plan). Run-wide caps are ON TOP OF the per-lead caps above (both apply).
+  CONTACT_RESOLVE_BATCH_MAX_LEADS_PER_RUN: z.coerce.number().int().min(1).max(100).default(10),
+  CONTACT_RESOLVE_BATCH_MAX_REQUESTS_PER_RUN: z.coerce.number().int().min(1).max(200).default(20),
+  CONTACT_RESOLVE_BATCH_MAX_CREDITS_PER_RUN: z.coerce.number().int().min(1).max(100).default(10),
 
   // LLM provider config (abstraction-first; concrete provider chosen in Phase 5).
   LLM_PROVIDER: z.string().default('mock'),
