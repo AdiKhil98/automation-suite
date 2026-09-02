@@ -26,6 +26,13 @@ export interface EnrichmentQuery {
   firstName: string;
   lastName: string;
   title: string;
+  /**
+   * The matched PREVIEW row's provider-native person id, when the preview step surfaced one (e.g.
+   * Apollo). A provider's enrich() MAY prefer this over a name+domain lookup for a more precise match;
+   * providers that have no use for it (Hunter, Instantly) simply never read this field. Optional so
+   * every existing EnrichmentQuery literal (providers, tests) stays valid unchanged.
+   */
+  providerLeadId?: string | null;
 }
 
 /** Normalized verification vocabulary. Only VERIFIED is ever acceptable for autonomous outreach. */

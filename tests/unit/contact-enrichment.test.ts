@@ -374,6 +374,26 @@ describe('buildContactEnrichmentProvider — Hunter (fallback provider #2) gatin
   });
 });
 
+describe('buildContactEnrichmentProvider — Apollo (fallback provider #3) gating + DRY_RUN kill switch', () => {
+  const base = {
+    DRY_RUN: false, CONTACT_ENRICHMENT_PROVIDER: 'apollo', CONTACT_ENRICHMENT_ENABLED: true, ALLOW_PAID_ENRICHMENT_CALLS: true,
+    APOLLO_API_KEY: 'k', APOLLO_API_BASE_URL: 'https://api.apollo.io/api/v1', APOLLO_TIMEOUT_MS: 30000,
+    CONTACT_ENRICHMENT_PREVIEW_LIMIT: 25,
+  };
+  const ctx = (over: Partial<typeof base>) => ({ config: { ...base, ...over }, logger } as unknown as Parameters<typeof buildContactEnrichmentProvider>[0]);
+
+  it('DRY_RUN=true blocks live Apollo even with all paid flags + key (fail closed before network)', () => {
+    expect(() => buildContactEnrichmentProvider(ctx({ DRY_RUN: true }))).toThrow(/DRY_RUN=true blocks/);
+  });
+  it('constructs live Apollo provider when DRY_RUN=false + enabled + key (preview needs no paid flag — it is free)', () => {
+    expect(buildContactEnrichmentProvider(ctx({ ALLOW_PAID_ENRICHMENT_CALLS: false })).name).toBe('apollo');
+  });
+  it('fails closed without enable flag / without key', () => {
+    expect(() => buildContactEnrichmentProvider(ctx({ CONTACT_ENRICHMENT_ENABLED: false }))).toThrow(/CONTACT_ENRICHMENT_ENABLED/);
+    expect(() => buildContactEnrichmentProvider(ctx({ APOLLO_API_KEY: undefined }))).toThrow(/APOLLO_API_KEY/);
+  });
+});
+
 describe('validateDomainSearchOnlyFlags — CLI guard for --domain-search-only', () => {
   it('is a no-op when the flag is not set, regardless of provider/confirm', () => {
     expect(() => validateDomainSearchOnlyFlags({} as ContactEnrichCliOptions, 'instantly')).not.toThrow();
