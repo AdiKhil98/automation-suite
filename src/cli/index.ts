@@ -9,6 +9,7 @@ import { placesBackfillCommand } from './commands/places-backfill.js';
 import { evalAuditCommand } from './commands/eval-audit.js';
 import { gateACheckCommand } from './commands/gate-a-check.js';
 import { contactEnrichCommand, type ContactEnrichCliOptions } from './commands/contact-enrich.js';
+import { contactResolveBatchCommand, type ContactResolveBatchOptions } from './commands/contact-resolve-batch.js';
 import { generateDemosCommand } from './commands/generate-demos.js';
 import { composeDemosCommand } from './commands/compose-demos.js';
 import { generateEmailsCommand } from './commands/generate-emails.js';
@@ -561,6 +562,17 @@ program
   .option('--force-refresh', 'explicit one-shot bypass of the idempotency cache lookup — use ONLY when a provider capability has genuinely changed since the cached row was written; overwrites that row with the fresh result')
   .option('--domain-search-only', 'Hunter-only: skip the per-candidate Finder tier and try exactly one Domain Search call against the known --candidate list (requires --confirm)')
   .action((opts: ContactEnrichCliOptions) => withContext((ctx) => contactEnrichCommand(ctx, opts)));
+
+program
+  .command('contact-resolve-batch')
+  .description('Bounded multi-lead decision-maker resolver: walks qualified leads (strongest audit evidence first) through the existing Instantly -> Hunter cascade until one yields a VERIFIED contact. Apollo is never called. Plan by default; --confirm for a bounded live run. Never generates or sends email.')
+  .requiredOption('--candidates-file <path>', 'JSON file mapping leadId -> [{"fullName","title"}, ...] (operator-maintained; no persisted candidate source exists)')
+  .option('--limit <n>', 'max leads to attempt this run (default/hard cap from CONTACT_RESOLVE_BATCH_MAX_LEADS_PER_RUN)')
+  .option('--confirm', 'perform a bounded LIVE run (default is PLAN mode: no provider call, no network)')
+  .option('--max-total-requests <n>', 'run-wide request cap across all leads/providers (default CONTACT_RESOLVE_BATCH_MAX_REQUESTS_PER_RUN)')
+  .option('--max-total-credits <n>', 'run-wide credit cap across all leads/providers (default CONTACT_RESOLVE_BATCH_MAX_CREDITS_PER_RUN)')
+  .option('--stop-after-first-verified', 'stop the whole run immediately once any lead yields a VERIFIED contact')
+  .action((opts: ContactResolveBatchOptions) => withContext((ctx) => contactResolveBatchCommand(ctx, opts)));
 
 program
   .command('clean-audit-debug')
