@@ -5,6 +5,7 @@ import { ContactEnrichmentService, computeInputHash, type EnrichmentRunCaps } fr
 import { type CandidatePerson } from '../../domain/contact-enrichment/types.js';
 import { INSTANTLY_ENDPOINTS, INSTANTLY_SCOPES } from '../../integrations/contact-enrichment/instantly-schema.js';
 import { HUNTER_ENDPOINTS } from '../../integrations/contact-enrichment/hunter-schema.js';
+import { APOLLO_ENDPOINTS } from '../../integrations/contact-enrichment/apollo-schema.js';
 import { buildContactEnrichmentProvider } from './contact-enrich-build.js';
 import { type CliContext } from '../context.js';
 
@@ -106,6 +107,12 @@ export async function contactEnrichCommand(ctx: CliContext, opts: ContactEnrichC
       console.log(`  finder endpoint:  GET ${HUNTER_ENDPOINTS.emailFinder}`);
       console.log(`  verifier endpoint: GET ${HUNTER_ENDPOINTS.emailVerifier} (called only when Finder's own verification is ambiguous)`);
       console.log(`  domain-search endpoint: GET ${HUNTER_ENDPOINTS.domainSearch} (called at most once, only if every Finder attempt fails)`);
+    }
+    if (providerName === 'apollo') {
+      console.log(`  flow:            [--preview] free People Search over the domain (0 credits, no email revealed) → local match → [--confirm] paid People Match of a matched person only`);
+      console.log(`  search endpoint: POST ${APOLLO_ENDPOINTS.peopleSearch}`);
+      console.log(`  match endpoint:  POST ${APOLLO_ENDPOINTS.peopleMatch} (prefers the matched Apollo person id; falls back to name + domain)`);
+      console.log(`  auth:            X-Api-Key header (single API key; no OAuth scopes)`);
     }
     console.log(`  idempotency (PREVIEW): ${existingPreview ? `EXISTING ${existingPreview.outcome} (re-run would NOT spend)` : 'none yet'}`);
     console.log(`  idempotency (ENRICH):  ${existingEnrich ? `EXISTING ${existingEnrich.outcome} (re-run would NOT spend)` : 'none yet'}`);

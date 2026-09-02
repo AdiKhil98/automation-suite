@@ -1,5 +1,6 @@
 import { assertLiveCallsAllowed } from '../../config/live-call-guard.js';
 import { type ContactEnrichmentProvider, EnrichmentProviderNotAllowedError } from '../../domain/contact-enrichment/provider.js';
+import { ApolloContactEnrichmentProvider } from '../../integrations/contact-enrichment/apollo-provider.js';
 import { HunterContactEnrichmentProvider } from '../../integrations/contact-enrichment/hunter-provider.js';
 import { InstantlyContactEnrichmentProvider } from '../../integrations/contact-enrichment/instantly-provider.js';
 import { MockContactEnrichmentProvider } from '../../integrations/contact-enrichment/mock-provider.js';
@@ -29,6 +30,24 @@ export function buildContactEnrichmentProvider(ctx: CliContext): ContactEnrichme
       baseUrl: c.HUNTER_API_BASE_URL,
       timeoutMs: c.HUNTER_TIMEOUT_MS,
       // Paid enrichment gate: preview is a zero-network echo; enrich() fails closed unless this is true.
+      allowPaidEnrichment: c.ALLOW_PAID_ENRICHMENT_CALLS,
+      logger: ctx.logger,
+    });
+  }
+  if (c.CONTACT_ENRICHMENT_PROVIDER === 'apollo') {
+    assertLiveCallsAllowed(c.DRY_RUN, 'apollo-contact-enrichment');
+    if (!c.CONTACT_ENRICHMENT_ENABLED) {
+      throw new EnrichmentProviderNotAllowedError('CONTACT_ENRICHMENT_PROVIDER=apollo requires CONTACT_ENRICHMENT_ENABLED=true.');
+    }
+    if (!c.APOLLO_API_KEY) {
+      throw new EnrichmentProviderNotAllowedError('CONTACT_ENRICHMENT_PROVIDER=apollo requires APOLLO_API_KEY (read from env; never hard-coded).');
+    }
+    return new ApolloContactEnrichmentProvider({
+      apiKey: c.APOLLO_API_KEY,
+      baseUrl: c.APOLLO_API_BASE_URL,
+      timeoutMs: c.APOLLO_TIMEOUT_MS,
+      previewLimit: c.CONTACT_ENRICHMENT_PREVIEW_LIMIT,
+      // Paid enrichment gate: preview is free (0 credits); enrich() fails closed unless this is true.
       allowPaidEnrichment: c.ALLOW_PAID_ENRICHMENT_CALLS,
       logger: ctx.logger,
     });

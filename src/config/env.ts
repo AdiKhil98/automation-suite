@@ -48,7 +48,7 @@ const envSchema = z.object({
   // spent unless explicitly enabled. Apollo can be added later behind the same provider interface.
   CONTACT_ENRICHMENT_ENABLED: boolString(false),
   ALLOW_PAID_ENRICHMENT_CALLS: boolString(false),
-  CONTACT_ENRICHMENT_PROVIDER: z.enum(['mock', 'instantly', 'hunter']).default('mock'),
+  CONTACT_ENRICHMENT_PROVIDER: z.enum(['mock', 'instantly', 'hunter', 'apollo']).default('mock'),
   // Bounded spend controls for a single enrichment run (preferred + a small number of fallbacks).
   CONTACT_ENRICHMENT_MAX_REQUESTS_PER_RUN: z.coerce.number().int().min(1).max(10).default(3),
   CONTACT_ENRICHMENT_MAX_CREDITS_PER_RUN: z.coerce.number().int().min(1).max(20).default(3),
@@ -66,6 +66,12 @@ const envSchema = z.object({
   HUNTER_API_KEY: z.string().optional(),
   HUNTER_API_BASE_URL: z.string().url().default('https://api.hunter.io/v2'),
   HUNTER_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
+  // Apollo API (fallback provider #3: free People Search preview + paid People Match enrich). Key is a
+  // secret read only from env, never hard-coded, never logged, and never placed in a request URL
+  // (X-Api-Key header only).
+  APOLLO_API_KEY: z.string().optional(),
+  APOLLO_API_BASE_URL: z.string().url().default('https://api.apollo.io/api/v1'),
+  APOLLO_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
 
   // LLM provider config (abstraction-first; concrete provider chosen in Phase 5).
   LLM_PROVIDER: z.string().default('mock'),

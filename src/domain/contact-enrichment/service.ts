@@ -60,8 +60,8 @@ export interface EnrichmentPlan {
   enrichAlreadyResolved: ContactEnrichmentResult | null;
 }
 
-function queryFor(domain: string, p: CandidatePerson): EnrichmentQuery {
-  return { domain, fullName: p.fullName, firstName: p.firstName, lastName: p.lastName, title: p.title };
+function queryFor(domain: string, p: CandidatePerson, providerLeadId?: string | null): EnrichmentQuery {
+  return { domain, fullName: p.fullName, firstName: p.firstName, lastName: p.lastName, title: p.title, providerLeadId };
 }
 
 /**
@@ -201,12 +201,12 @@ export class ContactEnrichmentService {
     let resourceId: string | null = preview.resourceId;
     let capped = false, errored = false;
 
-    for (const { person } of matches) {
+    for (const { person, previewPerson } of matches) {
       if (requestsUsed >= caps.maxRequests) { capped = true; break; }
       if (creditsEstimated + Math.max(1, caps.minCreditsPerLookup) > caps.maxCredits) { capped = true; break; }
       let outcome;
       try {
-        outcome = await this.deps.provider.enrich(queryFor(domain, person));
+        outcome = await this.deps.provider.enrich(queryFor(domain, person, previewPerson.providerLeadId));
       } catch (err) {
         errored = true;
         attempts.push({ person: person.fullName, error: err instanceof Error ? err.message : String(err) });
