@@ -78,6 +78,13 @@ const envSchema = z.object({
   CONTACT_RESOLVE_BATCH_MAX_LEADS_PER_RUN: z.coerce.number().int().min(1).max(100).default(10),
   CONTACT_RESOLVE_BATCH_MAX_REQUESTS_PER_RUN: z.coerce.number().int().min(1).max(200).default(20),
   CONTACT_RESOLVE_BATCH_MAX_CREDITS_PER_RUN: z.coerce.number().int().min(1).max(100).default(10),
+  // discover-decision-makers: evidence-bound candidate discovery from a lead's own official website
+  // (produces the --candidates-file contact-resolve-batch consumes). Reuses the shared LLM_MODEL_AUDIT/
+  // MAX_LLM_* budget knobs above — this is the same call class (interpret website text) at the same
+  // cost tier, so no dedicated model/cost env vars are added.
+  DISCOVER_DECISION_MAKERS_MAX_LEADS_PER_RUN: z.coerce.number().int().min(1).max(100).default(10),
+  DISCOVER_DECISION_MAKERS_MAX_PAGES_PER_LEAD: z.coerce.number().int().min(1).max(5).default(3),
+  DECISION_MAKER_MIN_CONFIDENCE: z.coerce.number().min(0).max(1).default(0.6),
 
   // LLM provider config (abstraction-first; concrete provider chosen in Phase 5).
   LLM_PROVIDER: z.string().default('mock'),

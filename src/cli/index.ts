@@ -10,6 +10,7 @@ import { evalAuditCommand } from './commands/eval-audit.js';
 import { gateACheckCommand } from './commands/gate-a-check.js';
 import { contactEnrichCommand, type ContactEnrichCliOptions } from './commands/contact-enrich.js';
 import { contactResolveBatchCommand, type ContactResolveBatchOptions } from './commands/contact-resolve-batch.js';
+import { discoverDecisionMakersCommand, type DiscoverDecisionMakersOptions } from './commands/discover-decision-makers.js';
 import { generateDemosCommand } from './commands/generate-demos.js';
 import { composeDemosCommand } from './commands/compose-demos.js';
 import { generateEmailsCommand } from './commands/generate-emails.js';
@@ -573,6 +574,16 @@ program
   .option('--max-total-credits <n>', 'run-wide credit cap across all leads/providers (default CONTACT_RESOLVE_BATCH_MAX_CREDITS_PER_RUN)')
   .option('--stop-after-first-verified', 'stop the whole run immediately once any lead yields a VERIFIED contact')
   .action((opts: ContactResolveBatchOptions) => withContext((ctx) => contactResolveBatchCommand(ctx, opts)));
+
+program
+  .command('discover-decision-makers')
+  .description('Evidence-bound decision-maker discovery from each qualified lead\'s own official website (home + Team/About/Contact pages) via a single LLM call per lead, deterministically filtered/ranked/capped to 3. Writes a --candidates-file-compatible JSON file for contact-resolve-batch. Never calls Instantly/Hunter/Apollo. Plan by default; --preview is a free page-fetch-only step; --confirm also spends one LLM call per lead.')
+  .option('--out <path>', 'output JSON file (default .local-data/decision-makers/candidates.json)')
+  .option('--limit <n>', 'max leads to attempt this run (default/hard cap from DISCOVER_DECISION_MAKERS_MAX_LEADS_PER_RUN)')
+  .option('--preview', 'live, FREE page-fetch + link-discovery only — no LLM call')
+  .option('--confirm', 'full run: fetch + LLM extraction + deterministic filter, writes --out')
+  .option('--refresh', 'explicit bypass of the "already in --out" skip for this run')
+  .action((opts: DiscoverDecisionMakersOptions) => withContext((ctx) => discoverDecisionMakersCommand(ctx, opts)));
 
 program
   .command('clean-audit-debug')
