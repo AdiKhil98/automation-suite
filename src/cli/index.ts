@@ -578,11 +578,13 @@ program
 program
   .command('discover-decision-makers')
   .description('Evidence-bound decision-maker discovery from each qualified lead\'s own official website (home + best Team + best About/Ownership page, scored and content-confirmed; Contact only as a fallback) via a single LLM call per lead, deterministically filtered/ranked/capped to 3. Writes a --candidates-file-compatible JSON file for contact-resolve-batch. Never calls Instantly/Hunter/Apollo. Plan by default; --preview is a free page-fetch-only step; --confirm also spends one LLM call per lead.')
-  .option('--out <path>', 'output JSON file (default .local-data/decision-makers/candidates.json)')
-  .option('--limit <n>', 'max leads to attempt this run (default/hard cap from DISCOVER_DECISION_MAKERS_MAX_LEADS_PER_RUN)')
+  .option('--out <path>', 'candidates output JSON file (default .local-data/decision-makers/candidates.json)')
+  .option('--results <path>', 'extraction results manifest, used for idempotency (default .local-data/decision-makers/results.json)')
+  .option('--lead <leadId>', 'target exactly one lead (all qualification/lifecycle/domain checks still apply); required for --refresh --confirm')
+  .option('--limit <n>', 'max PAID extraction attempts this run; manifest-skipped leads do not count (default/hard cap from DISCOVER_DECISION_MAKERS_MAX_LEADS_PER_RUN). Mutually exclusive with --lead')
   .option('--preview', 'live, FREE page-fetch + link-discovery only — no LLM call')
   .option('--confirm', 'full run: fetch + LLM extraction + deterministic filter; writes --out only for leads that yield accepted candidates')
-  .option('--refresh', 'explicit bypass of the "already in --out" skip for this run')
+  .option('--refresh', 'explicit operator bypass of the idempotency guards for the selected scope; with --confirm it requires --lead')
   .action((opts: DiscoverDecisionMakersOptions) => withContext((ctx) => discoverDecisionMakersCommand(ctx, opts)));
 
 program

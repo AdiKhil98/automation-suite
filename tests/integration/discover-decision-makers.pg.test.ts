@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { type Logger } from 'pino';
 import { requireIntegrationTestDatabase } from '../support/test-database.js';
@@ -15,6 +15,7 @@ import { PipelineRepository } from '../../src/persistence/repositories/pipeline.
 import { ContactEnrichmentRepository } from '../../src/persistence/repositories/contact-enrichment.repo.js';
 import { type LeadStatus } from '../../src/domain/leads/status.js';
 import { readCandidatesFileIfExists } from '../../src/domain/contact-resolve-batch/candidates-file.js';
+import { readResultsManifestIfExists } from '../../src/domain/decision-makers/results-manifest.js';
 import { type PageFetchFn } from '../../src/domain/decision-makers/website-evidence.js';
 import { type FetchOutcome } from '../../src/utils/safe-fetch.js';
 import { MockLlmProvider, type MockResponder } from '../../src/integrations/llm/mock-llm.js';
@@ -235,7 +236,7 @@ describe('discover-decision-makers (PostgreSQL)', () => {
     void leadId;
   });
 
-  it('--refresh bypasses the "already in --out" skip and re-processes the lead', async () => {
+  it('--refresh --confirm bypasses the "already in --out" skip and re-processes the targeted lead', async () => {
     const leadId = await seedQualifiedLead();
     const out = tempOutPath();
     await discoverDecisionMakersCommand(ctx(), { out, confirm: true }, {
@@ -243,12 +244,11 @@ describe('discover-decision-makers (PostgreSQL)', () => {
       buildLlmDeps: () => llmDepsFor(verifiedResponder()),
     });
     let fetchCalls = 0;
-    await discoverDecisionMakersCommand(ctx(), { out, confirm: true, refresh: true }, {
+    await discoverDecisionMakersCommand(ctx(), { out, confirm: true, refresh: true, lead: leadId }, {
       buildFetcher: () => (url) => { fetchCalls += 1; return Promise.resolve(ok(url, HOME_HTML)); },
       buildLlmDeps: () => llmDepsFor(verifiedResponder()),
     });
     expect(fetchCalls).toBeGreaterThan(0);
-    void leadId;
   });
 
   it('--limit bounds how many leads are attempted', async () => {
@@ -262,6 +262,196 @@ describe('discover-decision-makers (PostgreSQL)', () => {
       buildLlmDeps: () => llmDepsFor(() => ({ rawJson: { candidates: [], insufficientEvidence: true } })),
     });
     expect(fetchCalls).toBe(1);
+  });
+
+  // --- results manifest: idempotency + bounded retry ------------------------------------------
+
+  /** Counts ACTUAL provider invocations (the responder runs once per generate), not how many times
+   * llmDeps was constructed — a run always builds deps once even if it never calls the model. */
+  function countingResponder(inner: MockResponder): { responder: MockResponder; calls: () => number } {
+    let calls = 0;
+    return { responder: (req, i) => { calls += 1; return inner(req, i); }, calls: () => calls };
+  }
+
+  const TEAM_SITE: Record<string, string> = { [HOME]: HOME_HTML, [`https://${DOMAIN}/meet-the-team`]: TEAM_HTML };
+  const noCandidateResponder: MockResponder = () => ({ rawJson: { candidates: [], insufficientEvidence: true } });
+
+  async function runConfirm(out: string, results: string, responder: MockResponder, over: Record<string, unknown> = {}, pages = TEAM_SITE): Promise<void> {
+    await discoverDecisionMakersCommand(ctx(), { out, results, confirm: true, ...over }, {
+      buildFetcher: () => fakeFetcher(pages),
+      buildLlmDeps: () => llmDepsFor(responder),
+    });
+  }
+
+  it('FOUND is durable: an unchanged lead makes zero paid calls on the second run', async () => {
+    const leadId = await seedQualifiedLead();
+    const out = tempOutPath();
+    const results = join(dirname(out), 'results.json');
+
+    const first = countingResponder(verifiedResponder());
+    await runConfirm(out, results, first.responder);
+    expect(first.calls()).toBe(1);
+    expect(readResultsManifestIfExists(results).results[leadId]).toMatchObject({ outcome: 'FOUND', attempts: 1, acceptedCount: 1 });
+
+    const second = countingResponder(verifiedResponder());
+    await runConfirm(out, results, second.responder);
+    expect(second.calls()).toBe(0);
+  });
+
+  it('Colosseum-style zero-candidate success becomes durable: NO_CANDIDATE, then zero paid calls forever', async () => {
+    const leadId = await seedQualifiedLead();
+    const out = tempOutPath();
+    const results = join(dirname(out), 'results.json');
+
+    const first = countingResponder(noCandidateResponder);
+    await runConfirm(out, results, first.responder);
+    expect(first.calls()).toBe(1);
+    // No candidate entry is created, so the old "already_in_out_file" guard could never have helped.
+    expect(readCandidatesFileIfExists(out)).toBeNull();
+    expect(readResultsManifestIfExists(results).results[leadId]).toMatchObject({ outcome: 'NO_CANDIDATE', attempts: 1, acceptedCount: 0 });
+
+    for (const _ of [1, 2, 3]) {
+      const again = countingResponder(noCandidateResponder);
+      await runConfirm(out, results, again.responder);
+      expect(again.calls()).toBe(0);
+    }
+  });
+
+  it('SCHEMA_INVALID does not auto-charge again at the same fingerprint', async () => {
+    const leadId = await seedQualifiedLead();
+    const out = tempOutPath();
+    const results = join(dirname(out), 'results.json');
+    const bad: MockResponder = () => ({ rawJson: { totally: 'wrong shape' } });
+
+    const first = countingResponder(bad);
+    await runConfirm(out, results, first.responder);
+    expect(first.calls()).toBe(1);
+    expect(readResultsManifestIfExists(results).results[leadId]).toMatchObject({ outcome: 'SCHEMA_INVALID', attempts: 1 });
+
+    const second = countingResponder(bad);
+    await runConfirm(out, results, second.responder);
+    expect(second.calls()).toBe(0);
+  });
+
+  it('PROVIDER_ERROR gets at most two paid attempts at the same fingerprint', async () => {
+    const leadId = await seedQualifiedLead();
+    const out = tempOutPath();
+    const results = join(dirname(out), 'results.json');
+    const failing: MockResponder = () => ({ status: 'rate_limited' });
+
+    const a = countingResponder(failing);
+    await runConfirm(out, results, a.responder);
+    expect(a.calls()).toBe(1);
+    expect(readResultsManifestIfExists(results).results[leadId]).toMatchObject({ outcome: 'PROVIDER_ERROR', attempts: 1 });
+
+    const b = countingResponder(failing);
+    await runConfirm(out, results, b.responder);
+    expect(b.calls()).toBe(1); // the one permitted retry
+    expect(readResultsManifestIfExists(results).results[leadId]).toMatchObject({ attempts: 2 });
+
+    const cRun = countingResponder(failing);
+    await runConfirm(out, results, cRun.responder);
+    expect(cRun.calls()).toBe(0); // exhausted
+  });
+
+  it('changed website evidence re-opens a settled NO_CANDIDATE lead', async () => {
+    const leadId = await seedQualifiedLead();
+    const out = tempOutPath();
+    const results = join(dirname(out), 'results.json');
+
+    await runConfirm(out, results, noCandidateResponder);
+    const before = readResultsManifestIfExists(results).results[leadId];
+
+    // Same lead, same domain — the team page now names someone.
+    const changed = { [HOME]: HOME_HTML, [`https://${DOMAIN}/meet-the-team`]: '<html><body><p>Dr. Shyam Shastri, Principal Dentist, founded Diamond Smile. Newly published.</p></body></html>' };
+    const after = countingResponder(verifiedResponder());
+    await runConfirm(out, results, after.responder, {}, changed);
+    expect(after.calls()).toBe(1);
+
+    const record = readResultsManifestIfExists(results).results[leadId];
+    expect(record?.fingerprint).not.toBe(before?.fingerprint);
+    expect(record).toMatchObject({ outcome: 'FOUND', attempts: 1 }); // attempts reset with the new fingerprint
+  });
+
+  it('--lead X --refresh re-runs exactly X and leaves other leads untouched', async () => {
+    const target = await seedQualifiedLead('Colosseum Norwood', 'colosseum.example');
+    await seedQualifiedLead('Other Practice', 'other.example');
+    const out = tempOutPath();
+    const results = join(dirname(out), 'results.json');
+    const site = { 'https://colosseum.example': HOME_HTML, 'https://other.example': HOME_HTML };
+
+    await runConfirm(out, results, noCandidateResponder, { lead: target }, site);
+    expect(Object.keys(readResultsManifestIfExists(results).results)).toEqual([target]);
+
+    const fetchedHosts = new Set<string>();
+    const rerun = countingResponder(verifiedResponder());
+    await discoverDecisionMakersCommand(ctx(), { out, results, confirm: true, refresh: true, lead: target }, {
+      buildFetcher: () => (url) => { fetchedHosts.add(new URL(url).host); return Promise.resolve(ok(url, HOME_HTML)); },
+      buildLlmDeps: () => llmDepsFor(rerun.responder),
+    });
+    expect(rerun.calls()).toBe(1);
+    expect([...fetchedHosts]).toEqual(['colosseum.example']);
+  });
+
+  it('--lead targets exactly one lead in plan, --preview and --confirm', async () => {
+    const target = await seedQualifiedLead('Target', 'target.example');
+    await seedQualifiedLead('Other', 'other.example');
+    const out = tempOutPath();
+    const results = join(dirname(out), 'results.json');
+
+    const planned = await captureRun(() => discoverDecisionMakersCommand(ctx(), { out, results, lead: target }, {}));
+    expect(planned).toContain(`target lead:            ${target}`);
+    expect(planned).toContain('selected this run:       1');
+
+    const previewHosts = new Set<string>();
+    await discoverDecisionMakersCommand(ctx(), { out, results, preview: true, lead: target }, {
+      buildFetcher: () => (url) => { previewHosts.add(new URL(url).host); return Promise.resolve(ok(url, HOME_HTML)); },
+    });
+    expect([...previewHosts]).toEqual(['target.example']);
+
+    const confirmHosts = new Set<string>();
+    await discoverDecisionMakersCommand(ctx(), { out, results, confirm: true, lead: target }, {
+      buildFetcher: () => (url) => { confirmHosts.add(new URL(url).host); return Promise.resolve(ok(url, HOME_HTML)); },
+      buildLlmDeps: () => llmDepsFor(noCandidateResponder),
+    });
+    expect([...confirmHosts]).toEqual(['target.example']);
+    expect(Object.keys(readResultsManifestIfExists(results).results)).toEqual([target]);
+  });
+
+  it('rejects meaningless or dangerous flag combinations', async () => {
+    const leadId = await seedQualifiedLead();
+    const out = tempOutPath();
+    // The important one: batch refresh would re-extract whichever leads sort first, at full price.
+    await expect(discoverDecisionMakersCommand(ctx(), { out, confirm: true, refresh: true }, {}))
+      .rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
+    await expect(discoverDecisionMakersCommand(ctx(), { out, lead: leadId, limit: '2' }, {}))
+      .rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
+    await expect(discoverDecisionMakersCommand(ctx(), { out, preview: true, confirm: true }, {}))
+      .rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
+    await expect(discoverDecisionMakersCommand(ctx(), { out, lead: 'no-such-lead' }, {}))
+      .rejects.toMatchObject({ code: 'LEAD_NOT_FOUND' });
+  });
+
+  it('a zero-provider-call result consumes no run LLM allowance and records nothing', async () => {
+    await seedQualifiedLead('Unreachable', 'unreachable.example');
+    await seedQualifiedLead('Reachable', 'reachable.example');
+    const out = tempOutPath();
+    const results = join(dirname(out), 'results.json');
+
+    // The first lead's site yields no evidence page at all -> no_pages, no provider call.
+    const counted = countingResponder(verifiedResponder());
+    const output = await captureRun(() => discoverDecisionMakersCommand(ctx({ MAX_LLM_CALLS_PER_RUN: 1 }), { out, results, confirm: true }, {
+      buildFetcher: () => (url) => (new URL(url).host === 'unreachable.example'
+        ? Promise.resolve({ kind: 'invalid', reason: 'unreachable' } as FetchOutcome)
+        : Promise.resolve(ok(url, TEAM_HTML))),
+      buildLlmDeps: () => llmDepsFor(counted.responder),
+    }));
+
+    // The unreachable lead did not eat the single-call run allowance; the reachable lead still ran.
+    expect(counted.calls()).toBe(1);
+    expect(output).toContain('no_pages');
+    expect(output).toContain('nothing recorded, still eligible');
+    expect(Object.keys(readResultsManifestIfExists(results).results)).toHaveLength(1);
   });
 
   it('DRY_RUN=true blocks --preview and --confirm before any lead is touched', async () => {
