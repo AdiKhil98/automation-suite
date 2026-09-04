@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { type Logger } from 'pino';
 import { requireIntegrationTestDatabase } from '../support/test-database.js';
 import { type DbHandle } from '../../src/persistence/db.js';
@@ -61,7 +61,7 @@ function verifiedResponder(): MockResponder {
   return () => ({
     rawJson: {
       candidates: [
-        { candidateRef: 'C1', fullName: 'Shyam Shastri', title: 'Principal Dentist', evidenceIds: ['E2'], confidence: 0.97, evidenceSnippet: 'Dr. Shyam Shastri, Principal Dentist, founded Diamond Smile.' },
+        { fullName: 'Shyam Shastri', title: 'Principal Dentist', evidenceIds: ['E2'], confidence: 0.97, evidenceSnippet: 'Dr. Shyam Shastri, Principal Dentist, founded Diamond Smile.' },
       ],
       insufficientEvidence: false,
     },
@@ -156,6 +156,64 @@ describe('discover-decision-makers (PostgreSQL)', () => {
     expect(data?.[leadId]).toEqual([
       { fullName: 'Shyam Shastri', title: 'Principal Dentist', sourceUrl: `https://${DOMAIN}/meet-the-team`, evidenceSnippet: 'Dr. Shyam Shastri, Principal Dentist, founded Diamond Smile.', confidence: 0.97 },
     ]);
+  });
+
+  /** Capture stdout for the run so the CLI's own claims can be asserted. */
+  async function captureRun(fn: () => Promise<void>): Promise<string> {
+    const lines: string[] = [];
+    const spy = vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => { lines.push(args.map(String).join(' ')); });
+    try { await fn(); } finally { spy.mockRestore(); }
+    return lines.join('\n');
+  }
+
+  it('a schema-invalid paid response writes no file and never claims it wrote one', async () => {
+    await seedQualifiedLead();
+    const out = tempOutPath();
+    const output = await captureRun(() => discoverDecisionMakersCommand(ctx(), { out, confirm: true }, {
+      buildFetcher: () => fakeFetcher({ [HOME]: HOME_HTML, [`https://${DOMAIN}/meet-the-team`]: TEAM_HTML }),
+      buildLlmDeps: () => llmDepsFor(() => ({ rawJson: { totally: 'wrong shape' } })),
+    }));
+
+    expect(readCandidatesFileIfExists(out)).toBeNull();
+    expect(output).not.toContain(`wrote: ${out}`);
+    expect(output).toContain('no candidates file was produced or updated');
+    expect(output).toContain('candidates file NOT written for this lead');
+    // The spend of a completed-but-unusable paid call stays visible.
+    expect(output).toContain('paid call:');
+    expect(output).toContain('outcome=schema_invalid');
+  });
+
+  it('a schema-invalid response preserves a previously written valid candidates file', async () => {
+    const firstLead = await seedQualifiedLead();
+    const out = tempOutPath();
+    await discoverDecisionMakersCommand(ctx(), { out, confirm: true }, {
+      buildFetcher: () => fakeFetcher({ [HOME]: HOME_HTML, [`https://${DOMAIN}/meet-the-team`]: TEAM_HTML }),
+      buildLlmDeps: () => llmDepsFor(verifiedResponder()),
+    });
+    const before = readCandidatesFileIfExists(out);
+    expect(before?.[firstLead]).toHaveLength(1);
+
+    const secondLead = await seedQualifiedLead('Gipsy Hill Dental', 'gipsyhilldental.com');
+    const output = await captureRun(() => discoverDecisionMakersCommand(ctx(), { out, confirm: true }, {
+      buildFetcher: () => fakeFetcher({ 'https://gipsyhilldental.com': HOME_HTML, 'https://gipsyhilldental.com/meet-the-team': TEAM_HTML }),
+      buildLlmDeps: () => llmDepsFor(() => ({ rawJson: { totally: 'wrong shape' } })),
+    }));
+
+    // The earlier lead's valid results survive untouched; nothing empty was written over them.
+    expect(readCandidatesFileIfExists(out)).toEqual(before);
+    expect(Object.keys(readCandidatesFileIfExists(out) ?? {})).not.toContain(secondLead);
+    expect(output).not.toContain(`wrote: ${out}`);
+  });
+
+  it('a successful run still reports the file it actually wrote', async () => {
+    await seedQualifiedLead();
+    const out = tempOutPath();
+    const output = await captureRun(() => discoverDecisionMakersCommand(ctx(), { out, confirm: true }, {
+      buildFetcher: () => fakeFetcher({ [HOME]: HOME_HTML, [`https://${DOMAIN}/meet-the-team`]: TEAM_HTML }),
+      buildLlmDeps: () => llmDepsFor(verifiedResponder()),
+    }));
+    expect(output).toContain(`wrote: ${out}`);
+    expect(output).toContain('1 lead updated');
   });
 
   it('existing evidence is reused: a second run skips a lead already present in --out (zero fetch/LLM calls) unless --refresh', async () => {

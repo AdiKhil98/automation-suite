@@ -1,8 +1,16 @@
 import { type Logger } from 'pino';
-import { type LlmProvider, type ReasoningEffort } from '../../integrations/llm/provider.js';
+import { type LlmProvider, type LlmResult, type ReasoningEffort } from '../../integrations/llm/provider.js';
 import { estimateCostUsd, worstCaseCostUsd } from '../../integrations/llm/pricing.js';
 import { buildExtractorMessages } from '../../prompts/decision-makers/index.js';
-import { DECISION_MAKER_JSON_SCHEMA, DECISION_MAKER_SCHEMA_VERSION, decisionMakerExtractionOutputSchema, type DecisionMakerExtractionOutputParsed } from './schema.js';
+import {
+  DECISION_MAKER_JSON_SCHEMA,
+  DECISION_MAKER_SCHEMA_VERSION,
+  decisionMakerExtractionOutputSchema,
+  MAX_CANDIDATE_NAME_CHARS,
+  MAX_CANDIDATE_TITLE_CHARS,
+  MAX_EVIDENCE_SNIPPET_CHARS,
+  type DecisionMakerExtractionOutputParsed,
+} from './schema.js';
 import { classifyTitlePriority, type TitlePriority } from './title-priority.js';
 import { MAX_EVIDENCE_CHARS_PER_PAGE } from './evidence-extraction.js';
 import { type EvidencePage } from './website-evidence.js';
@@ -30,7 +38,7 @@ export interface ProvenancedCandidate {
   evidenceSnippet: string;
 }
 
-export type RejectionReason = 'evidence_unresolvable' | 'low_confidence' | 'unmapped_title' | 'duplicate' | 'not_a_person';
+export type RejectionReason = 'evidence_unresolvable' | 'low_confidence' | 'unmapped_title' | 'duplicate' | 'not_a_person' | 'unusable_field';
 
 /** Corporate-entity wording in a "name". A chain's About page can state that its majority owner is a
  * holding company; that is an organisation, never an outreach decision-maker. */
@@ -41,12 +49,58 @@ export interface RejectedCandidate {
   reason: RejectionReason;
 }
 
+/**
+ * Safe, non-sensitive provenance for ONE completed paid request. Deliberately carries no model
+ * output, no prompt text, no evidence and no credentials — only what makes the spend auditable when
+ * the response is unusable. A paid call that fails our local contract must stay fail-closed, but it
+ * must never become financially invisible.
+ */
+export interface ExtractionCallMetadata {
+  provider: string;
+  requestedModel: string;
+  resolvedModel: string | null;
+  requestId: string | null;
+  responseId: string | null;
+  /** Requests actually issued for this lead. One, always — there is no repair/retry loop here. */
+  llmCalls: number;
+  inputTokens: number | null;
+  cachedInputTokens: number | null;
+  outputTokens: number | null;
+  reasoningTokens: number | null;
+  totalTokens: number | null;
+  /** Honest estimate: null when no verified price exists for the resolved model. */
+  estimatedCostUsd: number | null;
+  latencyMs: number;
+  failureCategory: 'none' | 'schema_invalid' | 'provider_error';
+}
+
 export type ExtractionOutcome =
-  | { status: 'ok'; accepted: ProvenancedCandidate[]; rejected: RejectedCandidate[]; insufficientEvidence: boolean; costUsd: number }
+  | { status: 'ok'; accepted: ProvenancedCandidate[]; rejected: RejectedCandidate[]; insufficientEvidence: boolean; costUsd: number; call: ExtractionCallMetadata }
   | { status: 'no_pages' }
   | { status: 'budget_blocked' }
-  | { status: 'schema_invalid'; errors: string[] }
-  | { status: 'provider_error'; message: string };
+  | { status: 'schema_invalid'; errors: string[]; call: ExtractionCallMetadata }
+  // `call` is null only when the request never completed (thrown/timed out), so no usage exists.
+  | { status: 'provider_error'; message: string; call: ExtractionCallMetadata | null };
+
+function buildCallMetadata(res: LlmResult, failureCategory: ExtractionCallMetadata['failureCategory'], estimatedCostUsd: number | null): ExtractionCallMetadata {
+  const { inputTokens, outputTokens } = res.usage;
+  return {
+    provider: res.provider,
+    requestedModel: res.requestedModel,
+    resolvedModel: res.resolvedModel,
+    requestId: res.requestId,
+    responseId: res.responseId,
+    llmCalls: 1,
+    inputTokens,
+    cachedInputTokens: res.usage.cachedInputTokens,
+    outputTokens,
+    reasoningTokens: res.usage.reasoningTokens,
+    totalTokens: inputTokens !== null && outputTokens !== null ? inputTokens + outputTokens : null,
+    estimatedCostUsd,
+    latencyMs: res.latencyMs,
+    failureCategory,
+  };
+}
 
 const ALIAS_RE = /^E(\d+)$/;
 
@@ -60,10 +114,43 @@ function resolvePageAlias(tag: string, pages: readonly EvidencePage[]): Evidence
 }
 
 /**
+ * Deterministic storage-bound normalization for supporting/display text. Applied only AFTER the
+ * candidate's evidence citation has resolved, so a merely verbose snippet costs nothing.
+ *
+ * Never applied to a name or a title: a truncated identity would be a FALSE identity, and this
+ * pipeline's whole purpose is evidence-bound identity. An oversized name/title rejects that one
+ * candidate instead (`unusable_field`).
+ */
+function normalizeSnippet(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed.length <= MAX_EVIDENCE_SNIPPET_CHARS) return trimmed;
+  return `${trimmed.slice(0, MAX_EVIDENCE_SNIPPET_CHARS - 1).trimEnd()}…`;
+}
+
+/** Blank (nothing to verify) or absurdly long (a pasted paragraph, not an identity) — either way this
+ * single candidate is unusable and is dropped without touching the rest of the response. */
+function isUnusable(value: string, maxChars: number): boolean {
+  const trimmed = value.trim();
+  return trimmed.length === 0 || trimmed.length > maxChars;
+}
+
+/** Keep an unusable value out of logs/CLI at full length while still identifying what was rejected. */
+const REJECTION_DISPLAY_CHARS = 80;
+function forDisplay(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return '(blank)';
+  return trimmed.length <= REJECTION_DISPLAY_CHARS ? trimmed : `${trimmed.slice(0, REJECTION_DISPLAY_CHARS)}…`;
+}
+
+/**
  * Pure deterministic pipeline applied to every model-proposed candidate, regardless of what the model
- * returned: unresolvable evidence citation -> reject; below-threshold confidence -> reject; title that
- * doesn't map to a qualifying tier -> reject (ordinary staff never slip through); duplicate name ->
- * reject; then sort by (priority asc, confidence desc) and hard-cap to 3.
+ * returned: unusable identity/snippet -> reject; unresolvable evidence citation -> reject;
+ * below-threshold confidence -> reject; title that doesn't map to a qualifying tier -> reject
+ * (ordinary staff never slip through); duplicate name -> reject; then sort by (priority asc,
+ * confidence desc) and hard-cap to 3.
+ *
+ * Every rejection here is scoped to ONE candidate. Whole-response fail-closed is reserved for the Zod
+ * layer (structural shape, evidence-citation contract, confidence range) — see schema.ts.
  */
 export function filterAndRankCandidates(
   parsed: DecisionMakerExtractionOutputParsed,
@@ -76,6 +163,16 @@ export function filterAndRankCandidates(
   const rejected: RejectedCandidate[] = [];
 
   for (const cand of parsed.candidates) {
+    // Identity must be exact and verifiable. A blank/absurd name or title, or a snippet with nothing
+    // in it to check the claim against, makes THIS candidate unusable — never the whole response.
+    if (
+      isUnusable(cand.fullName, MAX_CANDIDATE_NAME_CHARS) ||
+      isUnusable(cand.title, MAX_CANDIDATE_TITLE_CHARS) ||
+      cand.evidenceSnippet.trim().length === 0
+    ) {
+      rejected.push({ fullName: forDisplay(cand.fullName), title: forDisplay(cand.title), reason: 'unusable_field' });
+      continue;
+    }
     if (ORGANIZATION_NAME_RE.test(cand.fullName)) {
       rejected.push({ fullName: cand.fullName, title: cand.title, reason: 'not_a_person' });
       continue;
@@ -114,7 +211,7 @@ export function filterAndRankCandidates(
       priority,
       confidence: cand.confidence,
       sourceUrl: firstPage.url,
-      evidenceSnippet: cand.evidenceSnippet,
+      evidenceSnippet: normalizeSnippet(cand.evidenceSnippet),
     });
   }
 
@@ -170,20 +267,39 @@ export async function extractDecisionMakers(
       maxRetries: deps.maxRetries,
     });
   } catch (err) {
+    // The request never completed, so no usage exists to preserve — nothing was billed for a response.
     deps.logger.error({ err: err instanceof Error ? err.message : String(err) }, 'decision-makers: provider call failed');
-    return { status: 'provider_error', message: err instanceof Error ? err.message : String(err) };
+    return { status: 'provider_error', message: err instanceof Error ? err.message : String(err), call: null };
   }
 
+  // The request completed and is billable from here on, whatever we go on to decide about its
+  // content. Resolve cost ONCE, preferring the provider's resolved-model estimate.
+  const estimatedCostUsd = res.usage.estimatedCostUsd ?? estimateCostUsd(res.resolvedModel ?? deps.model, res.usage);
+
   if (res.status !== 'ok') {
-    return { status: 'provider_error', message: `${res.status}${res.refusal ? `: ${res.refusal}` : ''}${res.incompleteReason ? `: ${res.incompleteReason}` : ''}` };
+    const call = buildCallMetadata(res, 'provider_error', estimatedCostUsd);
+    deps.logger.warn({ call }, 'decision-makers: paid call completed but unusable (provider status)');
+    return { status: 'provider_error', message: `${res.status}${res.refusal ? `: ${res.refusal}` : ''}${res.incompleteReason ? `: ${res.incompleteReason}` : ''}`, call };
   }
 
   const parsed = decisionMakerExtractionOutputSchema.safeParse(res.rawJson);
   if (!parsed.success) {
-    return { status: 'schema_invalid', errors: parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`) };
+    // Fail closed for this lead — but never silently. The raw output is deliberately NOT logged or
+    // returned; only the issue paths/messages and the safe spend metadata are.
+    const call = buildCallMetadata(res, 'schema_invalid', estimatedCostUsd);
+    const errors = parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`);
+    deps.logger.warn({ call, errors }, 'decision-makers: paid call completed but failed local schema validation');
+    return { status: 'schema_invalid', errors, call };
   }
 
   const { accepted, rejected } = filterAndRankCandidates(parsed.data, pages, practiceName, deps.minConfidence);
-  const costUsd = isRealProvider ? (estimateCostUsd(deps.model, res.usage) ?? 0) : 0;
-  return { status: 'ok', accepted, rejected, insufficientEvidence: parsed.data.insufficientEvidence, costUsd };
+  const costUsd = isRealProvider ? (estimatedCostUsd ?? 0) : 0;
+  return {
+    status: 'ok',
+    accepted,
+    rejected,
+    insufficientEvidence: parsed.data.insufficientEvidence,
+    costUsd,
+    call: buildCallMetadata(res, 'none', estimatedCostUsd),
+  };
 }
