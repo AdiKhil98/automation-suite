@@ -4,6 +4,7 @@ import { estimateCostUsd, worstCaseCostUsd } from '../../integrations/llm/pricin
 import { buildExtractorMessages } from '../../prompts/decision-makers/index.js';
 import { DECISION_MAKER_JSON_SCHEMA, DECISION_MAKER_SCHEMA_VERSION, decisionMakerExtractionOutputSchema, type DecisionMakerExtractionOutputParsed } from './schema.js';
 import { classifyTitlePriority, type TitlePriority } from './title-priority.js';
+import { MAX_EVIDENCE_CHARS_PER_PAGE } from './evidence-extraction.js';
 import { type EvidencePage } from './website-evidence.js';
 
 export interface DecisionMakerLlmDeps {
@@ -29,7 +30,11 @@ export interface ProvenancedCandidate {
   evidenceSnippet: string;
 }
 
-export type RejectionReason = 'evidence_unresolvable' | 'low_confidence' | 'unmapped_title' | 'duplicate';
+export type RejectionReason = 'evidence_unresolvable' | 'low_confidence' | 'unmapped_title' | 'duplicate' | 'not_a_person';
+
+/** Corporate-entity wording in a "name". A chain's About page can state that its majority owner is a
+ * holding company; that is an organisation, never an outreach decision-maker. */
+const ORGANIZATION_NAME_RE = /\b(ltd|limited|llc|llp|plc|inc|gmbh|ag|bv|nv|holdings?|capital|group|partners|investments?|corporation|corp|company)\b/i;
 export interface RejectedCandidate {
   fullName: string;
   title: string;
@@ -71,6 +76,10 @@ export function filterAndRankCandidates(
   const rejected: RejectedCandidate[] = [];
 
   for (const cand of parsed.candidates) {
+    if (ORGANIZATION_NAME_RE.test(cand.fullName)) {
+      rejected.push({ fullName: cand.fullName, title: cand.title, reason: 'not_a_person' });
+      continue;
+    }
     const resolvedPages = cand.evidenceIds
       .map((tag) => resolvePageAlias(tag, pages))
       .filter((p): p is EvidencePage => p !== null);
@@ -82,7 +91,11 @@ export function filterAndRankCandidates(
       rejected.push({ fullName: cand.fullName, title: cand.title, reason: 'low_confidence' });
       continue;
     }
-    const priority = classifyTitlePriority(cand.title, cand.evidenceSnippet, practiceName);
+    const citedPage = resolvedPages[0];
+    // Every page in `pages` was fetched same-origin from the lead's verified official domain, so the
+    // cited page's role is sufficient provenance for the ambiguous Director tier.
+    const provenance = citedPage ? { role: citedPage.role, officialDomain: true } : null;
+    const priority = classifyTitlePriority(cand.title, cand.evidenceSnippet, practiceName, provenance);
     if (priority === null) {
       rejected.push({ fullName: cand.fullName, title: cand.title, reason: 'unmapped_title' });
       continue;
@@ -109,13 +122,13 @@ export function filterAndRankCandidates(
   return { accepted: scored.slice(0, 3), rejected };
 }
 
-/** Conservative worst-case input-token estimate for the pre-call budget proof: bounded by the prompt's
- * own truncation (system text + up to `maxPages` evidence pages, each capped at 1500 chars in the
- * prompt serialization), using a standard ~4-chars-per-token approximation, rounded up. */
+/** Conservative worst-case input-token estimate for the pre-call budget proof: bounded by the hard cap
+ * `gatherWebsiteEvidence` applies to each page's assembled evidence text (system text + up to
+ * `maxPages` evidence pages, each at most MAX_EVIDENCE_CHARS_PER_PAGE), using a standard
+ * ~4-chars-per-token approximation, rounded up. */
 function worstCaseInputTokensFor(maxPages: number): number {
-  const SYSTEM_PROMPT_CHARS_ESTIMATE = 2000;
-  const CHARS_PER_PAGE_IN_PROMPT = 1500;
-  return Math.ceil((SYSTEM_PROMPT_CHARS_ESTIMATE + maxPages * CHARS_PER_PAGE_IN_PROMPT) / 4);
+  const SYSTEM_PROMPT_CHARS_ESTIMATE = 2500;
+  return Math.ceil((SYSTEM_PROMPT_CHARS_ESTIMATE + maxPages * MAX_EVIDENCE_CHARS_PER_PAGE) / 4);
 }
 
 /**

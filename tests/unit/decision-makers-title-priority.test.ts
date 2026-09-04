@@ -31,6 +31,30 @@ describe('classifyTitlePriority', () => {
     expect(classifyTitlePriority('Managing Director', 'John Doe is Managing Director of a completely different company.', 'Diamond Smile')).toBeNull();
   });
 
+  it('tier 4 is accepted from a team/about page on the lead\'s own domain without repeating the practice name', () => {
+    // Real roster shape: "Mena Williams — Managing Director" is rendered as a title card, with the
+    // practice name in the page header rather than in the card, so requiring the name in the same
+    // snippet rejected a correctly identified decision-maker on a page we fetched from the lead's site.
+    const snippet = 'Mena Williams Managing Director VIEW PROFILE';
+    expect(classifyTitlePriority('Managing Director', snippet, 'Dulwich Orthodontics', { role: 'team', officialDomain: true })).toBe(4);
+    expect(classifyTitlePriority('Director', snippet, 'Dulwich Orthodontics', { role: 'about', officialDomain: true })).toBe(4);
+  });
+
+  it('tier 4 provenance relief does NOT extend to weaker pages or unverified domains', () => {
+    const snippet = 'Mena Williams Managing Director VIEW PROFILE';
+    expect(classifyTitlePriority('Managing Director', snippet, 'Dulwich Orthodontics', { role: 'home', officialDomain: true })).toBeNull();
+    expect(classifyTitlePriority('Managing Director', snippet, 'Dulwich Orthodontics', { role: 'contact', officialDomain: true })).toBeNull();
+    expect(classifyTitlePriority('Managing Director', snippet, 'Dulwich Orthodontics', { role: 'team', officialDomain: false })).toBeNull();
+  });
+
+  it('corporate-group wording re-imposes the practice-name requirement on the ambiguous Director tier', () => {
+    const corporate = 'Jane Roe, Regional Director, Colosseum Dental Group holdings.';
+    expect(classifyTitlePriority('Director', corporate, 'Norwood Dental Clinic', { role: 'team', officialDomain: true })).toBeNull();
+    // ...unless the practice itself is named in the same evidence.
+    const named = 'Jane Roe is Managing Director of Norwood Dental Clinic, part of a larger group.';
+    expect(classifyTitlePriority('Managing Director', named, 'Norwood Dental Clinic', { role: 'team', officialDomain: true })).toBe(4);
+  });
+
   it('ordinary staff and unrelated roles are excluded entirely', () => {
     for (const title of ['Associate Dentist', 'Dentist', 'Hygienist', 'Receptionist', 'Marketing Manager', 'Dental Nurse', 'Office Administrator']) {
       expect(classifyTitlePriority(title, SNIPPET, 'Diamond Smile')).toBeNull();

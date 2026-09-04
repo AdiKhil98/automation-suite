@@ -136,10 +136,11 @@ export async function discoverDecisionMakersCommand(ctx: CliContext, opts: Disco
   let llmCallsThisRun = 0;
   console.log('');
   for (const { lead, domain, baseUrl } of eligible) {
-    const { pages, fetchErrors } = await gatherWebsiteEvidence(fetcher, baseUrl, c.DISCOVER_DECISION_MAKERS_MAX_PAGES_PER_LEAD);
+    const { pages, fetchErrors, fetchCount, selection } = await gatherWebsiteEvidence(fetcher, baseUrl, c.DISCOVER_DECISION_MAKERS_MAX_PAGES_PER_LEAD);
     const pageSummary = pages.map((p) => `${p.role}:${p.url}`).join(', ') || '(none)';
     if (!opts.confirm) {
-      console.log(`  lead ${lead.id} → domain ${domain} → pages fetched: ${pageSummary}${fetchErrors.length > 0 ? ` (errors: ${fetchErrors.join('; ')})` : ''}`);
+      console.log(`  lead ${lead.id} → domain ${domain} → ${String(fetchCount)}/${String(c.DISCOVER_DECISION_MAKERS_MAX_PAGES_PER_LEAD)} fetches → pages: ${pageSummary}${fetchErrors.length > 0 ? ` (errors: ${fetchErrors.join('; ')})` : ''}`);
+      for (const line of selection) console.log(`      ${line}`);
       continue;
     }
 
