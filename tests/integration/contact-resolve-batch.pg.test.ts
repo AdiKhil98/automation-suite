@@ -11,9 +11,11 @@ import { contactResolveBatchCommand } from '../../src/cli/commands/contact-resol
 import { type CliContext } from '../../src/cli/context.js';
 import { LeadFactsRepository } from '../../src/persistence/repositories/lead-facts.repo.js';
 import { LeadsRepository } from '../../src/persistence/repositories/leads.repo.js';
+import { PipelineRepository } from '../../src/persistence/repositories/pipeline.repo.js';
 import { ContactEnrichmentRepository } from '../../src/persistence/repositories/contact-enrichment.repo.js';
 import { type ContactEnrichmentProvider } from '../../src/domain/contact-enrichment/provider.js';
 import { type ResolveCascadeProvider } from '../../src/domain/contact-resolve-batch/eligibility.js';
+import { type LeadStatus } from '../../src/domain/leads/status.js';
 import { type EnrichmentQuery, type PreviewPerson, type ProviderEnrichmentOutcome } from '../../src/domain/contact-enrichment/types.js';
 
 const testDatabase = requireIntegrationTestDatabase();
@@ -99,18 +101,37 @@ describe('contact-resolve-batch (PostgreSQL)', () => {
       logger,
       db: handle.db,
       leads: new LeadsRepository(handle.db),
-      events: undefined as unknown as CliContext['events'],
+      events: new PipelineRepository(handle.db),
       service: undefined as unknown as CliContext['service'],
     };
   }
 
-  async function seedQualifiedLead(businessName = 'Diamond Smile', domain = DOMAIN): Promise<string> {
+  /** Seed a lead at `status`, having durably passed QUALIFIED in its pipeline_events history (unless
+   * `neverQualified` is set) — mirrors real lead lifecycle: the QUALIFIED transition is recorded even
+   * when the lead has since moved on to a later status. */
+  async function seedLead(opts: {
+    businessName?: string;
+    domain?: string;
+    status?: LeadStatus;
+    neverQualified?: boolean;
+  } = {}): Promise<string> {
+    const { businessName = 'Diamond Smile', domain = DOMAIN, status = 'QUALIFIED', neverQualified = false } = opts;
     const id = randomUUID();
-    await handle.db.insert(leads).values({ id, businessName, normalizedDomain: domain, status: 'QUALIFIED' });
+    await handle.db.insert(leads).values({ id, businessName, normalizedDomain: domain, status });
+    if (!neverQualified) {
+      await new PipelineRepository(handle.db).record({
+        leadId: id, runId: null, type: 'STATE_TRANSITION', fromStatus: 'READY_FOR_QUALIFICATION', toStatus: 'QUALIFIED',
+        message: 'READY_FOR_QUALIFICATION -> QUALIFIED', data: null,
+      });
+    }
     await new LeadFactsRepository(handle.db).writeCurrentFact({
       leadId: id, factType: 'official_domain', value: domain, normalizedValue: domain, sourceType: 'manual', sourceUrl: null,
     });
     return id;
+  }
+
+  async function seedQualifiedLead(businessName = 'Diamond Smile', domain = DOMAIN): Promise<string> {
+    return seedLead({ businessName, domain });
   }
 
   const CANDS = [{ fullName: 'Shyam Shastri', title: 'Principal Dentist' }, { fullName: 'Shaimil Patel', title: 'Clinical Director' }];
@@ -223,5 +244,19 @@ describe('contact-resolve-batch (PostgreSQL)', () => {
     expect(callsAfterFirstRun).toBeGreaterThan(0);
     await contactResolveBatchCommand(ctx(), { candidatesFile, confirm: true }, { buildProvider });
     expect(calls).toBe(callsAfterFirstRun); // second run: lead is chain_exhausted, not even selected
+  });
+
+  it('durable qualification (pipeline_events history) is used, not the current literal status: QUALIFIED -> AUDITED stays eligible; never-qualified and REJECTED are excluded', async () => {
+    const auditedId = await seedLead({ businessName: 'Audited Lead', domain: 'audited.example', status: 'AUDITED' });
+    const neverQualifiedId = await seedLead({ businessName: 'Never Qualified', domain: 'never.example', status: 'READY_FOR_ENRICHMENT', neverQualified: true });
+    const rejectedId = await seedLead({ businessName: 'Rejected Lead', domain: 'rejected.example', status: 'REJECTED' });
+    const candidatesFile = writeCandidatesFile({ [auditedId]: CANDS, [neverQualifiedId]: CANDS, [rejectedId]: CANDS });
+    await contactResolveBatchCommand(ctx(), { candidatesFile, confirm: true }, {
+      buildProvider: (name) => fakeProvider(name, { enrichResponder: verifiedResponder('audited.example') }),
+    });
+    const enrichRepo = new ContactEnrichmentRepository(handle.db);
+    expect(await enrichRepo.listByLead(auditedId)).not.toHaveLength(0);
+    expect(await enrichRepo.listByLead(neverQualifiedId)).toHaveLength(0);
+    expect(await enrichRepo.listByLead(rejectedId)).toHaveLength(0);
   });
 });
