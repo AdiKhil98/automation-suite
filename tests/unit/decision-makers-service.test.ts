@@ -48,6 +48,39 @@ describe('extractDecisionMakers', () => {
     }
   });
 
+  it('a Managing Director cited from an official team page is accepted without the practice name in the snippet', async () => {
+    const responder: MockResponder = () => ({
+      rawJson: {
+        candidates: [
+          { candidateRef: 'C1', fullName: 'Mena Williams', title: 'Managing Director', evidenceIds: ['E2'], confidence: 0.9, evidenceSnippet: 'Mena Williams Managing Director VIEW PROFILE' },
+        ],
+        insufficientEvidence: false,
+      },
+    });
+    const result = await extractDecisionMakers(baseDeps(responder), [HOME_PAGE, TEAM_PAGE], 'Dulwich Orthodontics', 3);
+    expect(result.status).toBe('ok');
+    if (result.status === 'ok') {
+      expect(result.accepted[0]).toMatchObject({ fullName: 'Mena Williams', priority: 4 });
+    }
+  });
+
+  it('an organisation proposed as a person is rejected outright', async () => {
+    const responder: MockResponder = () => ({
+      rawJson: {
+        candidates: [
+          { candidateRef: 'C1', fullName: 'Jacobs Holding AG', title: 'Owner', evidenceIds: ['E2'], confidence: 0.95, evidenceSnippet: 'Our majority owner is Jacobs Holding AG.' },
+        ],
+        insufficientEvidence: false,
+      },
+    });
+    const result = await extractDecisionMakers(baseDeps(responder), [HOME_PAGE, TEAM_PAGE], 'Diamond Smile', 3);
+    expect(result.status).toBe('ok');
+    if (result.status === 'ok') {
+      expect(result.accepted).toHaveLength(0);
+      expect(result.rejected[0]).toMatchObject({ fullName: 'Jacobs Holding AG', reason: 'not_a_person' });
+    }
+  });
+
   it('multiple strong roles -> correct priority ordering (owner before clinical director before practice manager)', async () => {
     const responder: MockResponder = () => ({
       rawJson: {
