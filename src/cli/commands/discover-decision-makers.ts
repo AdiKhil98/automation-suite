@@ -6,7 +6,9 @@ import {
 } from '../../domain/contact-resolve-batch/candidates-file.js';
 import { extractDecisionMakers, type DecisionMakerLlmDeps } from '../../domain/decision-makers/service.js';
 import { buildSafeHttpFetcher, gatherWebsiteEvidence, type PageFetchFn } from '../../domain/decision-makers/website-evidence.js';
+import { isLifecycleEligibleForContactWork } from '../../domain/leads/lead-lifecycle.js';
 import { type Lead } from '../../domain/leads/lead.js';
+import { ContactEnrichmentRepository } from '../../persistence/repositories/contact-enrichment.repo.js';
 import { LeadFactsRepository } from '../../persistence/repositories/lead-facts.repo.js';
 import { AppError } from '../../utils/errors.js';
 import { type CliContext } from '../context.js';
@@ -76,14 +78,30 @@ export async function discoverDecisionMakersCommand(ctx: CliContext, opts: Disco
   const existing: CandidatesFileData = readCandidatesFileIfExists(outPath) ?? {};
 
   const all = await ctx.leads.list(1000);
-  const qualified = all.filter((l) => l.status === 'QUALIFIED');
+  // Durable qualification: did this lead EVER pass QUALIFIED, per the append-only pipeline_events
+  // history — not whether its CURRENT status literally equals 'QUALIFIED' (QUALIFIED's only legal
+  // outgoing transition is to READY_FOR_CAPTURE, so an audited/captured lead has long since moved past
+  // it and would otherwise be invisible here). Current-status lifecycle viability (rejected / opted out
+  // / active outreach in flight) is still enforced separately below.
+  const everQualified = await ctx.events.leadsEverReachedStatus(all.map((l) => l.id), 'QUALIFIED');
+  const qualified = all.filter((l) => everQualified.has(l.id) && isLifecycleEligibleForContactWork(l.status));
 
   const factsRepo = new LeadFactsRepository(ctx.db);
+  const enrichRepo = new ContactEnrichmentRepository(ctx.db);
   const eligible: EligibleLead[] = [];
   const skipped: Array<{ lead: Lead; reason: string }> = [];
   for (const lead of qualified) {
     const domainFact = await factsRepo.getCurrentFact(lead.id, 'official_domain');
     if (!domainFact) { skipped.push({ lead, reason: 'no_verified_domain' }); continue; }
+    // A BOUNCED lead's previously-VERIFIED contact is unusable — allow fresh discovery for a
+    // replacement rather than treating the lead as permanently complete.
+    if (lead.status !== 'BOUNCED') {
+      const enrichResults = await enrichRepo.listByLead(lead.id);
+      if (enrichResults.some((r) => r.outcome === 'VERIFIED')) {
+        skipped.push({ lead, reason: 'already_verified_contact' });
+        continue;
+      }
+    }
     if (!opts.refresh && existing[lead.id] && existing[lead.id].length > 0) {
       skipped.push({ lead, reason: 'already_in_out_file' });
       continue;

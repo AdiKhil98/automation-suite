@@ -9,6 +9,7 @@ import {
   type ResolveCascadeProvider,
   type SkipReason,
 } from '../../domain/contact-resolve-batch/eligibility.js';
+import { isLifecycleEligibleForContactWork } from '../../domain/leads/lead-lifecycle.js';
 import { ContactEnrichmentRepository } from '../../persistence/repositories/contact-enrichment.repo.js';
 import { AuditRepository } from '../../persistence/repositories/audit.repo.js';
 import { LeadFactsRepository } from '../../persistence/repositories/lead-facts.repo.js';
@@ -81,7 +82,14 @@ export async function contactResolveBatchCommand(ctx: CliContext, opts: ContactR
   const auditRepo = new AuditRepository(ctx.db);
 
   const all = await ctx.leads.list(1000);
-  const qualified = all.filter((l) => l.status === 'QUALIFIED');
+  // Durable qualification: did this lead EVER pass QUALIFIED, per the append-only pipeline_events
+  // history — not whether its CURRENT status literally equals 'QUALIFIED' (QUALIFIED's only legal
+  // outgoing transition is to READY_FOR_CAPTURE, so an audited/captured lead has long since moved past
+  // it). Computed over every lead (not just the lifecycle-viable ones) so `classifyLead` can still
+  // report the more specific 'rejected_or_active_outreach' reason for a durably-qualified lead whose
+  // current status now blocks new contact work.
+  const durablyQualifiedLeadIds = await ctx.events.leadsEverReachedStatus(all.map((l) => l.id), 'QUALIFIED');
+  const qualified = all.filter((l) => durablyQualifiedLeadIds.has(l.id) && isLifecycleEligibleForContactWork(l.status));
 
   const officialDomainByLead = new Map<string, string | null>();
   const existingResultsByLead = new Map<string, ContactEnrichmentResult[]>();
@@ -117,7 +125,7 @@ export async function contactResolveBatchCommand(ctx: CliContext, opts: ContactR
 
   const { selected, skipped } = selectResolveBatchTargets(
     all,
-    { officialDomainByLead, candidatesByLead, existingResultsByLead, maxOpportunityScoreByLead, availableProviders },
+    { durablyQualifiedLeadIds, officialDomainByLead, candidatesByLead, existingResultsByLead, maxOpportunityScoreByLead, availableProviders },
     { limit },
   );
 

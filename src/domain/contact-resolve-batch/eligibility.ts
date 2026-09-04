@@ -1,4 +1,5 @@
 import { type Lead } from '../leads/lead.js';
+import { isLifecycleEligibleForContactWork } from '../leads/lead-lifecycle.js';
 import { computeInputHash } from '../contact-enrichment/service.js';
 import { type CandidatePerson, type ContactEnrichmentResult } from '../contact-enrichment/types.js';
 
@@ -16,11 +17,13 @@ export type ResolveCascadeProvider = 'instantly' | 'hunter';
 export const CASCADE_ORDER: readonly ResolveCascadeProvider[] = ['instantly', 'hunter'];
 
 export type SkipReason =
+  /** Never durably qualified: no STATE_TRANSITION to QUALIFIED exists in this lead's pipeline_events
+   * history (see `PipelineRepository.leadsEverReachedStatus`). */
   | 'not_qualified'
   /**
-   * Named for clarity/future-proofing but currently unreachable: a lead's `status` is a single column,
-   * so a lead that is `REJECTED`/`REJECTED_AUTOMATICALLY`/mid-outreach (`EMAIL_DRAFTED` and beyond)
-   * cannot simultaneously be `QUALIFIED` — the `not_qualified` check above already excludes it.
+   * Durably qualified at some point, but its CURRENT status no longer permits new contact work:
+   * REJECTED / REJECTED_AUTOMATICALLY / DUPLICATE / UNSUBSCRIBED / REPLIED, or outreach already in
+   * flight (EMAIL_DRAFTED through SENT). See `isLifecycleEligibleForContactWork`.
    */
   | 'rejected_or_active_outreach'
   | 'no_verified_domain'
@@ -64,20 +67,25 @@ function isProviderStepResolved(rows: readonly ContactEnrichmentResult[], provid
   return false;
 }
 
-/** Classify a single lead. Order is fixed and deterministic: status -> domain -> candidates ->
- * already-verified -> chain-exhausted. */
+/** Classify a single lead. Order is fixed and deterministic: durable-qualification -> current-lifecycle
+ * -> domain -> candidates -> already-verified -> chain-exhausted. */
 export function classifyLead(
   lead: Lead,
+  durablyQualified: boolean,
   officialDomain: string | null,
   candidates: CandidatePerson[] | undefined,
   existingResults: readonly ContactEnrichmentResult[],
   availableProviders: readonly ResolveCascadeProvider[],
   maxOpportunityScore: number | null,
 ): ClassifyResult {
-  if (lead.status !== 'QUALIFIED') return { eligible: false, reason: 'not_qualified' };
+  if (!durablyQualified) return { eligible: false, reason: 'not_qualified' };
+  if (!isLifecycleEligibleForContactWork(lead.status)) return { eligible: false, reason: 'rejected_or_active_outreach' };
   if (!officialDomain) return { eligible: false, reason: 'no_verified_domain' };
   if (!candidates || candidates.length === 0) return { eligible: false, reason: 'no_known_candidates' };
-  if (existingResults.some((r) => r.outcome === 'VERIFIED')) return { eligible: false, reason: 'already_verified' };
+  // A BOUNCED lead's previously-VERIFIED contact is unusable — allow the cascade to resolve a
+  // replacement instead of treating the lead as permanently complete.
+  const hasUsableVerifiedContact = existingResults.some((r) => r.outcome === 'VERIFIED') && lead.status !== 'BOUNCED';
+  if (hasUsableVerifiedContact) return { eligible: false, reason: 'already_verified' };
 
   const nextSteps: ResolveCascadeProvider[] = [];
   for (const provider of CASCADE_ORDER) {
@@ -89,6 +97,9 @@ export function classifyLead(
 }
 
 export interface ResolveBatchInputs {
+  /** Leads with a STATE_TRANSITION to QUALIFIED anywhere in their pipeline_events history — see
+   * `PipelineRepository.leadsEverReachedStatus`. Absence means never durably qualified. */
+  durablyQualifiedLeadIds: ReadonlySet<string>;
   officialDomainByLead: ReadonlyMap<string, string | null>;
   candidatesByLead: ReadonlyMap<string, CandidatePerson[]>;
   existingResultsByLead: ReadonlyMap<string, ContactEnrichmentResult[]>;
@@ -113,6 +124,7 @@ export function selectResolveBatchTargets(leads: readonly Lead[], data: ResolveB
   for (const lead of leads) {
     const decision = classifyLead(
       lead,
+      data.durablyQualifiedLeadIds.has(lead.id),
       data.officialDomainByLead.get(lead.id) ?? null,
       data.candidatesByLead.get(lead.id),
       data.existingResultsByLead.get(lead.id) ?? [],

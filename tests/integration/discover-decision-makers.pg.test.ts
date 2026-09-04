@@ -11,6 +11,9 @@ import { discoverDecisionMakersCommand } from '../../src/cli/commands/discover-d
 import { type CliContext } from '../../src/cli/context.js';
 import { LeadFactsRepository } from '../../src/persistence/repositories/lead-facts.repo.js';
 import { LeadsRepository } from '../../src/persistence/repositories/leads.repo.js';
+import { PipelineRepository } from '../../src/persistence/repositories/pipeline.repo.js';
+import { ContactEnrichmentRepository } from '../../src/persistence/repositories/contact-enrichment.repo.js';
+import { type LeadStatus } from '../../src/domain/leads/status.js';
 import { readCandidatesFileIfExists } from '../../src/domain/contact-resolve-batch/candidates-file.js';
 import { type PageFetchFn } from '../../src/domain/decision-makers/website-evidence.js';
 import { type FetchOutcome } from '../../src/utils/safe-fetch.js';
@@ -76,18 +79,37 @@ describe('discover-decision-makers (PostgreSQL)', () => {
       logger,
       db: handle.db,
       leads: new LeadsRepository(handle.db),
-      events: undefined as unknown as CliContext['events'],
+      events: new PipelineRepository(handle.db),
       service: undefined as unknown as CliContext['service'],
     };
   }
 
-  async function seedQualifiedLead(businessName = 'Diamond Smile', domain = DOMAIN): Promise<string> {
+  /** Seed a lead at `status`, having durably passed QUALIFIED in its pipeline_events history (unless
+   * `neverQualified` is set) — mirrors real lead lifecycle: the QUALIFIED transition is recorded even
+   * when the lead has since moved on to a later status. */
+  async function seedLead(opts: {
+    businessName?: string;
+    domain?: string;
+    status?: LeadStatus;
+    neverQualified?: boolean;
+  } = {}): Promise<string> {
+    const { businessName = 'Diamond Smile', domain = DOMAIN, status = 'QUALIFIED', neverQualified = false } = opts;
     const id = randomUUID();
-    await handle.db.insert(leads).values({ id, businessName, normalizedDomain: domain, status: 'QUALIFIED' });
+    await handle.db.insert(leads).values({ id, businessName, normalizedDomain: domain, status });
+    if (!neverQualified) {
+      await new PipelineRepository(handle.db).record({
+        leadId: id, runId: null, type: 'STATE_TRANSITION', fromStatus: 'READY_FOR_QUALIFICATION', toStatus: 'QUALIFIED',
+        message: 'READY_FOR_QUALIFICATION -> QUALIFIED', data: null,
+      });
+    }
     await new LeadFactsRepository(handle.db).writeCurrentFact({
       leadId: id, factType: 'official_domain', value: domain, normalizedValue: domain, sourceType: 'manual', sourceUrl: null,
     });
     return id;
+  }
+
+  async function seedQualifiedLead(businessName = 'Diamond Smile', domain = DOMAIN): Promise<string> {
+    return seedLead({ businessName, domain });
   }
 
   function llmDepsFor(responder: MockResponder): DecisionMakerLlmDeps {
@@ -195,5 +217,51 @@ describe('discover-decision-makers (PostgreSQL)', () => {
       .rejects.toMatchObject({ code: 'DRY_RUN_LIVE_BLOCKED' });
     expect(fetchCalls).toBe(0);
     expect(readCandidatesFileIfExists(out)).toBeNull();
+  });
+
+  it('durable qualification (pipeline_events history) is used, not the current literal status: QUALIFIED -> AUDITED stays eligible; never-qualified and REJECTED are excluded', async () => {
+    await seedLead({ businessName: 'Audited Lead', domain: 'audited.example', status: 'AUDITED' });
+    await seedLead({ businessName: 'Never Qualified', domain: 'never.example', status: 'READY_FOR_ENRICHMENT', neverQualified: true });
+    await seedLead({ businessName: 'Rejected Lead', domain: 'rejected.example', status: 'REJECTED' });
+    const out = tempOutPath();
+    const fetchedHosts = new Set<string>();
+    await discoverDecisionMakersCommand(ctx(), { out, preview: true }, {
+      buildFetcher: () => (url) => { fetchedHosts.add(new URL(url).host); return Promise.resolve(ok(url, '<html><body>none</body></html>')); },
+    });
+    expect(fetchedHosts.has('audited.example')).toBe(true);
+    expect(fetchedHosts.has('never.example')).toBe(false);
+    expect(fetchedHosts.has('rejected.example')).toBe(false);
+  });
+
+  it('a durably-qualified lead with active outreach in flight (EMAIL_DRAFTED) is excluded — another attempt must not begin', async () => {
+    await seedLead({ businessName: 'Drafting Lead', domain: 'drafting.example', status: 'EMAIL_DRAFTED' });
+    const out = tempOutPath();
+    const fetchedHosts = new Set<string>();
+    await discoverDecisionMakersCommand(ctx(), { out, preview: true }, {
+      buildFetcher: () => (url) => { fetchedHosts.add(new URL(url).host); return Promise.resolve(ok(url, '<html><body>none</body></html>')); },
+    });
+    expect(fetchedHosts.has('drafting.example')).toBe(false);
+  });
+
+  it('a lead already holding a VERIFIED contact is skipped unless it has since BOUNCED, where replacement discovery is allowed', async () => {
+    const verifiedId = await seedLead({ businessName: 'Verified Lead', domain: 'verified.example', status: 'QUALIFIED' });
+    const bouncedId = await seedLead({ businessName: 'Bounced Lead', domain: 'bounced.example', status: 'BOUNCED' });
+    const enrichRepo = new ContactEnrichmentRepository(handle.db);
+    for (const [leadId, domain] of [[verifiedId, 'verified.example'], [bouncedId, 'bounced.example']] as const) {
+      await enrichRepo.save({
+        id: randomUUID(), leadId, provider: 'hunter', mode: 'ENRICH', inputHash: `hash-${leadId}`,
+        requestedDomain: domain, candidates: [], outcome: 'VERIFIED',
+        accepted: { fullName: 'X', title: 'Y', email: 'x@example.com', verificationStatus: 'VERIFIED', dataQuality: null, confidence: null },
+        creditsEstimated: 1, creditsReported: null, providerResourceId: null, endpoint: null, provenance: {},
+        createdAt: new Date(), completedAt: new Date(),
+      });
+    }
+    const out = tempOutPath();
+    const fetchedHosts = new Set<string>();
+    await discoverDecisionMakersCommand(ctx(), { out, preview: true }, {
+      buildFetcher: () => (url) => { fetchedHosts.add(new URL(url).host); return Promise.resolve(ok(url, '<html><body>none</body></html>')); },
+    });
+    expect(fetchedHosts.has('verified.example')).toBe(false);
+    expect(fetchedHosts.has('bounced.example')).toBe(true);
   });
 });
