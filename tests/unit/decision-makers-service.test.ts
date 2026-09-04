@@ -3,7 +3,12 @@ import { type Logger } from 'pino';
 import { extractDecisionMakers, filterAndRankCandidates, type DecisionMakerLlmDeps } from '../../src/domain/decision-makers/service.js';
 import { MockLlmProvider, type MockResponder } from '../../src/integrations/llm/mock-llm.js';
 import { type EvidencePage } from '../../src/domain/decision-makers/website-evidence.js';
-import { decisionMakerExtractionOutputSchema } from '../../src/domain/decision-makers/schema.js';
+import {
+  DECISION_MAKER_JSON_SCHEMA,
+  DECISION_MAKER_SCHEMA_VERSION,
+  decisionMakerExtractionOutputSchema,
+  MAX_EVIDENCE_SNIPPET_CHARS,
+} from '../../src/domain/decision-makers/schema.js';
 
 const logger = { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} } as unknown as Logger;
 
@@ -35,7 +40,7 @@ describe('extractDecisionMakers', () => {
     const responder: MockResponder = () => ({
       rawJson: {
         candidates: [
-          { candidateRef: 'C1', fullName: 'Shyam Shastri', title: 'Principal Dentist', evidenceIds: ['E2'], confidence: 0.95, evidenceSnippet: 'Dr. Shyam Shastri, Principal Dentist, founded Diamond Smile.' },
+          { fullName: 'Shyam Shastri', title: 'Principal Dentist', evidenceIds: ['E2'], confidence: 0.95, evidenceSnippet: 'Dr. Shyam Shastri, Principal Dentist, founded Diamond Smile.' },
         ],
         insufficientEvidence: false,
       },
@@ -52,7 +57,7 @@ describe('extractDecisionMakers', () => {
     const responder: MockResponder = () => ({
       rawJson: {
         candidates: [
-          { candidateRef: 'C1', fullName: 'Mena Williams', title: 'Managing Director', evidenceIds: ['E2'], confidence: 0.9, evidenceSnippet: 'Mena Williams Managing Director VIEW PROFILE' },
+          { fullName: 'Mena Williams', title: 'Managing Director', evidenceIds: ['E2'], confidence: 0.9, evidenceSnippet: 'Mena Williams Managing Director VIEW PROFILE' },
         ],
         insufficientEvidence: false,
       },
@@ -68,7 +73,7 @@ describe('extractDecisionMakers', () => {
     const responder: MockResponder = () => ({
       rawJson: {
         candidates: [
-          { candidateRef: 'C1', fullName: 'Jacobs Holding AG', title: 'Owner', evidenceIds: ['E2'], confidence: 0.95, evidenceSnippet: 'Our majority owner is Jacobs Holding AG.' },
+          { fullName: 'Jacobs Holding AG', title: 'Owner', evidenceIds: ['E2'], confidence: 0.95, evidenceSnippet: 'Our majority owner is Jacobs Holding AG.' },
         ],
         insufficientEvidence: false,
       },
@@ -85,9 +90,9 @@ describe('extractDecisionMakers', () => {
     const responder: MockResponder = () => ({
       rawJson: {
         candidates: [
-          { candidateRef: 'C1', fullName: 'Kymya Doyley', title: 'Practice Manager', evidenceIds: ['E2'], confidence: 0.9, evidenceSnippet: 'Kymya Doyley is our Practice Manager.' },
-          { candidateRef: 'C2', fullName: 'Shaimil Patel', title: 'Clinical Director', evidenceIds: ['E2'], confidence: 0.9, evidenceSnippet: 'Shaimil Patel is our Clinical Director.' },
-          { candidateRef: 'C3', fullName: 'Shyam Shastri', title: 'Principal Dentist', evidenceIds: ['E2'], confidence: 0.9, evidenceSnippet: 'Dr. Shyam Shastri, Principal Dentist, founded Diamond Smile.' },
+          { fullName: 'Kymya Doyley', title: 'Practice Manager', evidenceIds: ['E2'], confidence: 0.9, evidenceSnippet: 'Kymya Doyley is our Practice Manager.' },
+          { fullName: 'Shaimil Patel', title: 'Clinical Director', evidenceIds: ['E2'], confidence: 0.9, evidenceSnippet: 'Shaimil Patel is our Clinical Director.' },
+          { fullName: 'Shyam Shastri', title: 'Principal Dentist', evidenceIds: ['E2'], confidence: 0.9, evidenceSnippet: 'Dr. Shyam Shastri, Principal Dentist, founded Diamond Smile.' },
         ],
         insufficientEvidence: false,
       },
@@ -103,7 +108,7 @@ describe('extractDecisionMakers', () => {
     const responder: MockResponder = () => ({
       rawJson: {
         candidates: [
-          { candidateRef: 'C1', fullName: 'Priya Nair', title: 'Dental Hygienist', evidenceIds: ['E2'], confidence: 0.9, evidenceSnippet: 'Priya Nair is a Dental Hygienist.' },
+          { fullName: 'Priya Nair', title: 'Dental Hygienist', evidenceIds: ['E2'], confidence: 0.9, evidenceSnippet: 'Priya Nair is a Dental Hygienist.' },
         ],
         insufficientEvidence: false,
       },
@@ -120,7 +125,7 @@ describe('extractDecisionMakers', () => {
     const responder: MockResponder = () => ({
       rawJson: {
         candidates: [
-          { candidateRef: 'C1', fullName: 'Shyam Shastri', title: 'Principal Dentist', evidenceIds: ['E2'], confidence: 0.3, evidenceSnippet: 'possibly Shyam?' },
+          { fullName: 'Shyam Shastri', title: 'Principal Dentist', evidenceIds: ['E2'], confidence: 0.3, evidenceSnippet: 'possibly Shyam?' },
         ],
         insufficientEvidence: false,
       },
@@ -137,7 +142,7 @@ describe('extractDecisionMakers', () => {
     const responder: MockResponder = () => ({
       rawJson: {
         candidates: [
-          { candidateRef: 'C1', fullName: 'Shyam Shastri', title: 'Principal Dentist', evidenceIds: ['E99'], confidence: 0.95, evidenceSnippet: 'Dr. Shyam Shastri, Principal Dentist.' },
+          { fullName: 'Shyam Shastri', title: 'Principal Dentist', evidenceIds: ['E99'], confidence: 0.95, evidenceSnippet: 'Dr. Shyam Shastri, Principal Dentist.' },
         ],
         insufficientEvidence: false,
       },
@@ -154,10 +159,10 @@ describe('extractDecisionMakers', () => {
     const responder: MockResponder = () => ({
       rawJson: {
         candidates: [
-          { candidateRef: 'C1', fullName: 'Person One', title: 'Owner', evidenceIds: ['E2'], confidence: 0.95, evidenceSnippet: 'Person One, Owner.' },
-          { candidateRef: 'C2', fullName: 'Person Two', title: 'Founder', evidenceIds: ['E2'], confidence: 0.94, evidenceSnippet: 'Person Two, Founder.' },
-          { candidateRef: 'C3', fullName: 'Person Three', title: 'Principal Dentist', evidenceIds: ['E2'], confidence: 0.93, evidenceSnippet: 'Person Three, Principal Dentist.' },
-          { candidateRef: 'C4', fullName: 'Person Four', title: 'Clinical Director', evidenceIds: ['E2'], confidence: 0.92, evidenceSnippet: 'Person Four, Clinical Director.' },
+          { fullName: 'Person One', title: 'Owner', evidenceIds: ['E2'], confidence: 0.95, evidenceSnippet: 'Person One, Owner.' },
+          { fullName: 'Person Two', title: 'Founder', evidenceIds: ['E2'], confidence: 0.94, evidenceSnippet: 'Person Two, Founder.' },
+          { fullName: 'Person Three', title: 'Principal Dentist', evidenceIds: ['E2'], confidence: 0.93, evidenceSnippet: 'Person Three, Principal Dentist.' },
+          { fullName: 'Person Four', title: 'Clinical Director', evidenceIds: ['E2'], confidence: 0.92, evidenceSnippet: 'Person Four, Clinical Director.' },
         ],
         insufficientEvidence: false,
       },
@@ -173,6 +178,67 @@ describe('extractDecisionMakers', () => {
     expect(result.status).toBe('schema_invalid');
   });
 
+  it('a paid schema-invalid call preserves usage/cost metadata instead of becoming financially invisible', async () => {
+    const responder: MockResponder = () => ({
+      rawJson: { totally: 'wrong shape' },
+      resolvedModel: 'gpt-5.6-sol',
+      requestId: 'req_abc123',
+      usage: { inputTokens: 4210, cachedInputTokens: 0, cacheWriteTokens: 0, outputTokens: 318, reasoningTokens: 96, estimatedCostUsd: 0.0271 },
+    });
+    const result = await extractDecisionMakers(baseDeps(responder), [HOME_PAGE, TEAM_PAGE], 'Diamond Smile', 3);
+    expect(result.status).toBe('schema_invalid');
+    if (result.status === 'schema_invalid') {
+      expect(result.call).toMatchObject({
+        llmCalls: 1,
+        resolvedModel: 'gpt-5.6-sol',
+        requestId: 'req_abc123',
+        inputTokens: 4210,
+        outputTokens: 318,
+        totalTokens: 4528,
+        estimatedCostUsd: 0.0271,
+        failureCategory: 'schema_invalid',
+      });
+      // Safe metadata only — never the raw model output.
+      expect(JSON.stringify(result.call)).not.toContain('wrong shape');
+    }
+  });
+
+  it('a completed-but-unusable provider status also preserves usage/cost metadata', async () => {
+    const responder: MockResponder = () => ({
+      status: 'incomplete',
+      incompleteReason: 'max_output_tokens',
+      usage: { inputTokens: 4210, cachedInputTokens: 0, cacheWriteTokens: 0, outputTokens: 2000, reasoningTokens: 1900, estimatedCostUsd: 0.05 },
+    });
+    const result = await extractDecisionMakers(baseDeps(responder), [HOME_PAGE, TEAM_PAGE], 'Diamond Smile', 3);
+    expect(result.status).toBe('provider_error');
+    if (result.status === 'provider_error') {
+      expect(result.call).toMatchObject({ llmCalls: 1, totalTokens: 6210, estimatedCostUsd: 0.05, failureCategory: 'provider_error' });
+    }
+  });
+
+  it('a successful call reports metadata with no failure category', async () => {
+    const responder: MockResponder = () => ({
+      rawJson: {
+        candidates: [
+          { fullName: 'Shyam Shastri', title: 'Principal Dentist', evidenceIds: ['E2'], confidence: 0.95, evidenceSnippet: 'Dr. Shyam Shastri, Principal Dentist.' },
+        ],
+        insufficientEvidence: false,
+      },
+    });
+    const result = await extractDecisionMakers(baseDeps(responder), [HOME_PAGE, TEAM_PAGE], 'Diamond Smile', 3);
+    expect(result.status).toBe('ok');
+    if (result.status === 'ok') expect(result.call).toMatchObject({ llmCalls: 1, failureCategory: 'none', totalTokens: 320 });
+  });
+
+  it('sends the versioned decision-maker JSON Schema as the structured-output contract', async () => {
+    const provider = new MockLlmProvider(() => ({ rawJson: { candidates: [], insufficientEvidence: true } }));
+    await extractDecisionMakers({ ...baseDeps(() => ({})), provider }, [HOME_PAGE, TEAM_PAGE], 'Diamond Smile', 3);
+    // The provider turns `outputSchema` into text.format json_schema with strict:true — asserted in
+    // tests/unit/openai-responses.test.ts. This proves the decision-maker path feeds it the right one.
+    expect(provider.calls[0]?.outputSchema).toBe(DECISION_MAKER_JSON_SCHEMA);
+    expect(provider.calls[0]?.schemaName).toBe(`decision_maker_extraction_${DECISION_MAKER_SCHEMA_VERSION}`);
+  });
+
   it('no pages gathered -> no_pages, no LLM call attempted', async () => {
     let called = 0;
     const responder: MockResponder = () => { called += 1; return { rawJson: { candidates: [], insufficientEvidence: true } }; };
@@ -185,10 +251,10 @@ describe('extractDecisionMakers', () => {
     const responder: MockResponder = () => ({
       rawJson: {
         candidates: [
-          { candidateRef: 'C1', fullName: 'Kymya Doyley', title: 'Practice Manager', evidenceIds: ['E2'], confidence: 0.88, evidenceSnippet: 'Kymya Doyley is our Practice Manager.' },
-          { candidateRef: 'C2', fullName: 'Shyam Shastri', title: 'Principal Dentist', evidenceIds: ['E2'], confidence: 0.97, evidenceSnippet: 'Dr. Shyam Shastri, Principal Dentist, founded Diamond Smile.' },
-          { candidateRef: 'C3', fullName: 'Shaimil Patel', title: 'Clinical Director', evidenceIds: ['E2'], confidence: 0.92, evidenceSnippet: 'Shaimil Patel is our Clinical Director.' },
-          { candidateRef: 'C4', fullName: 'Priya Nair', title: 'Dental Hygienist', evidenceIds: ['E2'], confidence: 0.9, evidenceSnippet: 'Priya Nair is a Dental Hygienist.' },
+          { fullName: 'Kymya Doyley', title: 'Practice Manager', evidenceIds: ['E2'], confidence: 0.88, evidenceSnippet: 'Kymya Doyley is our Practice Manager.' },
+          { fullName: 'Shyam Shastri', title: 'Principal Dentist', evidenceIds: ['E2'], confidence: 0.97, evidenceSnippet: 'Dr. Shyam Shastri, Principal Dentist, founded Diamond Smile.' },
+          { fullName: 'Shaimil Patel', title: 'Clinical Director', evidenceIds: ['E2'], confidence: 0.92, evidenceSnippet: 'Shaimil Patel is our Clinical Director.' },
+          { fullName: 'Priya Nair', title: 'Dental Hygienist', evidenceIds: ['E2'], confidence: 0.9, evidenceSnippet: 'Priya Nair is a Dental Hygienist.' },
         ],
         insufficientEvidence: false,
       },
@@ -206,10 +272,107 @@ describe('extractDecisionMakers', () => {
   });
 });
 
+describe('trust failures vs harmless size normalization', () => {
+  const VALID = { fullName: 'Shyam Shastri', title: 'Principal Dentist', evidenceIds: ['E2'], confidence: 0.95, evidenceSnippet: 'Dr. Shyam Shastri, Principal Dentist.' };
+
+  it('an over-long evidence snippet is truncated, not rejected, and does not destroy sibling candidates', async () => {
+    const longSnippet = `Shaimil Patel is our Clinical Director. ${'x'.repeat(2000)}`;
+    const responder: MockResponder = () => ({
+      rawJson: {
+        candidates: [
+          { fullName: 'Shaimil Patel', title: 'Clinical Director', evidenceIds: ['E2'], confidence: 0.9, evidenceSnippet: longSnippet },
+          VALID,
+        ],
+        insufficientEvidence: false,
+      },
+    });
+    const result = await extractDecisionMakers(baseDeps(responder), [HOME_PAGE, TEAM_PAGE], 'Diamond Smile', 3);
+    expect(result.status).toBe('ok');
+    if (result.status === 'ok') {
+      // BOTH candidates survive — the old contract would have failed the entire paid response.
+      expect(result.accepted.map((a) => a.fullName)).toEqual(['Shyam Shastri', 'Shaimil Patel']);
+      const truncated = result.accepted.find((a) => a.fullName === 'Shaimil Patel');
+      expect(truncated?.evidenceSnippet.length).toBeLessThanOrEqual(MAX_EVIDENCE_SNIPPET_CHARS);
+      expect(truncated?.evidenceSnippet.startsWith('Shaimil Patel is our Clinical Director.')).toBe(true);
+      expect(truncated?.evidenceSnippet.endsWith('…')).toBe(true);
+    }
+  });
+
+  it('an absurd name rejects only that candidate; a name is never truncated into a false identity', async () => {
+    const responder: MockResponder = () => ({
+      rawJson: {
+        candidates: [
+          { fullName: 'A'.repeat(500), title: 'Owner', evidenceIds: ['E2'], confidence: 0.95, evidenceSnippet: 'Long paste.' },
+          VALID,
+        ],
+        insufficientEvidence: false,
+      },
+    });
+    const result = await extractDecisionMakers(baseDeps(responder), [HOME_PAGE, TEAM_PAGE], 'Diamond Smile', 3);
+    expect(result.status).toBe('ok');
+    if (result.status === 'ok') {
+      expect(result.accepted.map((a) => a.fullName)).toEqual(['Shyam Shastri']);
+      expect(result.rejected[0]?.reason).toBe('unusable_field');
+      // The rejection record stays readable rather than echoing 500 characters.
+      expect(result.rejected[0]?.fullName.length).toBeLessThanOrEqual(81);
+    }
+  });
+
+  it('a blank name or blank snippet rejects only that candidate', async () => {
+    const responder: MockResponder = () => ({
+      rawJson: {
+        candidates: [
+          { fullName: '   ', title: 'Owner', evidenceIds: ['E2'], confidence: 0.95, evidenceSnippet: 'Someone owns it.' },
+          { fullName: 'Kymya Doyley', title: 'Practice Manager', evidenceIds: ['E2'], confidence: 0.9, evidenceSnippet: '   ' },
+          VALID,
+        ],
+        insufficientEvidence: false,
+      },
+    });
+    const result = await extractDecisionMakers(baseDeps(responder), [HOME_PAGE, TEAM_PAGE], 'Diamond Smile', 3);
+    expect(result.status).toBe('ok');
+    if (result.status === 'ok') {
+      expect(result.accepted.map((a) => a.fullName)).toEqual(['Shyam Shastri']);
+      expect(result.rejected.map((r) => r.reason)).toEqual(['unusable_field', 'unusable_field']);
+    }
+  });
+
+  it('TRUST: a broken evidence-citation contract still fails the whole response closed', async () => {
+    const responder: MockResponder = () => ({
+      rawJson: { candidates: [{ ...VALID, evidenceIds: [] }], insufficientEvidence: false },
+    });
+    const result = await extractDecisionMakers(baseDeps(responder), [HOME_PAGE, TEAM_PAGE], 'Diamond Smile', 3);
+    expect(result.status).toBe('schema_invalid');
+  });
+
+  it('TRUST: an out-of-range confidence still fails the whole response closed', async () => {
+    const responder: MockResponder = () => ({
+      rawJson: { candidates: [{ ...VALID, confidence: 1.4 }], insufficientEvidence: false },
+    });
+    const result = await extractDecisionMakers(baseDeps(responder), [HOME_PAGE, TEAM_PAGE], 'Diamond Smile', 3);
+    expect(result.status).toBe('schema_invalid');
+  });
+
+  it('TRUST: an invalid evidence alias still fails that candidate closed, never guessed', async () => {
+    const responder: MockResponder = () => ({
+      rawJson: {
+        candidates: [{ ...VALID, evidenceIds: ['https://example.com/team'] }],
+        insufficientEvidence: false,
+      },
+    });
+    const result = await extractDecisionMakers(baseDeps(responder), [HOME_PAGE, TEAM_PAGE], 'Diamond Smile', 3);
+    expect(result.status).toBe('ok');
+    if (result.status === 'ok') {
+      expect(result.accepted).toHaveLength(0);
+      expect(result.rejected[0]?.reason).toBe('evidence_unresolvable');
+    }
+  });
+});
+
 describe('filterAndRankCandidates (pure)', () => {
   it('is a pure function producing the same shape extractDecisionMakers relies on', () => {
     const parsed = decisionMakerExtractionOutputSchema.parse({
-      candidates: [{ candidateRef: 'C1', fullName: 'Shyam Shastri', title: 'Owner', evidenceIds: ['E1'], confidence: 0.9, evidenceSnippet: 'Shyam Shastri, Owner.' }],
+      candidates: [{ fullName: 'Shyam Shastri', title: 'Owner', evidenceIds: ['E1'], confidence: 0.9, evidenceSnippet: 'Shyam Shastri, Owner.' }],
       insufficientEvidence: false,
     });
     const { accepted, rejected } = filterAndRankCandidates(parsed, [HOME_PAGE], 'Diamond Smile', 0.6);

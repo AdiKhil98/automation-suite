@@ -581,7 +581,7 @@ program
   .option('--out <path>', 'output JSON file (default .local-data/decision-makers/candidates.json)')
   .option('--limit <n>', 'max leads to attempt this run (default/hard cap from DISCOVER_DECISION_MAKERS_MAX_LEADS_PER_RUN)')
   .option('--preview', 'live, FREE page-fetch + link-discovery only — no LLM call')
-  .option('--confirm', 'full run: fetch + LLM extraction + deterministic filter, writes --out')
+  .option('--confirm', 'full run: fetch + LLM extraction + deterministic filter; writes --out only for leads that yield accepted candidates')
   .option('--refresh', 'explicit bypass of the "already in --out" skip for this run')
   .action((opts: DiscoverDecisionMakersOptions) => withContext((ctx) => discoverDecisionMakersCommand(ctx, opts)));
 

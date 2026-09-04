@@ -4,7 +4,7 @@ import {
   saveCandidatesFile,
   type CandidatesFileData,
 } from '../../domain/contact-resolve-batch/candidates-file.js';
-import { extractDecisionMakers, type DecisionMakerLlmDeps } from '../../domain/decision-makers/service.js';
+import { extractDecisionMakers, type DecisionMakerLlmDeps, type ExtractionCallMetadata } from '../../domain/decision-makers/service.js';
 import { buildSafeHttpFetcher, gatherWebsiteEvidence, type PageFetchFn } from '../../domain/decision-makers/website-evidence.js';
 import { isLifecycleEligibleForContactWork } from '../../domain/leads/lead-lifecycle.js';
 import { type Lead } from '../../domain/leads/lead.js';
@@ -40,6 +40,15 @@ function parsePositiveInt(value: string | undefined, flag: string, fallback: num
   const n = Number.parseInt(value, 10);
   if (!Number.isInteger(n) || n <= 0) throw new AppError('INVALID_ARGUMENT', `${flag} must be a positive integer (got "${value}").`);
   return n;
+}
+
+/** One-line spend/provenance summary for a COMPLETED paid request — printed on success and, more
+ * importantly, on failure, so a schema-invalid paid call is never financially invisible. Contains no
+ * model output and no secrets. */
+function formatCall(call: ExtractionCallMetadata): string {
+  const n = (v: number | null): string => (v === null ? 'n/a' : String(v));
+  const cost = call.estimatedCostUsd === null ? 'unknown' : `$${call.estimatedCostUsd.toFixed(4)}`;
+  return `paid call: calls=${String(call.llmCalls)} model=${call.resolvedModel ?? call.requestedModel} tokens in=${n(call.inputTokens)} out=${n(call.outputTokens)} total=${n(call.totalTokens)} est.cost=${cost} outcome=${call.failureCategory} requestId=${call.requestId ?? 'n/a'}`;
 }
 
 function resolveOfficialBaseUrl(officialDomain: string, officialWebsiteUrl: string | null): string {
@@ -134,6 +143,7 @@ export async function discoverDecisionMakersCommand(ctx: CliContext, opts: Disco
   const llmDeps = opts.confirm ? (deps.buildLlmDeps ?? buildDecisionMakerLlmDeps)(ctx) : null;
 
   let llmCallsThisRun = 0;
+  let leadsWritten = 0;
   console.log('');
   for (const { lead, domain, baseUrl } of eligible) {
     const { pages, fetchErrors, fetchCount, selection } = await gatherWebsiteEvidence(fetcher, baseUrl, c.DISCOVER_DECISION_MAKERS_MAX_PAGES_PER_LEAD);
@@ -156,17 +166,30 @@ export async function discoverDecisionMakersCommand(ctx: CliContext, opts: Disco
       console.log(
         `  lead ${lead.id} → domain ${domain} → pages: ${pageSummary} → accepted: ${result.accepted.map((a) => `${a.fullName} (${a.title}, tier ${String(a.priority)})`).join(', ') || 'none'} → rejected: ${result.rejected.map((r) => `${r.fullName}[${r.reason}]`).join(', ') || 'none'} (cost $${result.costUsd.toFixed(4)})`,
       );
+      console.log(`      ${formatCall(result.call)}`);
       if (result.accepted.length > 0) {
         existing[lead.id] = result.accepted.map((a) => ({
           fullName: a.fullName, title: a.title, sourceUrl: a.sourceUrl, evidenceSnippet: a.evidenceSnippet, confidence: a.confidence,
         }));
         saveCandidatesFile(outPath, existing);
+        leadsWritten += 1;
+      } else {
+        console.log(`      no accepted candidates — candidates file NOT written for this lead; any existing file left unchanged.`);
       }
     } else {
       console.log(`  lead ${lead.id} → domain ${domain} → ${result.status}${'message' in result ? `: ${result.message}` : ''}${'errors' in result ? `: ${result.errors.join('; ')}` : ''}`);
+      // A completed-but-unusable paid request still reports its spend.
+      if ('call' in result && result.call) console.log(`      ${formatCall(result.call)}`);
+      console.log(`      candidates file NOT written for this lead; any existing file left unchanged.`);
     }
   }
 
-  console.log(`\n  wrote: ${outPath}`);
+  // Truthful epilogue: only claim a write that actually happened. A failed lead must never be
+  // reported as having produced a file, and never overwrites valid prior results with an empty one.
+  if (leadsWritten > 0) {
+    console.log(`\n  wrote: ${outPath} (${String(leadsWritten)} lead${leadsWritten === 1 ? '' : 's'} updated)`);
+  } else {
+    console.log(`\n  no candidates file was produced or updated; ${outPath} left unchanged.`);
+  }
   console.log('  No Instantly/Hunter/Apollo/email-enrichment call was made. No lead_facts written. No lead state changed.');
 }
