@@ -577,7 +577,7 @@ program
 
 program
   .command('discover-decision-makers')
-  .description('Evidence-bound decision-maker discovery from each qualified lead\'s own official website (home + Team/About/Contact pages) via a single LLM call per lead, deterministically filtered/ranked/capped to 3. Writes a --candidates-file-compatible JSON file for contact-resolve-batch. Never calls Instantly/Hunter/Apollo. Plan by default; --preview is a free page-fetch-only step; --confirm also spends one LLM call per lead.')
+  .description('Evidence-bound decision-maker discovery from each qualified lead\'s own official website (home + best Team + best About/Ownership page, scored and content-confirmed; Contact only as a fallback) via a single LLM call per lead, deterministically filtered/ranked/capped to 3. Writes a --candidates-file-compatible JSON file for contact-resolve-batch. Never calls Instantly/Hunter/Apollo. Plan by default; --preview is a free page-fetch-only step; --confirm also spends one LLM call per lead.')
   .option('--out <path>', 'output JSON file (default .local-data/decision-makers/candidates.json)')
   .option('--limit <n>', 'max leads to attempt this run (default/hard cap from DISCOVER_DECISION_MAKERS_MAX_LEADS_PER_RUN)')
   .option('--preview', 'live, FREE page-fetch + link-discovery only — no LLM call')
