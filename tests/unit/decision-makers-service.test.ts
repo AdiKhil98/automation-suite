@@ -65,7 +65,8 @@ describe('extractDecisionMakers', () => {
     const result = await extractDecisionMakers(baseDeps(responder), [HOME_PAGE, TEAM_PAGE], 'Dulwich Orthodontics', 3);
     expect(result.status).toBe('ok');
     if (result.status === 'ok') {
-      expect(result.accepted[0]).toMatchObject({ fullName: 'Mena Williams', priority: 4 });
+      // Tier 2 (senior directorship), not the retired tier 4: employer ambiguity is a gate now, not a rank.
+      expect(result.accepted[0]).toMatchObject({ fullName: 'Mena Williams', priority: 2 });
     }
   });
 

@@ -1,6 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
 import { z } from 'zod';
+import { writeFileAtomicSync } from '../../utils/atomic-write.js';
 import { AppError } from '../../utils/errors.js';
 import { buildCandidatePerson } from '../contact-enrichment/candidate-parsing.js';
 import { type CandidatePerson } from '../contact-enrichment/types.js';
@@ -74,8 +74,9 @@ export function readCandidatesFileIfExists(path: string): CandidatesFileData | n
   return readAndParse(path);
 }
 
-/** Write the candidates file (pretty-printed), creating the parent directory if needed. */
+/** Write the candidates file (pretty-printed), creating the parent directory if needed. The write is
+ * atomic: an interrupted run must never truncate a file that holds already-paid-for extraction
+ * results. Reading and validation are unchanged, so `contact-resolve-batch` sees the same format. */
 export function saveCandidatesFile(path: string, data: CandidatesFileData): void {
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
+  writeFileAtomicSync(path, `${JSON.stringify(data, null, 2)}\n`);
 }
