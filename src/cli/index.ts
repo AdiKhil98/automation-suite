@@ -11,6 +11,7 @@ import { gateACheckCommand } from './commands/gate-a-check.js';
 import { contactEnrichCommand, type ContactEnrichCliOptions } from './commands/contact-enrich.js';
 import { contactResolveBatchCommand, type ContactResolveBatchOptions } from './commands/contact-resolve-batch.js';
 import { discoverDecisionMakersCommand, type DiscoverDecisionMakersOptions } from './commands/discover-decision-makers.js';
+import { decisionMakersRerankCommand, type DecisionMakersRerankOptions } from './commands/decision-makers-rerank.js';
 import { generateDemosCommand } from './commands/generate-demos.js';
 import { composeDemosCommand } from './commands/compose-demos.js';
 import { generateEmailsCommand } from './commands/generate-emails.js';
@@ -586,6 +587,14 @@ program
   .option('--confirm', 'full run: fetch + LLM extraction + deterministic filter; writes --out only for leads that yield accepted candidates')
   .option('--refresh', 'explicit operator bypass of the idempotency guards for the selected scope; with --confirm it requires --lead')
   .action((opts: DiscoverDecisionMakersOptions) => withContext((ctx) => discoverDecisionMakersCommand(ctx, opts)));
+
+program
+  .command('decision-makers-rerank')
+  .description('Re-rank candidates ALREADY stored in the decision-maker candidates file using the current deterministic title-priority taxonomy. Offline only: no network, LLM, enrichment or database access. Reorders entries (contact-resolve-batch derives priority from array order); never rewrites a name, title, evidence snippet, source URL or confidence. Dry run by default.')
+  .option('--file <path>', 'candidates file to re-rank (default .local-data/decision-makers/candidates.json)')
+  .option('--lead <leadId>', 're-rank only this lead (default: every lead in the file)')
+  .option('--confirm', 'apply the new ordering (default is a dry run that only prints before → after)')
+  .action((opts: DecisionMakersRerankOptions) => { decisionMakersRerankCommand(opts); });
 
 program
   .command('clean-audit-debug')

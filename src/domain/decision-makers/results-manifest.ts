@@ -1,6 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
 import { z } from 'zod';
+import { writeFileAtomicSync } from '../../utils/atomic-write.js';
 import { hashCanonical, sha256Hex } from '../../utils/hash.js';
 import { AppError } from '../../utils/errors.js';
 import { type ExtractionCallMetadata } from './service.js';
@@ -241,11 +241,8 @@ export function readResultsManifestIfExists(path: string): ResultsManifest {
   return parseManifest(path, text);
 }
 
-/** Atomic write: a full temp file then a rename, so an interrupted run can never leave a truncated
- * manifest that would fail closed on the next read. */
+/** Atomic write, so an interrupted run can never leave a truncated manifest that would fail closed on
+ * the next read. */
 export function saveResultsManifest(path: string, data: ResultsManifest): void {
-  mkdirSync(dirname(path), { recursive: true });
-  const tmp = `${path}.tmp`;
-  writeFileSync(tmp, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
-  renameSync(tmp, path);
+  writeFileAtomicSync(path, `${JSON.stringify(data, null, 2)}\n`);
 }
