@@ -5,6 +5,10 @@ import { readFileSync as read } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { decisionMakersRerankCommand } from '../../src/cli/commands/decision-makers-rerank.js';
 import { loadCandidatesFile } from '../../src/domain/contact-resolve-batch/candidates-file.js';
+import { guardOperationalLocalData } from '../support/local-data-isolation.js';
+
+// `decision-makers-rerank` also defaults to the real candidates file; every test here passes --file.
+guardOperationalLocalData();
 
 let dir: string | null = null;
 let logs: string[] = [];
