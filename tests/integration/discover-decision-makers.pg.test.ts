@@ -5,9 +5,10 @@ import { dirname, join } from 'node:path';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { type Logger } from 'pino';
 import { requireIntegrationTestDatabase } from '../support/test-database.js';
+import { guardOperationalLocalData } from '../support/local-data-isolation.js';
 import { type DbHandle } from '../../src/persistence/db.js';
 import { leads } from '../../src/persistence/schema.js';
-import { discoverDecisionMakersCommand } from '../../src/cli/commands/discover-decision-makers.js';
+import { discoverDecisionMakersCommand, type DiscoverDecisionMakersOptions } from '../../src/cli/commands/discover-decision-makers.js';
 import { type CliContext } from '../../src/cli/context.js';
 import { LeadFactsRepository } from '../../src/persistence/repositories/lead-facts.repo.js';
 import { LeadsRepository } from '../../src/persistence/repositories/leads.repo.js';
@@ -20,6 +21,9 @@ import { type PageFetchFn } from '../../src/domain/decision-makers/website-evide
 import { type FetchOutcome } from '../../src/utils/safe-fetch.js';
 import { MockLlmProvider, type MockResponder } from '../../src/integrations/llm/mock-llm.js';
 import { type DecisionMakerLlmDeps } from '../../src/domain/decision-makers/service.js';
+
+// Fails this file if any test in it creates or modifies the real .local-data decision-maker files.
+guardOperationalLocalData();
 
 const testDatabase = requireIntegrationTestDatabase();
 const logger = { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} } as unknown as Logger;
@@ -38,15 +42,40 @@ const liveConfig = {
   ENRICH_MAX_BYTES: 2_000_000,
 };
 
+/**
+ * TEST ISOLATION. `discover-decision-makers` defaults BOTH of its local state files to real,
+ * operator-owned paths under `.local-data/decision-makers/`. Supplying only `out` left `results`
+ * falling through to the operational manifest, and every --confirm test wrote mock records into it.
+ * Harmless here (the ids are throwaway UUIDs) but wrong: a test run on a machine that holds real
+ * state would mutate live idempotency data. Both paths are now always temp, enforced by `runDiscover`
+ * below — no test may call the command directly.
+ */
 let tmpDir: string | null = null;
+let tmpResults = '';
 function tempOutPath(): string {
   tmpDir = mkdtempSync(join(tmpdir(), 'discover-decision-makers-test-'));
+  tmpResults = join(tmpDir, 'results.json');
   return join(tmpDir, 'candidates.json');
 }
 afterEach(() => {
   if (tmpDir) rmSync(tmpDir, { recursive: true, force: true });
   tmpDir = null;
+  tmpResults = '';
 });
+
+/**
+ * The ONLY way this suite may invoke the command. `results` is injected from the per-test temp dir and
+ * is not accepted from callers, so a new test physically cannot fall through to the operational
+ * manifest. A source-level guard below asserts nothing bypasses this wrapper.
+ */
+function runDiscover(
+  context: CliContext,
+  opts: Omit<DiscoverDecisionMakersOptions, 'results'>,
+  deps: Parameters<typeof discoverDecisionMakersCommand>[2] = {},
+): Promise<void> {
+  if (!tmpResults) throw new Error('runDiscover called before tempOutPath() — no temp results path is set.');
+  return discoverDecisionMakersCommand(context, { ...opts, results: tmpResults }, deps);
+}
 
 function ok(url: string, html: string): FetchOutcome {
   return { kind: 'ok', finalUrl: url, host: new URL(url).host, status: 200, html };
@@ -125,7 +154,7 @@ describe('discover-decision-makers (PostgreSQL)', () => {
     const leadId = await seedQualifiedLead();
     const out = tempOutPath();
     let fetchCalls = 0;
-    await discoverDecisionMakersCommand(ctx(), { out }, {
+    await runDiscover(ctx(), { out }, {
       buildFetcher: () => (url) => { fetchCalls += 1; return Promise.resolve(ok(url, HOME_HTML)); },
     });
     expect(fetchCalls).toBe(0);
@@ -137,7 +166,7 @@ describe('discover-decision-makers (PostgreSQL)', () => {
     await seedQualifiedLead();
     const out = tempOutPath();
     let llmCalls = 0;
-    await discoverDecisionMakersCommand(ctx(), { out, preview: true }, {
+    await runDiscover(ctx(), { out, preview: true }, {
       buildFetcher: () => fakeFetcher({ [HOME]: HOME_HTML, [`https://${DOMAIN}/meet-the-team`]: TEAM_HTML }),
       buildLlmDeps: () => { llmCalls += 1; return llmDepsFor(verifiedResponder()); },
     });
@@ -148,7 +177,7 @@ describe('discover-decision-makers (PostgreSQL)', () => {
   it('--confirm fetches + extracts + writes an --out file that contact-resolve-batch can load', async () => {
     const leadId = await seedQualifiedLead();
     const out = tempOutPath();
-    await discoverDecisionMakersCommand(ctx(), { out, confirm: true }, {
+    await runDiscover(ctx(), { out, confirm: true }, {
       buildFetcher: () => fakeFetcher({ [HOME]: HOME_HTML, [`https://${DOMAIN}/meet-the-team`]: TEAM_HTML }),
       buildLlmDeps: () => llmDepsFor(verifiedResponder()),
     });
@@ -170,7 +199,7 @@ describe('discover-decision-makers (PostgreSQL)', () => {
   it('a schema-invalid paid response writes no file and never claims it wrote one', async () => {
     await seedQualifiedLead();
     const out = tempOutPath();
-    const output = await captureRun(() => discoverDecisionMakersCommand(ctx(), { out, confirm: true }, {
+    const output = await captureRun(() => runDiscover(ctx(), { out, confirm: true }, {
       buildFetcher: () => fakeFetcher({ [HOME]: HOME_HTML, [`https://${DOMAIN}/meet-the-team`]: TEAM_HTML }),
       buildLlmDeps: () => llmDepsFor(() => ({ rawJson: { totally: 'wrong shape' } })),
     }));
@@ -187,7 +216,7 @@ describe('discover-decision-makers (PostgreSQL)', () => {
   it('a schema-invalid response preserves a previously written valid candidates file', async () => {
     const firstLead = await seedQualifiedLead();
     const out = tempOutPath();
-    await discoverDecisionMakersCommand(ctx(), { out, confirm: true }, {
+    await runDiscover(ctx(), { out, confirm: true }, {
       buildFetcher: () => fakeFetcher({ [HOME]: HOME_HTML, [`https://${DOMAIN}/meet-the-team`]: TEAM_HTML }),
       buildLlmDeps: () => llmDepsFor(verifiedResponder()),
     });
@@ -195,7 +224,7 @@ describe('discover-decision-makers (PostgreSQL)', () => {
     expect(before?.[firstLead]).toHaveLength(1);
 
     const secondLead = await seedQualifiedLead('Gipsy Hill Dental', 'gipsyhilldental.com');
-    const output = await captureRun(() => discoverDecisionMakersCommand(ctx(), { out, confirm: true }, {
+    const output = await captureRun(() => runDiscover(ctx(), { out, confirm: true }, {
       buildFetcher: () => fakeFetcher({ 'https://gipsyhilldental.com': HOME_HTML, 'https://gipsyhilldental.com/meet-the-team': TEAM_HTML }),
       buildLlmDeps: () => llmDepsFor(() => ({ rawJson: { totally: 'wrong shape' } })),
     }));
@@ -209,7 +238,7 @@ describe('discover-decision-makers (PostgreSQL)', () => {
   it('a successful run still reports the file it actually wrote', async () => {
     await seedQualifiedLead();
     const out = tempOutPath();
-    const output = await captureRun(() => discoverDecisionMakersCommand(ctx(), { out, confirm: true }, {
+    const output = await captureRun(() => runDiscover(ctx(), { out, confirm: true }, {
       buildFetcher: () => fakeFetcher({ [HOME]: HOME_HTML, [`https://${DOMAIN}/meet-the-team`]: TEAM_HTML }),
       buildLlmDeps: () => llmDepsFor(verifiedResponder()),
     }));
@@ -220,14 +249,14 @@ describe('discover-decision-makers (PostgreSQL)', () => {
   it('existing evidence is reused: a second run skips a lead already present in --out (zero fetch/LLM calls) unless --refresh', async () => {
     const leadId = await seedQualifiedLead();
     const out = tempOutPath();
-    await discoverDecisionMakersCommand(ctx(), { out, confirm: true }, {
+    await runDiscover(ctx(), { out, confirm: true }, {
       buildFetcher: () => fakeFetcher({ [HOME]: HOME_HTML, [`https://${DOMAIN}/meet-the-team`]: TEAM_HTML }),
       buildLlmDeps: () => llmDepsFor(verifiedResponder()),
     });
 
     let fetchCalls = 0;
     let llmCalls = 0;
-    await discoverDecisionMakersCommand(ctx(), { out, confirm: true }, {
+    await runDiscover(ctx(), { out, confirm: true }, {
       buildFetcher: () => (url) => { fetchCalls += 1; return Promise.resolve(ok(url, HOME_HTML)); },
       buildLlmDeps: () => { llmCalls += 1; return llmDepsFor(verifiedResponder()); },
     });
@@ -239,12 +268,12 @@ describe('discover-decision-makers (PostgreSQL)', () => {
   it('--refresh --confirm bypasses the "already in --out" skip and re-processes the targeted lead', async () => {
     const leadId = await seedQualifiedLead();
     const out = tempOutPath();
-    await discoverDecisionMakersCommand(ctx(), { out, confirm: true }, {
+    await runDiscover(ctx(), { out, confirm: true }, {
       buildFetcher: () => fakeFetcher({ [HOME]: HOME_HTML, [`https://${DOMAIN}/meet-the-team`]: TEAM_HTML }),
       buildLlmDeps: () => llmDepsFor(verifiedResponder()),
     });
     let fetchCalls = 0;
-    await discoverDecisionMakersCommand(ctx(), { out, confirm: true, refresh: true, lead: leadId }, {
+    await runDiscover(ctx(), { out, confirm: true, refresh: true, lead: leadId }, {
       buildFetcher: () => (url) => { fetchCalls += 1; return Promise.resolve(ok(url, HOME_HTML)); },
       buildLlmDeps: () => llmDepsFor(verifiedResponder()),
     });
@@ -256,7 +285,7 @@ describe('discover-decision-makers (PostgreSQL)', () => {
     await seedQualifiedLead('Lead Two', 'lead-two.example');
     const out = tempOutPath();
     let fetchCalls = 0;
-    await discoverDecisionMakersCommand(ctx(), { out, confirm: true, limit: '1' }, {
+    await runDiscover(ctx(), { out, confirm: true, limit: '1' }, {
       // Neither lead's homepage has any secondary links, so exactly one fetch per attempted lead.
       buildFetcher: () => (url) => { fetchCalls += 1; return Promise.resolve(ok(url, '<html><body>none</body></html>')); },
       buildLlmDeps: () => llmDepsFor(() => ({ rawJson: { candidates: [], insufficientEvidence: true } })),
@@ -276,8 +305,8 @@ describe('discover-decision-makers (PostgreSQL)', () => {
   const TEAM_SITE: Record<string, string> = { [HOME]: HOME_HTML, [`https://${DOMAIN}/meet-the-team`]: TEAM_HTML };
   const noCandidateResponder: MockResponder = () => ({ rawJson: { candidates: [], insufficientEvidence: true } });
 
-  async function runConfirm(out: string, results: string, responder: MockResponder, over: Record<string, unknown> = {}, pages = TEAM_SITE): Promise<void> {
-    await discoverDecisionMakersCommand(ctx(), { out, results, confirm: true, ...over }, {
+  async function runConfirm(out: string, responder: MockResponder, over: Record<string, unknown> = {}, pages = TEAM_SITE): Promise<void> {
+    await runDiscover(ctx(), { out, confirm: true, ...over }, {
       buildFetcher: () => fakeFetcher(pages),
       buildLlmDeps: () => llmDepsFor(responder),
     });
@@ -289,12 +318,12 @@ describe('discover-decision-makers (PostgreSQL)', () => {
     const results = join(dirname(out), 'results.json');
 
     const first = countingResponder(verifiedResponder());
-    await runConfirm(out, results, first.responder);
+    await runConfirm(out, first.responder);
     expect(first.calls()).toBe(1);
     expect(readResultsManifestIfExists(results).results[leadId]).toMatchObject({ outcome: 'FOUND', attempts: 1, acceptedCount: 1 });
 
     const second = countingResponder(verifiedResponder());
-    await runConfirm(out, results, second.responder);
+    await runConfirm(out, second.responder);
     expect(second.calls()).toBe(0);
   });
 
@@ -304,7 +333,7 @@ describe('discover-decision-makers (PostgreSQL)', () => {
     const results = join(dirname(out), 'results.json');
 
     const first = countingResponder(noCandidateResponder);
-    await runConfirm(out, results, first.responder);
+    await runConfirm(out, first.responder);
     expect(first.calls()).toBe(1);
     // No candidate entry is created, so the old "already_in_out_file" guard could never have helped.
     expect(readCandidatesFileIfExists(out)).toBeNull();
@@ -312,7 +341,7 @@ describe('discover-decision-makers (PostgreSQL)', () => {
 
     for (const _ of [1, 2, 3]) {
       const again = countingResponder(noCandidateResponder);
-      await runConfirm(out, results, again.responder);
+      await runConfirm(out, again.responder);
       expect(again.calls()).toBe(0);
     }
   });
@@ -324,12 +353,12 @@ describe('discover-decision-makers (PostgreSQL)', () => {
     const bad: MockResponder = () => ({ rawJson: { totally: 'wrong shape' } });
 
     const first = countingResponder(bad);
-    await runConfirm(out, results, first.responder);
+    await runConfirm(out, first.responder);
     expect(first.calls()).toBe(1);
     expect(readResultsManifestIfExists(results).results[leadId]).toMatchObject({ outcome: 'SCHEMA_INVALID', attempts: 1 });
 
     const second = countingResponder(bad);
-    await runConfirm(out, results, second.responder);
+    await runConfirm(out, second.responder);
     expect(second.calls()).toBe(0);
   });
 
@@ -340,17 +369,17 @@ describe('discover-decision-makers (PostgreSQL)', () => {
     const failing: MockResponder = () => ({ status: 'rate_limited' });
 
     const a = countingResponder(failing);
-    await runConfirm(out, results, a.responder);
+    await runConfirm(out, a.responder);
     expect(a.calls()).toBe(1);
     expect(readResultsManifestIfExists(results).results[leadId]).toMatchObject({ outcome: 'PROVIDER_ERROR', attempts: 1 });
 
     const b = countingResponder(failing);
-    await runConfirm(out, results, b.responder);
+    await runConfirm(out, b.responder);
     expect(b.calls()).toBe(1); // the one permitted retry
     expect(readResultsManifestIfExists(results).results[leadId]).toMatchObject({ attempts: 2 });
 
     const cRun = countingResponder(failing);
-    await runConfirm(out, results, cRun.responder);
+    await runConfirm(out, cRun.responder);
     expect(cRun.calls()).toBe(0); // exhausted
   });
 
@@ -359,13 +388,13 @@ describe('discover-decision-makers (PostgreSQL)', () => {
     const out = tempOutPath();
     const results = join(dirname(out), 'results.json');
 
-    await runConfirm(out, results, noCandidateResponder);
+    await runConfirm(out, noCandidateResponder);
     const before = readResultsManifestIfExists(results).results[leadId];
 
     // Same lead, same domain — the team page now names someone.
     const changed = { [HOME]: HOME_HTML, [`https://${DOMAIN}/meet-the-team`]: '<html><body><p>Dr. Shyam Shastri, Principal Dentist, founded Diamond Smile. Newly published.</p></body></html>' };
     const after = countingResponder(verifiedResponder());
-    await runConfirm(out, results, after.responder, {}, changed);
+    await runConfirm(out, after.responder, {}, changed);
     expect(after.calls()).toBe(1);
 
     const record = readResultsManifestIfExists(results).results[leadId];
@@ -380,12 +409,12 @@ describe('discover-decision-makers (PostgreSQL)', () => {
     const results = join(dirname(out), 'results.json');
     const site = { 'https://colosseum.example': HOME_HTML, 'https://other.example': HOME_HTML };
 
-    await runConfirm(out, results, noCandidateResponder, { lead: target }, site);
+    await runConfirm(out, noCandidateResponder, { lead: target }, site);
     expect(Object.keys(readResultsManifestIfExists(results).results)).toEqual([target]);
 
     const fetchedHosts = new Set<string>();
     const rerun = countingResponder(verifiedResponder());
-    await discoverDecisionMakersCommand(ctx(), { out, results, confirm: true, refresh: true, lead: target }, {
+    await runDiscover(ctx(), { out, confirm: true, refresh: true, lead: target }, {
       buildFetcher: () => (url) => { fetchedHosts.add(new URL(url).host); return Promise.resolve(ok(url, HOME_HTML)); },
       buildLlmDeps: () => llmDepsFor(rerun.responder),
     });
@@ -399,18 +428,18 @@ describe('discover-decision-makers (PostgreSQL)', () => {
     const out = tempOutPath();
     const results = join(dirname(out), 'results.json');
 
-    const planned = await captureRun(() => discoverDecisionMakersCommand(ctx(), { out, results, lead: target }, {}));
+    const planned = await captureRun(() => runDiscover(ctx(), { out, lead: target }, {}));
     expect(planned).toContain(`target lead:            ${target}`);
     expect(planned).toContain('selected this run:       1');
 
     const previewHosts = new Set<string>();
-    await discoverDecisionMakersCommand(ctx(), { out, results, preview: true, lead: target }, {
+    await runDiscover(ctx(), { out, preview: true, lead: target }, {
       buildFetcher: () => (url) => { previewHosts.add(new URL(url).host); return Promise.resolve(ok(url, HOME_HTML)); },
     });
     expect([...previewHosts]).toEqual(['target.example']);
 
     const confirmHosts = new Set<string>();
-    await discoverDecisionMakersCommand(ctx(), { out, results, confirm: true, lead: target }, {
+    await runDiscover(ctx(), { out, confirm: true, lead: target }, {
       buildFetcher: () => (url) => { confirmHosts.add(new URL(url).host); return Promise.resolve(ok(url, HOME_HTML)); },
       buildLlmDeps: () => llmDepsFor(noCandidateResponder),
     });
@@ -422,13 +451,13 @@ describe('discover-decision-makers (PostgreSQL)', () => {
     const leadId = await seedQualifiedLead();
     const out = tempOutPath();
     // The important one: batch refresh would re-extract whichever leads sort first, at full price.
-    await expect(discoverDecisionMakersCommand(ctx(), { out, confirm: true, refresh: true }, {}))
+    await expect(runDiscover(ctx(), { out, confirm: true, refresh: true }, {}))
       .rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
-    await expect(discoverDecisionMakersCommand(ctx(), { out, lead: leadId, limit: '2' }, {}))
+    await expect(runDiscover(ctx(), { out, lead: leadId, limit: '2' }, {}))
       .rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
-    await expect(discoverDecisionMakersCommand(ctx(), { out, preview: true, confirm: true }, {}))
+    await expect(runDiscover(ctx(), { out, preview: true, confirm: true }, {}))
       .rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
-    await expect(discoverDecisionMakersCommand(ctx(), { out, lead: 'no-such-lead' }, {}))
+    await expect(runDiscover(ctx(), { out, lead: 'no-such-lead' }, {}))
       .rejects.toMatchObject({ code: 'LEAD_NOT_FOUND' });
   });
 
@@ -440,7 +469,7 @@ describe('discover-decision-makers (PostgreSQL)', () => {
 
     // The first lead's site yields no evidence page at all -> no_pages, no provider call.
     const counted = countingResponder(verifiedResponder());
-    const output = await captureRun(() => discoverDecisionMakersCommand(ctx({ MAX_LLM_CALLS_PER_RUN: 1 }), { out, results, confirm: true }, {
+    const output = await captureRun(() => runDiscover(ctx({ MAX_LLM_CALLS_PER_RUN: 1 }), { out, confirm: true }, {
       buildFetcher: () => (url) => (new URL(url).host === 'unreachable.example'
         ? Promise.resolve({ kind: 'invalid', reason: 'unreachable' } as FetchOutcome)
         : Promise.resolve(ok(url, TEAM_HTML))),
@@ -459,9 +488,9 @@ describe('discover-decision-makers (PostgreSQL)', () => {
     const out = tempOutPath();
     let fetchCalls = 0;
     const buildFetcher = () => (url: string) => { fetchCalls += 1; return Promise.resolve(ok(url, HOME_HTML)); };
-    await expect(discoverDecisionMakersCommand(ctx({ DRY_RUN: true }), { out, preview: true }, { buildFetcher }))
+    await expect(runDiscover(ctx({ DRY_RUN: true }), { out, preview: true }, { buildFetcher }))
       .rejects.toMatchObject({ code: 'DRY_RUN_LIVE_BLOCKED' });
-    await expect(discoverDecisionMakersCommand(ctx({ DRY_RUN: true }), { out, confirm: true }, { buildFetcher }))
+    await expect(runDiscover(ctx({ DRY_RUN: true }), { out, confirm: true }, { buildFetcher }))
       .rejects.toMatchObject({ code: 'DRY_RUN_LIVE_BLOCKED' });
     expect(fetchCalls).toBe(0);
     expect(readCandidatesFileIfExists(out)).toBeNull();
@@ -473,7 +502,7 @@ describe('discover-decision-makers (PostgreSQL)', () => {
     await seedLead({ businessName: 'Rejected Lead', domain: 'rejected.example', status: 'REJECTED' });
     const out = tempOutPath();
     const fetchedHosts = new Set<string>();
-    await discoverDecisionMakersCommand(ctx(), { out, preview: true }, {
+    await runDiscover(ctx(), { out, preview: true }, {
       buildFetcher: () => (url) => { fetchedHosts.add(new URL(url).host); return Promise.resolve(ok(url, '<html><body>none</body></html>')); },
     });
     expect(fetchedHosts.has('audited.example')).toBe(true);
@@ -485,7 +514,7 @@ describe('discover-decision-makers (PostgreSQL)', () => {
     await seedLead({ businessName: 'Drafting Lead', domain: 'drafting.example', status: 'EMAIL_DRAFTED' });
     const out = tempOutPath();
     const fetchedHosts = new Set<string>();
-    await discoverDecisionMakersCommand(ctx(), { out, preview: true }, {
+    await runDiscover(ctx(), { out, preview: true }, {
       buildFetcher: () => (url) => { fetchedHosts.add(new URL(url).host); return Promise.resolve(ok(url, '<html><body>none</body></html>')); },
     });
     expect(fetchedHosts.has('drafting.example')).toBe(false);
@@ -506,7 +535,7 @@ describe('discover-decision-makers (PostgreSQL)', () => {
     }
     const out = tempOutPath();
     const fetchedHosts = new Set<string>();
-    await discoverDecisionMakersCommand(ctx(), { out, preview: true }, {
+    await runDiscover(ctx(), { out, preview: true }, {
       buildFetcher: () => (url) => { fetchedHosts.add(new URL(url).host); return Promise.resolve(ok(url, '<html><body>none</body></html>')); },
     });
     expect(fetchedHosts.has('verified.example')).toBe(false);
