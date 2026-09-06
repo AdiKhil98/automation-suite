@@ -133,7 +133,28 @@ describe('classifyLead', () => {
       row({ provider: 'instantly', mode: 'ENRICH', outcome: 'NOT_FOUND', inputHash: instantlyHash }),
     ];
     const d = classifyLead(lead(), true, DOMAIN, CANDIDATES, results, BOTH, null);
-    expect(d).toEqual({ eligible: false, reason: 'chain_exhausted' });
+    expect(d).toEqual({ eligible: false, reason: 'personal_chain_exhausted' });
+  });
+
+  it('exhaustion is decided by PERSISTED ROWS, not by provider availability: the same fully-resolved lead reports personal_chain_exhausted even with zero providers configured', () => {
+    const results = [
+      row({ provider: 'hunter', mode: 'ENRICH', outcome: 'CAPPED', inputHash: computeInputHash('ENRICH', 'hunter', DOMAIN, CANDIDATES) }),
+      row({ provider: 'instantly', mode: 'ENRICH', outcome: 'NOT_FOUND', inputHash: computeInputHash('ENRICH', 'instantly', DOMAIN, CANDIDATES) }),
+    ];
+    expect(classifyLead(lead(), true, DOMAIN, CANDIDATES, results, [], null)).toEqual({ eligible: false, reason: 'personal_chain_exhausted' });
+  });
+
+  it('REGRESSION: zero configured providers on a NEVER-TRIED lead reports no_providers_configured, never chain exhaustion', () => {
+    // The old code filtered by availability INSIDE the exhaustion loop, so an empty provider list
+    // produced an empty nextSteps and the lead was falsely declared "conclusively exhausted" despite
+    // no provider ever having been called. Configuration state must never masquerade as a result.
+    const d = classifyLead(lead(), true, DOMAIN, CANDIDATES, [], [], null);
+    expect(d).toEqual({ eligible: false, reason: 'no_providers_configured' });
+  });
+
+  it('a partially-tried lead with no providers configured is also no_providers_configured, and is NOT offered to the generic fallback', () => {
+    const results = [row({ provider: 'instantly', mode: 'ENRICH', outcome: 'NOT_FOUND', inputHash: computeInputHash('ENRICH', 'instantly', DOMAIN, CANDIDATES) })];
+    expect(classifyLead(lead(), true, DOMAIN, CANDIDATES, results, [], null)).toEqual({ eligible: false, reason: 'no_providers_configured' });
   });
 
   it('a resolved step for a provider NOT available this run is simply not offered, but does not itself exhaust the lead', () => {

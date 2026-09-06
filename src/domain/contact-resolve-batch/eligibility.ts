@@ -29,7 +29,21 @@ export type SkipReason =
   | 'no_verified_domain'
   | 'no_known_candidates'
   | 'already_verified'
-  | 'chain_exhausted';
+  /**
+   * Personal cascade steps REMAIN to be tried, but no provider is configured for this run, so none
+   * of them can run. This is a configuration state, not a result: nothing about the lead has been
+   * concluded and it does NOT qualify for the GENERIC_OFFICIAL fallback. Previously this case was
+   * misreported as `chain_exhausted`, which claimed we had tried everything when we had tried
+   * nothing.
+   */
+  | 'no_providers_configured'
+  /**
+   * Every provider in `CASCADE_ORDER` has a persisted row at this lead's current candidate hash, and
+   * none of them yielded a VERIFIED personal contact. This is a genuine, provider-independent
+   * conclusion drawn from stored evidence, and it is the ONLY state that unlocks the
+   * GENERIC_OFFICIAL fallback.
+   */
+  | 'personal_chain_exhausted';
 
 export interface ResolveBatchTarget {
   lead: Lead;
@@ -87,12 +101,18 @@ export function classifyLead(
   const hasUsableVerifiedContact = existingResults.some((r) => r.outcome === 'VERIFIED') && lead.status !== 'BOUNCED';
   if (hasUsableVerifiedContact) return { eligible: false, reason: 'already_verified' };
 
-  const nextSteps: ResolveCascadeProvider[] = [];
+  // Exhaustion is a property of PERSISTED EVIDENCE, computed over the full fixed CASCADE_ORDER and
+  // deliberately independent of which providers happen to be configured right now. Availability is
+  // applied afterwards, and only to decide what this particular run can attempt. Conflating the two
+  // is what previously let an unconfigured run declare a never-tried lead "exhausted".
+  const pendingSteps: ResolveCascadeProvider[] = [];
   for (const provider of CASCADE_ORDER) {
-    if (!availableProviders.includes(provider)) continue;
-    if (!isProviderStepResolved(existingResults, provider, officialDomain, candidates)) nextSteps.push(provider);
+    if (!isProviderStepResolved(existingResults, provider, officialDomain, candidates)) pendingSteps.push(provider);
   }
-  if (nextSteps.length === 0) return { eligible: false, reason: 'chain_exhausted' };
+  if (pendingSteps.length === 0) return { eligible: false, reason: 'personal_chain_exhausted' };
+
+  const nextSteps = pendingSteps.filter((p) => availableProviders.includes(p));
+  if (nextSteps.length === 0) return { eligible: false, reason: 'no_providers_configured' };
   return { eligible: true, target: { lead, domain: officialDomain, candidates, nextSteps, maxOpportunityScore } };
 }
 
@@ -110,6 +130,13 @@ export interface ResolveBatchInputs {
 export interface ResolveBatchSelection {
   selected: ResolveBatchTarget[];
   skipped: Array<{ lead: Lead; reason: SkipReason }>;
+  /**
+   * Leads whose personal cascade is conclusively exhausted with no VERIFIED personal contact —
+   * exactly the `personal_chain_exhausted` subset of `skipped`, surfaced here because it is the ONLY
+   * input the GENERIC_OFFICIAL fallback is allowed to consider. They remain listed in `skipped` too:
+   * from the personal cascade's point of view they genuinely are skipped.
+   */
+  fallbackCandidates: Array<{ lead: Lead; candidates: CandidatePerson[]; domain: string }>;
 }
 
 /**
@@ -121,17 +148,28 @@ export interface ResolveBatchSelection {
 export function selectResolveBatchTargets(leads: readonly Lead[], data: ResolveBatchInputs, opts: { limit: number }): ResolveBatchSelection {
   const targets: ResolveBatchTarget[] = [];
   const skipped: ResolveBatchSelection['skipped'] = [];
+  const fallbackCandidates: ResolveBatchSelection['fallbackCandidates'] = [];
   for (const lead of leads) {
+    const officialDomain = data.officialDomainByLead.get(lead.id) ?? null;
+    const candidates = data.candidatesByLead.get(lead.id);
     const decision = classifyLead(
       lead,
       data.durablyQualifiedLeadIds.has(lead.id),
-      data.officialDomainByLead.get(lead.id) ?? null,
-      data.candidatesByLead.get(lead.id),
+      officialDomain,
+      candidates,
       data.existingResultsByLead.get(lead.id) ?? [],
       data.availableProviders,
       data.maxOpportunityScoreByLead.get(lead.id) ?? null,
     );
-    if (!decision.eligible) { skipped.push({ lead, reason: decision.reason }); continue; }
+    if (!decision.eligible) {
+      skipped.push({ lead, reason: decision.reason });
+      // `personal_chain_exhausted` is only ever returned after the domain and candidate gates have
+      // both passed, so both are non-null here; the guard keeps that provable to the type system.
+      if (decision.reason === 'personal_chain_exhausted' && officialDomain && candidates) {
+        fallbackCandidates.push({ lead, candidates, domain: officialDomain });
+      }
+      continue;
+    }
     targets.push(decision.target);
   }
   const ordered = [...targets].sort(
@@ -140,5 +178,5 @@ export function selectResolveBatchTargets(leads: readonly Lead[], data: ResolveB
       a.lead.createdAt.getTime() - b.lead.createdAt.getTime() ||
       a.lead.id.localeCompare(b.lead.id),
   );
-  return { selected: ordered.slice(0, opts.limit), skipped };
+  return { selected: ordered.slice(0, opts.limit), skipped, fallbackCandidates };
 }

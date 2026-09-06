@@ -16,7 +16,7 @@ import { type LeadStatus } from '../leads/status.js';
 import { type NewPipelineEvent } from '../pipeline/pipeline-event.js';
 import { EMAIL_SCHEMA_VERSION, EMAIL_REVIEW_JSON_SCHEMA, EMAIL_WRITER_JSON_SCHEMA, emailReviewSchema, emailWriterSchema } from './email-schema.js';
 import { buildEmailBrief } from './email-brief.js';
-import { buildEmailContext, type EmailDemoMeta, type EmailFinding, type EmailInputs, renderEmail } from './email-render.js';
+import { buildEmailContext, type EmailDemoMeta, type EmailFinding, type EmailInputs, type EmailRecipientContext, renderEmail } from './email-render.js';
 import { EMAIL_WRITER_RULES_VERSION, type EmailStatus } from './email-types.js';
 import { validateEmail } from './email-validation.js';
 import { isEmailReviewApprovable } from './email-review-gate.js';
@@ -130,6 +130,9 @@ export interface EmailWriteInput {
   findings: EmailFinding[];
   demo: EmailDemoMeta | null;
   opportunityScore: number | null;
+  /** Recipient contract (see EmailRecipientContext). Absent/null is treated as unverified identity,
+   * so copy stays unaddressed — a generic inbox is never greeted by a person's name. */
+  recipient?: EmailRecipientContext | null;
 }
 
 export interface EmailResult {
@@ -159,7 +162,7 @@ export class EmailWriterService {
     const isReal = this.deps.provider.name !== 'mock';
 
     const safeFindings = input.findings.filter((f) => f.safeForOutreach);
-    const emailInputs: EmailInputs = { facts: input.facts, findings: safeFindings, demo: input.demo };
+    const emailInputs: EmailInputs = { facts: input.facts, findings: safeFindings, demo: input.demo, recipient: input.recipient ?? null };
     const ctx = buildEmailContext(emailInputs);
     const brief = this.brief(input, safeFindings);
 
