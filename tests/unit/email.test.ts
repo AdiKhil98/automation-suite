@@ -374,9 +374,20 @@ describe('email rendering and language', () => {
     expect(rendered.findingInputs.map((item) => item.findingId)).toContain('finding-cta');
   });
 
-  it('renders a named greeting only from a verified contact fact', () => {
-    const withName = inputs({ facts: [...baseFacts(), fact('fact-contact', 'contact_name', 'Dr. Meyer')] });
-    expect(renderEmail(strongEnglish(), withName).body.startsWith('Hello Dr. Meyer,')).toBe(true);
+  it('renders a named greeting only from a verified contact fact AND a PERSONAL_VERIFIED recipient', () => {
+    // Knowing the owner's name is necessary but no longer sufficient: the greeting is now gated on
+    // the resolved recipient too, so a generic business inbox is never addressed as a person.
+    const nameFacts = [...baseFacts(), fact('fact-contact', 'contact_name', 'Dr. Meyer')];
+    const personal = inputs({ facts: nameFacts });
+    personal.recipient = { contactType: 'PERSONAL_VERIFIED', email: 'meyer@praxis.example', intendedDecisionMakers: [] };
+    expect(renderEmail(strongEnglish(), personal).body.startsWith('Hello Dr. Meyer,')).toBe(true);
+
+    const generic = inputs({ facts: nameFacts });
+    generic.recipient = { contactType: 'GENERIC_OFFICIAL', email: 'info@praxis.example', intendedDecisionMakers: [{ fullName: 'Dr. Meyer', title: 'Principal' }] };
+    expect(renderEmail(strongEnglish(), generic).body.startsWith('Hello,')).toBe(true);
+
+    // No recipient contract at all: fail closed, stay neutral.
+    expect(renderEmail(strongEnglish(), inputs({ facts: nameFacts })).body.startsWith('Hello,')).toBe(true);
     expect(renderEmail(strongEnglish(), inputs()).body.startsWith('Hello,')).toBe(true);
   });
 

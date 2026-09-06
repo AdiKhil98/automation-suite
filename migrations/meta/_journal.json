@@ -302,6 +302,13 @@
       "when": 1786825200000,
       "tag": "0042_contact_enrichment_domain_search_only_mode",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1786911600000,
+      "tag": "0043_contact_resolutions",
+      "breakpoints": true
     }
   ]
 }

@@ -27,10 +27,36 @@ export interface EmailDemoMeta {
   approvedFindingRefs?: string[];
 }
 
+/**
+ * Who the email is actually addressed to, and therefore how it may address them.
+ *
+ * COPY SAFETY. `PERSONAL_VERIFIED` means the address was proven to be that named person's own work
+ * email by the Instantly/Hunter trust boundary — only then may copy greet them by name.
+ * `GENERIC_OFFICIAL` is a published business inbox belonging to the ORGANISATION; greeting it
+ * "Hello Dr Richard" would assert an identity nobody verified. `intendedDecisionMakers` is who we
+ * hope the inbox forwards to, never a claim about whose mailbox it is.
+ */
+export interface EmailRecipientContext {
+  contactType: 'PERSONAL_VERIFIED' | 'GENERIC_OFFICIAL';
+  email: string;
+  intendedDecisionMakers: { fullName: string; title: string }[];
+}
+
 export interface EmailInputs {
   facts: LeadFact[];
   findings: EmailFinding[];
   demo: EmailDemoMeta | null;
+  /** Absent = recipient identity unproven; treated exactly like GENERIC_OFFICIAL for naming. */
+  recipient?: EmailRecipientContext | null;
+}
+
+/**
+ * Whether copy may address the recipient by personal name. Fail-closed: ONLY an explicit
+ * PERSONAL_VERIFIED recipient qualifies. An absent recipient context is not an implicit licence to
+ * use a name — it means nothing verified this address belongs to a person.
+ */
+export function personalNameAllowed(recipient: EmailRecipientContext | null | undefined): boolean {
+  return recipient?.contactType === 'PERSONAL_VERIFIED';
 }
 
 const current = (facts: LeadFact[], type: string): LeadFact | undefined =>
@@ -85,7 +111,10 @@ export function buildEmailContext(inputs: EmailInputs): EmailValidationContext {
 /** Assemble the final plain-text message after validation; no model controls URLs or signoff. */
 export function renderEmail(out: EmailWriterOutput, inputs: EmailInputs): RenderedEmail {
   const language = resolveEmailLanguage(inputs.facts);
-  const nameFact = current(inputs.facts, 'contact_name');
+  // A personal greeting is gated on the RECIPIENT, not merely on a name being known: knowing the
+  // owner's name says nothing about whose inbox `info@practice.co.uk` is. Without a PERSONAL_VERIFIED
+  // recipient the greeting stays neutral even when a contact_name fact exists.
+  const nameFact = personalNameAllowed(inputs.recipient) ? current(inputs.facts, 'contact_name') : undefined;
   const greeting = nameFact ? NAMED_GREETING[language](nameFact.value.trim()) : NEUTRAL_GREETING[language];
   const ctaKind: EmailCtaKind = out.primary_cta === 'VIEW_CONCEPT' ? 'demo_link' : 'reply';
 

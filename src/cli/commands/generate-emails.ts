@@ -5,6 +5,7 @@ import { generateEmails, type EmailItem } from '../../pipeline/generate-emails.j
 import { DemoInputRepository } from '../../persistence/repositories/demo-input.repo.js';
 import { EmailInputRepository } from '../../persistence/repositories/email-input.repo.js';
 import { LeadFactsRepository } from '../../persistence/repositories/lead-facts.repo.js';
+import { ContactResolutionRepository } from '../../persistence/repositories/contact-resolution.repo.js';
 import { PipelineRunsRepository } from '../../persistence/repositories/runs.repo.js';
 import { ControlledTestRepository } from '../../persistence/repositories/controlled-test.repo.js';
 import { buildEmailService } from './email-build.js';
@@ -30,6 +31,7 @@ export async function generateEmailsCommand(ctx: CliContext, cliOpts: GenerateEm
   const auditRepo = new DemoInputRepository(ctx.db);
   const emailInputRepo = new EmailInputRepository(ctx.db);
   const factsRepo = new LeadFactsRepository(ctx.db);
+  const resolutionRepo = new ContactResolutionRepository(ctx.db);
 
   const perCallW = worstCaseCostUsd(c.EMAIL_WRITER_MODEL, worstCaseEmailInputTokens(), c.EMAIL_MAX_OUTPUT_TOKENS);
   const perCallR = worstCaseCostUsd(c.EMAIL_REVIEWER_MODEL, worstCaseEmailInputTokens(), c.EMAIL_MAX_OUTPUT_TOKENS);
@@ -65,7 +67,17 @@ export async function generateEmailsCommand(ctx: CliContext, cliOpts: GenerateEm
       if (!approved) throw new Error('controlled_test_demo_approval_invalid');
       demo = { ...demo, status: 'APPROVED' };
     }
-    items.push({ input: { leadId: lead.id, facts, findings: audit.findings, demo, opportunityScore: audit.opportunityScore } });
+    // Recipient contract. A GENERIC_OFFICIAL resolution keeps the copy unaddressed; its absence is
+    // treated the same way (identity unproven), so no lead can be greeted by name by default.
+    const resolution = await resolutionRepo.getCurrent(lead.id);
+    const recipient = resolution
+      ? {
+          contactType: resolution.resolutionType,
+          email: resolution.recipientEmail,
+          intendedDecisionMakers: resolution.intendedDecisionMakers.map((d) => ({ fullName: d.fullName, title: d.title })),
+        }
+      : null;
+    items.push({ input: { leadId: lead.id, facts, findings: audit.findings, demo, opportunityScore: audit.opportunityScore, recipient } });
   }
 
   console.log(`\nEmail run (${campaign.name}, provider=${providerName}):`);

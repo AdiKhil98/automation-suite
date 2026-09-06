@@ -2867,3 +2867,54 @@ export const contactEnrichmentResults = pgTable(
     ),
   }),
 );
+
+// One row per terminal contact resolution for a lead: WHO we may write to and HOW we are allowed to
+// address them. Additive only; no existing table is altered and NO lead_facts are written by the
+// feature that populates it, so a manual contact fact is never overwritten.
+//
+// Deliberately separate from contact_enrichment_results. That table records what a PAID PROVIDER CALL
+// did; this one records the resolved recipient contract that downstream email generation consumes.
+// Keeping them apart is what stops a generic business inbox from ever being represented through the
+// person-level VERIFIED status.
+//
+// The address is snapshotted in recipient_email (the value as resolved), while provenance stays
+// authoritative through the FKs: source_fact_id for a GENERIC_OFFICIAL inbox (the published
+// contact_email fact it was accepted from) and enrichment_result_id for a PERSONAL_VERIFIED address
+// (the enrichment row whose trust boundary accepted it). Exactly one of the two is always set.
+export const contactResolutions = pgTable(
+  'contact_resolutions',
+  {
+    id: text('id').primaryKey(),
+    leadId: text('lead_id').notNull().references(() => leads.id, { onDelete: 'cascade' }),
+    resolutionType: text('resolution_type').notNull(),
+    recipientEmail: text('recipient_email').notNull(),
+    sourceFactId: text('source_fact_id').references(() => leadFacts.id),
+    enrichmentResultId: text('enrichment_result_id').references(() => contactEnrichmentResults.id),
+    sourceUrl: text('source_url'),
+    // Who we HOPE a generic inbox forwards to — never a claim that the mailbox belongs to them.
+    // Always an empty array for PERSONAL_VERIFIED, where the person IS the recipient.
+    intendedDecisionMakers: jsonb('intended_decision_makers').notNull().default(sql`'[]'::jsonb`),
+    resolvedAt: timestamp('resolved_at', { withTimezone: true }).notNull().defaultNow(),
+    isCurrent: boolean('is_current').notNull().default(true),
+  },
+  (t) => ({
+    leadIdx: index('contact_resolutions_lead_idx').on(t.leadId),
+    // At most one current resolution per lead; superseding demotes the previous row first.
+    currentUk: uniqueIndex('contact_resolutions_current_uk').on(t.leadId).where(sql`${t.isCurrent}`),
+    typeCk: check('contact_resolutions_type_ck', sql`${t.resolutionType} IN ('PERSONAL_VERIFIED','GENERIC_OFFICIAL')`),
+    // UNRESOLVED is the ABSENCE of a current row, never a stored value — enforced by the CHECK above.
+    // Each type must carry its own provenance FK and must not carry the other's.
+    provenanceCk: check(
+      'contact_resolutions_provenance_ck',
+      sql`(${t.resolutionType} = 'GENERIC_OFFICIAL' AND ${t.sourceFactId} IS NOT NULL AND ${t.enrichmentResultId} IS NULL AND ${t.sourceUrl} IS NOT NULL)
+          OR (${t.resolutionType} = 'PERSONAL_VERIFIED' AND ${t.enrichmentResultId} IS NOT NULL AND ${t.sourceFactId} IS NULL)`,
+    ),
+    // A named decision-maker list is meaningful ONLY for a generic inbox (a forwarding request). On a
+    // PERSONAL_VERIFIED row it must stay empty, so a person can never be attached to an address that
+    // was not verified as theirs.
+    intendedCk: check(
+      'contact_resolutions_intended_ck',
+      sql`${t.resolutionType} = 'GENERIC_OFFICIAL' OR ${t.intendedDecisionMakers} = '[]'::jsonb`,
+    ),
+  }),
+);
