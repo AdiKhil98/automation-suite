@@ -19,8 +19,8 @@ import { type DraftInspectionResult } from '../../src/integrations/send/provider
 
 const SENDER = 'admin@scaleflow.it.com';
 const RECIPIENT = 'kheadi10@gmail.com';
-const SUBJECT = 'Automation Suite tracked-send test';
-const BODY = 'Hi Adi,\n\nThis is the controlled Automation Suite send test.\n\nAdi\nScaleFlow';
+const SUBJECT = 'Quick test';
+const BODY = 'Hi Adi,\n\nJust testing this mailbox.\n\nAdi';
 const HASH = messageContentHash(SUBJECT, BODY);
 const NOW = Date.UTC(2026, 6, 30, 12, 0, 0);
 
