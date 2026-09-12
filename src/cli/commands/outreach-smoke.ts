@@ -22,18 +22,13 @@ import { buildSendProvider } from './send-build.js';
 import { type CliContext } from '../context.js';
 
 const CAMPAIGN_NAME = 'Phase 17B Smoke Test';
-const SUGGESTED_SUBJECT = 'Automation Suite tracked-send test';
+const SUGGESTED_SUBJECT = 'Quick test';
 const SUGGESTED_BODY = [
   'Hi Adi,',
   '',
-  'This is the controlled Automation Suite send test.',
-  '',
-  'It verifies that the email is sent from admin@scaleflow.it.com, stored with its exact content, connected to the correct Gmail thread, synchronized to the outreach dashboard, and prepared for read-only reply detection.',
-  '',
-  'No action is required unless you want to reply to test the tracking flow.',
+  'Just testing this mailbox.',
   '',
   'Adi',
-  'ScaleFlow',
 ].join('\n');
 
 function sequencePolicy(ctx: CliContext): SequencePolicy {
