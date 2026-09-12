@@ -1,5 +1,6 @@
 import { OutreachService } from '../../domain/outreach/outreach-service.js';
 import { type SequencePolicy } from '../../domain/outreach/followups.js';
+import { isFollowupStep, isSequenceStep, lessonEmailLabel } from '../../domain/outreach/sequence.js';
 import { DrizzleOutreachUnitOfWork } from '../../persistence/outreach-unit-of-work.js';
 import { EnrollInputRepository } from '../../persistence/repositories/enroll-input.repo.js';
 import { OutreachReadRepository } from '../../persistence/repositories/outreach.repo.js';
@@ -11,6 +12,7 @@ function sequencePolicy(ctx: CliContext): SequencePolicy {
   return {
     step1DelayDays: ctx.config.OUTREACH_FOLLOWUP_1_DELAY_DAYS,
     step2DelayDays: ctx.config.OUTREACH_FOLLOWUP_2_DELAY_DAYS,
+    step3DelayDays: ctx.config.OUTREACH_FOLLOWUP_3_DELAY_DAYS,
     dueHourLocal: ctx.config.OUTREACH_FOLLOWUP_DUE_HOUR_LOCAL,
   };
 }
@@ -19,6 +21,8 @@ export type EnrollFromAttemptOutcome =
   | 'ENROLLED'
   | 'ALREADY_ENROLLED'
   | 'RECORD_NOT_ENROLLABLE'
+  /** Durable provenance and outreach state disagree about the sequence step; nothing was written. */
+  | 'STEP_MISMATCH'
   | 'REFUSED';
 
 export interface EnrollFromAttemptResult {
@@ -32,7 +36,13 @@ export interface EnrollFromAttemptResult {
   contentHash?: string;
   gmailMessageId?: string;
   gmailThreadId?: string;
+  /** The next follow-up's due instant, or undefined when the sequence is finished. */
   followupDueAt?: string;
+  /** What this confirmed send represented: 0 = INITIAL, 1..3 = the internal follow-up step. */
+  sequenceStep?: number;
+  messageType?: 'INITIAL' | 'FOLLOW_UP';
+  /** The record status after enrollment (INITIAL_SENT / FOLLOW_UP_n_SENT). */
+  recordStatus?: string;
 }
 
 /**
@@ -70,9 +80,58 @@ export async function enrollConfirmedSendFromAttempt(
     return refused(`contact ${input.recipientEmail} is on do-not-contact`);
   }
   const record = tracked.record;
+  const common = {
+    campaignId: campaign.id,
+    campaignName: campaign.name,
+    contact: input.recipientEmail,
+    gmailMessageId: input.providerMessageId,
+    gmailThreadId: input.providerThreadId,
+  };
 
-  const result = await service.enrollConfirmedSend({
+  // ---- Route on DURABLE provenance, never on a heuristic. ----
+  // `email_drafts.sequence_step` was written when the copy was composed and travels with the
+  // attempt's own draft chain, so a recovery run days later (or after a crash/restart) knows
+  // exactly what the confirmed send was. Pre-0044 rows are 0 and therefore INITIAL, which is
+  // precisely what they were.
+  const step = input.sequenceStep;
+  if (step === 0) {
+    const result = await service.enrollConfirmedSend({
+      outreachRecordId: record.id,
+      subject: input.subject,
+      body: input.body,
+      gmailMessageId: input.providerMessageId,
+      gmailThreadId: input.providerThreadId,
+      sentAt: input.sentAt,
+      emailDraftId: input.emailDraftId,
+      finalizedEmailId: input.finalizedEmailId,
+      sendAttemptId: input.attemptId,
+      policy: sequencePolicy(ctx),
+    });
+    return {
+      ...common,
+      outcome: result.outcome,
+      recordId: result.record.id,
+      messageId: result.message?.id,
+      contentHash: result.message?.contentHash,
+      followupDueAt: result.followup?.dueAt.toISOString(),
+      sequenceStep: 0,
+      messageType: 'INITIAL',
+      recordStatus: result.record.status,
+    };
+  }
+
+  if (!isFollowupStep(step)) {
+    return refused(`draft ${input.emailDraftId} records an unknown sequence step ${String(step)}`);
+  }
+  // A follow-up must land on the record its copy was written for; enrolling it against a different
+  // record would silently attach one contact's message to another's timeline.
+  if (input.outreachRecordId !== null && input.outreachRecordId !== record.id) {
+    return refused(`draft ${input.emailDraftId} belongs to outreach record ${input.outreachRecordId}, but the active record for ${input.recipientEmail} is ${record.id}`);
+  }
+
+  const result = await service.enrollConfirmedFollowup({
     outreachRecordId: record.id,
+    expectedStep: step,
     subject: input.subject,
     body: input.body,
     gmailMessageId: input.providerMessageId,
@@ -83,18 +142,17 @@ export async function enrollConfirmedSendFromAttempt(
     sendAttemptId: input.attemptId,
     policy: sequencePolicy(ctx),
   });
-
   return {
+    ...common,
     outcome: result.outcome,
+    reason: result.reason,
     recordId: result.record.id,
-    campaignId: campaign.id,
-    campaignName: campaign.name,
-    contact: input.recipientEmail,
     messageId: result.message?.id,
     contentHash: result.message?.contentHash,
-    gmailMessageId: input.providerMessageId,
-    gmailThreadId: input.providerThreadId,
-    followupDueAt: result.followup?.dueAt.toISOString(),
+    followupDueAt: result.nextFollowup?.dueAt.toISOString(),
+    sequenceStep: step,
+    messageType: 'FOLLOW_UP',
+    recordStatus: result.record.status,
   };
 }
 
@@ -119,15 +177,20 @@ export async function outreachEnrollSentCommand(
     return;
   }
   if (r.outcome === 'ENROLLED') {
-    console.log('\n✅ ENROLLED — confirmed production send is now tracked in outreach.');
+    const step = r.sequenceStep ?? 0;
+    const label = isSequenceStep(step) ? lessonEmailLabel(step) : 'sequence email';
+    console.log(`\n✅ ENROLLED — confirmed production send is now tracked in outreach (${label}).`);
     console.log(`  record:            ${r.recordId}  (lead ${opts.lead})`);
     console.log(`  campaign:          ${r.campaignName} (${r.campaignId})`);
     console.log(`  contact:           ${r.contact}`);
     console.log(`  message:           ${r.messageId ?? '-'}  sha256=${r.contentHash?.slice(0, 12) ?? '-'}…`);
+    console.log(`  message type:      ${r.messageType ?? '-'} (internal sequence step ${String(r.sequenceStep ?? 0)})`);
     console.log(`  gmail message id:  ${r.gmailMessageId}`);
     console.log(`  gmail thread id:   ${r.gmailThreadId}`);
-    console.log('  record status:     INITIAL_SENT');
-    console.log(`  follow-up 1 due:   ${r.followupDueAt ?? '-'} (TRACKING ONLY; never auto-sent)`);
+    console.log(`  record status:     ${r.recordStatus ?? '-'}`);
+    console.log(r.followupDueAt === undefined
+      ? '  next follow-up:    none — the sequence is complete; nothing further is scheduled.'
+      : `  next follow-up:    ${r.followupDueAt}`);
     console.log('\nReply sync and bounce reconciliation now see this thread:');
     console.log('  pnpm cli outreach-sync-replies --confirm-gmail-read');
     console.log('  pnpm cli outreach-reconcile-delivery --confirm-gmail-read');
@@ -137,5 +200,9 @@ export async function outreachEnrollSentCommand(
     console.log(`\n↩️  ALREADY_ENROLLED — Gmail message ${r.gmailMessageId} is already tracked (record ${r.recordId}). Nothing changed.`);
     return;
   }
-  console.log(`\n❌ RECORD_NOT_ENROLLABLE — outreach record ${r.recordId} cannot enroll this send. Nothing changed.`);
+  if (r.outcome === 'STEP_MISMATCH') {
+    console.log(`\n❌ STEP_MISMATCH — ${r.reason ?? 'provenance disagrees with the outreach state'}. Nothing changed; reconcile manually.`);
+    return;
+  }
+  console.log(`\n❌ RECORD_NOT_ENROLLABLE — outreach record ${r.recordId} cannot enroll this send${r.reason ? ` (${r.reason})` : ''}. Nothing changed.`);
 }

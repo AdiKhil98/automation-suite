@@ -98,6 +98,12 @@ export const defaultMockEmailResponder: MockResponder = (request) => {
       buyerLanguageOnly: true,
       conversationNotAudit: true,
       confidentObservation: true,
+      // Sequence-job dimensions: reported at every step. The gate enforces only the subset that
+      // applies to the step under review, so a mock first email and a mock follow-up both pass.
+      addsClarityNotRestart: true,
+      compressedNotExpanded: true,
+      pressureReduced: true,
+      binaryReplyClose: true,
       problems: [],
       requiredRevisions: [],
     },

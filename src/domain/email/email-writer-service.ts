@@ -6,7 +6,10 @@ import {
   type EmailBrief,
   EMAIL_REVIEWER_PROMPT_VERSION,
   EMAIL_WRITER_PROMPT_VERSION,
+  INITIAL_SEQUENCE_CONTEXT,
+  type SequenceContext,
 } from '../../prompts/email/index.js';
+import { type SequenceStep } from '../outreach/sequence.js';
 import { type LlmProvider, type LlmResult, type ReasoningEffort } from '../../integrations/llm/provider.js';
 import { worstCaseCostUsd } from '../../integrations/llm/pricing.js';
 import { EMAIL_DEBUG_TTL_MS, type EmailDebugStore } from '../../integrations/email/email-debug-store.js';
@@ -80,6 +83,10 @@ export interface EmailPersist {
     ctaKind: string;
     hasDemoUrlPlaceholder: boolean;
     status: EmailStatus;
+    /** Sequence provenance: 0 = INITIAL / Outreach #1, 1..3 = lesson Follow-up #2..#4. */
+    sequenceStep: number;
+    /** The outreach record this copy belongs to (null for a first email written before tracking). */
+    outreachRecordId: string | null;
     writerPromptVersion: string;
     reviewerPromptVersion: string;
     schemaVersion: string;
@@ -133,6 +140,14 @@ export interface EmailWriteInput {
   /** Recipient contract (see EmailRecipientContext). Absent/null is treated as unverified identity,
    * so copy stays unaddressed — a generic inbox is never greeted by a person's name. */
   recipient?: EmailRecipientContext | null;
+  /**
+   * Where this email sits in the outreach sequence. Absent = a first email (step 0), which is what
+   * every pre-existing caller means. A follow-up supplies its step, the thread it continues, and the
+   * text already sent, so the writer gets the step's JOB and the reviewer judges that job.
+   */
+  sequence?: SequenceContext | null;
+  /** The outreach record this email belongs to (persisted as durable sequence provenance). */
+  outreachRecordId?: string | null;
 }
 
 export interface EmailResult {
@@ -162,7 +177,9 @@ export class EmailWriterService {
     const isReal = this.deps.provider.name !== 'mock';
 
     const safeFindings = input.findings.filter((f) => f.safeForOutreach);
-    const emailInputs: EmailInputs = { facts: input.facts, findings: safeFindings, demo: input.demo, recipient: input.recipient ?? null };
+    const seq: SequenceContext = input.sequence ?? INITIAL_SEQUENCE_CONTEXT;
+    const emailInputs: EmailInputs = { facts: input.facts, findings: safeFindings, demo: input.demo,
+      recipient: input.recipient ?? null, threadSubject: seq.threadSubject };
     const ctx = buildEmailContext(emailInputs);
     const brief = this.brief(input, safeFindings);
 
@@ -205,8 +222,30 @@ export class EmailWriterService {
       await this.deps.uow.transaction(async (repos) => {
         const lead = await repos.leads.getById(input.leadId);
         // A demo is optional: OPPORTUNITY_READY (no demo) advances the same way as the demo-bearing
-        // states. All three reach EMAIL_DRAFTED via a legal edge in the state machine.
-        if (lead && (lead.status === 'DEMO_READY' || lead.status === 'DEMO_DECIDED' || lead.status === 'OPPORTUNITY_READY')) {
+        // states. All reach EMAIL_DRAFTED via a legal edge in the state machine.
+        //
+        // SENT is the sequence RE-ENTRY, and it is deliberately the narrowest possible edge: it is
+        // legal ONLY for a follow-up (sequence step >= 1). A first email is never composed from
+        // SENT, so no code path and no operator mistake can rewind an already-sent lead back into
+        // drafting. See the `SENT` entry in the lead state machine for the full rationale.
+        const isFollowup = seq.step > 0;
+        const preOutreach = lead !== null
+          && (lead.status === 'DEMO_READY' || lead.status === 'DEMO_DECIDED' || lead.status === 'OPPORTUNITY_READY');
+        const sequenceReentry = lead !== null && lead.status === 'SENT' && isFollowup;
+        if (sequenceReentry) {
+          // An explicit, immutable marker so the timeline never reads as "this lead was never sent".
+          // `outreach_records` remains authoritative for what has actually been delivered.
+          await repos.events.record({
+            leadId: input.leadId, runId, type: 'NOTE', fromStatus: 'SENT', toStatus: 'EMAIL_DRAFTED',
+            message: `outreach sequence re-entry: composing follow-up step ${String(seq.step)}`,
+            data: {
+              sequenceStep: seq.step,
+              outreachRecordId: input.outreachRecordId ?? null,
+              note: 'the lead was already sent; leads.status is the work-queue pointer, outreach_records is authoritative for delivery history',
+            },
+          });
+        }
+        if (preOutreach || sequenceReentry) {
           await repos.leadService.transition(input.leadId, 'EMAIL_DRAFTED');
           if (persist.routeTo === 'EMAIL_REVIEW_FAILED') {
             await repos.leadService.transition(input.leadId, 'EMAIL_REVIEW_FAILED');
@@ -228,7 +267,7 @@ export class EmailWriterService {
 
     // ---- Writer ----
     if (!canCall(c.writerModel)) return finish('BUDGET_BLOCKED', failPersist('EMAIL_REVIEW_FAILED'));
-    const wMsgs = buildEmailWriterMessages(brief, null);
+    const wMsgs = buildEmailWriterMessages(brief, null, seq);
     const wRes = await this.deps.provider.generate({
       task: 'email_write', system: wMsgs.system, user: wMsgs.user, images: [], outputSchema: EMAIL_WRITER_JSON_SCHEMA,
       schemaName: 'email_write', model: c.writerModel, reasoningEffort: c.writerEffort, store: c.store, timeoutMs: c.timeoutMs,
@@ -250,14 +289,15 @@ export class EmailWriterService {
     const check = validateEmail(draft, ctx);
     if (!check.ok) {
       wRec.validationViolations = check.violations;
-      const p = this.buildPersist(input, draft, null, 'REVIEW_FAILED', 'EMAIL_REVIEW_FAILED', emailInputs, wRes, null, cost, modelCalls);
+      const p = this.buildPersist(input, draft, null, 'REVIEW_FAILED', 'EMAIL_REVIEW_FAILED', emailInputs, wRes, null, cost, modelCalls,
+        undefined, seq.step, input.outreachRecordId ?? null);
       await recordDebug('VALIDATION_FAILED', draft, null, check.violations);
       return finish('VALIDATION_FAILED', p);
     }
 
     // ---- Independent adversarial reviewer ----
     if (!canCall(c.reviewerModel)) return finish('BUDGET_BLOCKED', failPersist('EMAIL_REVIEW_FAILED'));
-    const rMsgs = buildEmailReviewerMessages(brief, draft);
+    const rMsgs = buildEmailReviewerMessages(brief, draft, seq);
     const rRes = await this.deps.provider.generate({
       task: 'email_review', system: rMsgs.system, user: rMsgs.user, images: [], outputSchema: EMAIL_REVIEW_JSON_SCHEMA,
       schemaName: 'email_review', model: c.reviewerModel, reasoningEffort: c.reviewerEffort, store: c.store, timeoutMs: c.timeoutMs,
@@ -276,9 +316,16 @@ export class EmailWriterService {
 
     // Revisions are never silently approved without being applied. Every persuasion, evidence,
     // punctuation, CTA, competitor, and demo-alignment dimension must pass (shared gate).
-    const approvable = isEmailReviewApprovable(review);
+    // Step-specific and fail-closed: a follow-up that violates the job of its sequence position is
+    // never approvable. The subject dimensions are skipped only when the subject is deterministic
+    // thread continuity produced by code rather than authored by the model.
+    const approvable = isEmailReviewApprovable(review, {
+      sequenceStep: seq.step,
+      subjectIsThreadContinuity: seq.threadSubject !== null,
+    });
     if (!approvable) {
-      const p = this.buildPersist(input, draft, review, 'REVIEW_FAILED', 'EMAIL_REVIEW_FAILED', emailInputs, wRes, rRes, cost, modelCalls);
+      const p = this.buildPersist(input, draft, review, 'REVIEW_FAILED', 'EMAIL_REVIEW_FAILED', emailInputs, wRes, rRes, cost, modelCalls,
+        undefined, seq.step, input.outreachRecordId ?? null);
       await recordDebug('REVIEW_REJECTED', draft, review, []);
       return finish('REVIEW_REJECTED', p);
     }
@@ -287,7 +334,8 @@ export class EmailWriterService {
     const rendered = renderEmail(draft, emailInputs);
     const route: LeadStatus = rendered.hasDemoUrlPlaceholder ? 'WAITING_FOR_DEMO_URL' : 'READY_FOR_HUMAN_APPROVAL';
     const outcome: EmailOutcome = rendered.hasDemoUrlPlaceholder ? 'APPROVED_WAITING_URL' : 'APPROVED_READY';
-    const p = this.buildPersist(input, draft, review, 'APPROVED', route, emailInputs, wRes, rRes, cost, modelCalls, rendered);
+    const p = this.buildPersist(input, draft, review, 'APPROVED', route, emailInputs, wRes, rRes, cost, modelCalls, rendered,
+      seq.step, input.outreachRecordId ?? null);
     await recordDebug(outcome, draft, review, []);
     return finish(outcome, p);
   }
@@ -304,6 +352,8 @@ export class EmailWriterService {
     cost: number,
     modelCalls: EmailModelCall[],
     rendered = renderEmail(draft, emailInputs),
+    sequenceStep: SequenceStep = 0,
+    outreachRecordId: string | null = null,
   ): EmailPersist {
     const c = this.deps.config;
     const emailId = randomUUID();
@@ -312,6 +362,7 @@ export class EmailWriterService {
       email: {
         id: emailId, leadId: input.leadId, demoId: input.demo?.id ?? null, runId: '', subject: rendered.subject, body: rendered.body,
         ctaKind: rendered.ctaKind, hasDemoUrlPlaceholder: rendered.hasDemoUrlPlaceholder, status,
+        sequenceStep, outreachRecordId,
         writerPromptVersion: EMAIL_WRITER_PROMPT_VERSION, reviewerPromptVersion: EMAIL_REVIEWER_PROMPT_VERSION,
         schemaVersion: EMAIL_SCHEMA_VERSION, rulesVersion: EMAIL_WRITER_RULES_VERSION, provider: this.deps.provider.name,
         requestedWriterModel: c.writerModel, requestedReviewerModel: c.reviewerModel, writerResponseId: wRes.responseId,

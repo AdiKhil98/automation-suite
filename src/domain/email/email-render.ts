@@ -48,6 +48,19 @@ export interface EmailInputs {
   demo: EmailDemoMeta | null;
   /** Absent = recipient identity unproven; treated exactly like GENERIC_OFFICIAL for naming. */
   recipient?: EmailRecipientContext | null;
+  /**
+   * The subject of the Gmail thread this email continues (follow-ups only). When present the
+   * rendered subject is DETERMINISTIC thread continuity — `Re: <original>` — and the model's
+   * selected subject is discarded. Manufacturing a fresh subject would break the thread the
+   * recipient already has, so code owns this, not the model.
+   */
+  threadSubject?: string | null;
+}
+
+/** Deterministic reply subject: prefix once, never twice. */
+export function replySubject(original: string): string {
+  const trimmed = original.trim();
+  return /^re:\s/i.test(trimmed) ? trimmed : `Re: ${trimmed}`;
 }
 
 /**
@@ -151,7 +164,9 @@ export function renderEmail(out: EmailWriterOutput, inputs: EmailInputs): Render
   }
 
   return {
-    subject: out.selected_subject,
+    // A threaded follow-up keeps the original subject (as a reply); only a first email — or a
+    // follow-up with no known thread — uses the model's selected subject.
+    subject: inputs.threadSubject ? replySubject(inputs.threadSubject) : out.selected_subject,
     body,
     ctaKind,
     hasDemoUrlPlaceholder: body.includes(DEMO_URL_TOKEN),

@@ -24,6 +24,7 @@ import { evaluateHardGates } from '../../src/evaluation/email/hard-gates.js';
 import { runLiveValidation, type LiveOrchestratorConfig } from '../../src/evaluation/email/live/live-orchestrator.js';
 import { replayLiveValidation } from '../../src/evaluation/email/live/replay.js';
 import { type LiveValidationReport } from '../../src/evaluation/email/live/live-report.js';
+import { EMAIL_SCHEMA_VERSION } from '../../src/domain/email/email-schema.js';
 import { MockLlmProvider } from '../../src/integrations/llm/mock-llm.js';
 import { defaultMockLiveValidationResponder } from '../../src/fixtures/mock-live-validation-responses.js';
 import {
@@ -265,7 +266,13 @@ describe('Phase 7A4B1 — offline replay (zero live/network/DB/Gmail/Sheets/draf
     } catch {
       return; // git-ignored artifact absent in CI — the committed mock-report cases above cover the path
     }
-    const result = await replayLiveValidation(JSON.parse(raw) as LiveValidationReport);
+    const report = JSON.parse(raw) as LiveValidationReport;
+    // The composed-message hash is deliberately BOUND to EMAIL_SCHEMA_VERSION, so an artifact saved
+    // under an older schema can never reproduce its hash — that mismatch is the guarantee working,
+    // not a regression. Replay only an artifact from the CURRENT schema; a stale local artifact is
+    // re-captured by re-running the live validation, exactly like an absent one.
+    if (report.deterministic?.enriched?.schemaVersion !== EMAIL_SCHEMA_VERSION) return;
+    const result = await replayLiveValidation(report);
     expect(result.composedHashReproducible).toBe(true);
     expect(result.claimSpansReproducible).toBe(true);
     expect(result.reportHashOk).toBe(true);

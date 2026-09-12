@@ -18,6 +18,15 @@ export async function truncateAll(db: Database, permit: DestructiveTestDatabaseP
     DELETE FROM outreach_messages;
     DELETE FROM outreach_records;
     DELETE FROM outreach_campaigns;
+    -- Tables added by migrations 0034 and 0039-0043 that had drifted out of this list. They are
+    -- deleted first because they reference lead_facts / email_drafts / competitor_research_runs,
+    -- all of which are cleared further down.
+    DELETE FROM contact_resolutions;
+    DELETE FROM contact_enrichment_results;
+    DELETE FROM deterministic_findings;
+    DELETE FROM email_competitor_enrichment;
+    DELETE FROM competitor_pattern_packages;
+    DELETE FROM competitor_capture_runs;
     DELETE FROM demo_v2_review_packages;
     DELETE FROM demo_v2_screenshots;
     DELETE FROM demo_v2_render_versions;

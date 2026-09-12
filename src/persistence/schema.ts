@@ -973,6 +973,14 @@ export const emailDrafts = pgTable(
     // stored via the operator-email workflow). Disambiguates authorship so an operator email is never
     // represented as AI-generated; the AI writer/reviewer columns carry explicit 'OPERATOR' sentinels then.
     authorship: text('authorship').notNull().default('AI'),
+    // Sequence provenance (migration 0044). `sequence_step` is the outbound sequence position this
+    // copy was written for: 0 = INITIAL / lesson Outreach #1, 1 = lesson Follow-up #2, 2 = #3,
+    // 3 = #4 (final). Every pre-existing row is 0. Together with `outreach_record_id` this makes the
+    // attempt -> gmail_draft -> finalization -> email_draft chain durably self-describing, so a
+    // recovery run after a crash knows EXACTLY what a confirmed send represented — never inferred
+    // from subject text, timestamps, or "the latest email".
+    sequenceStep: integer('sequence_step').notNull().default(0),
+    outreachRecordId: text('outreach_record_id'),
     // Phase 10 human review (dashboard). Distinct from the automated reviewer verdict above.
     humanDecision: text('human_decision'),
     humanNotes: text('human_notes'),
@@ -985,6 +993,14 @@ export const emailDrafts = pgTable(
     statusCk: check('email_draft_status_ck', sql`${t.status} IN ('DRAFTED','APPROVED','REVIEW_FAILED')`),
     authorshipCk: check('email_draft_authorship_ck', sql`${t.authorship} IN ('AI','OPERATOR')`),
     humanDecisionCk: check('email_draft_human_decision_ck', sql`${t.humanDecision} IS NULL OR ${t.humanDecision} IN ('APPROVED','REJECTED')`),
+    sequenceStepCk: check('email_draft_sequence_step_ck', sql`${t.sequenceStep} BETWEEN 0 AND 3`),
+    // Migration 0044: hard idempotency for unattended follow-up preparation — at most ONE live draft
+    // per (outreach record, sequence step), so two concurrent timer runs cannot both compose the
+    // same follow-up. Partial: pre-0044 drafts (NULL record) and operator-REJECTED copy are excluded,
+    // the latter so a deliberately re-scheduled step can be composed again.
+    outreachSequenceUk: uniqueIndex('email_drafts_outreach_sequence_uk')
+      .on(t.outreachRecordId, t.sequenceStep)
+      .where(sql`${t.outreachRecordId} IS NOT NULL AND ${t.humanDecision} IS DISTINCT FROM 'REJECTED'`),
   }),
 );
 
@@ -2198,9 +2214,12 @@ export const outreachRecords = pgTable(
     activeUk: uniqueIndex('outreach_records_active_uk')
       .on(t.campaignId, t.leadId, t.contactEmail)
       .where(sql`${t.status} NOT IN ('UNSUBSCRIBED','DO_NOT_CONTACT','CLOSED_WON','CLOSED_LOST')`),
+    // FOLLOW_UP_1_* = lesson Follow-up #2, FOLLOW_UP_2_* = #3, FOLLOW_UP_3_* = #4 (final).
+    // There is deliberately no FOLLOW_UP_4_*: the sequence is four emails total.
     statusCk: check('outreach_record_status_ck', sql`${t.status} IN (
       'DRAFT_READY','AWAITING_APPROVAL','APPROVED_TO_SEND','INITIAL_SENT',
       'FOLLOW_UP_1_DUE','FOLLOW_UP_1_SENT','FOLLOW_UP_2_DUE','FOLLOW_UP_2_SENT',
+      'FOLLOW_UP_3_DUE','FOLLOW_UP_3_SENT',
       'REPLIED_POSITIVE','REPLIED_NEUTRAL','REPLIED_NEGATIVE','BOUNCED','UNSUBSCRIBED',
       'DO_NOT_CONTACT','MEETING_BOOKED','CLOSED_WON','CLOSED_LOST')`),
   }),
@@ -2255,7 +2274,8 @@ export const outreachFollowups = pgTable(
     // At most one pending (DUE) follow-up per record+step; cancelled/postponed rows retained.
     pendingUk: uniqueIndex('outreach_followups_pending_uk').on(t.outreachRecordId, t.step).where(sql`${t.status} = 'DUE'`),
     statusCk: check('outreach_followup_status_ck', sql`${t.status} IN ('DUE','CANCELLED','POSTPONED','SENT')`),
-    stepCk: check('outreach_followup_step_ck', sql`${t.step} IN (1,2)`),
+    // Internal steps 1-3 only (lesson Follow-up #2, #3, #4). Never a step 4.
+    stepCk: check('outreach_followup_step_ck', sql`${t.step} IN (1,2,3)`),
   }),
 );
 

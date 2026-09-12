@@ -5,7 +5,7 @@ import { messageContentHash } from '../../src/domain/outreach/records.js';
 import { InMemoryOutreachStore } from '../support/outreach-memory.js';
 
 const TZ = 'Europe/Berlin';
-const policy: SequencePolicy = { step1DelayDays: 3, step2DelayDays: 5, dueHourLocal: 9 };
+const policy: SequencePolicy = { step1DelayDays: 2, step2DelayDays: 2, step3DelayDays: 3, dueHourLocal: 9 };
 const NOW = Date.parse('2026-07-20T12:00:00Z');
 const SENT_AT = new Date('2026-07-20T11:59:00Z');
 

@@ -11,6 +11,9 @@ import { emailDraftFinalizations, emailDrafts, gmailDrafts, sendAttempts } from 
  *  - body:    `email_draft_finalizations.resolved_body` (exact sent body) + its hash
  *  - recipient: the exact `gmail_drafts.recipient_email` that was sent
  *  - Gmail message/thread ids + sent timestamp + confirmation status: the `send_attempts` row
+ *  - sequence provenance: `email_drafts.sequence_step` (+ `outreach_record_id`) — the DURABLE answer
+ *    to "what did this confirmed send represent?", so a recovery run after a crash never has to
+ *    infer INITIAL vs FOLLOW_UP from subject text, timestamps, or "the latest email"
  *
  * The join starts from the send_attempt (NOT from an active schedule, which is FULFILLED after a
  * successful send), so it resolves post-send. It is SELECT-only and performs no write.
@@ -34,6 +37,10 @@ export interface EnrollInputData {
   resolvedBodyHash: string;
   finalizedEmailId: string;
   emailDraftId: string;
+  /** 0 = INITIAL / lesson Outreach #1; 1..3 = lesson Follow-up #2..#4. Pre-0044 rows are 0. */
+  sequenceStep: number;
+  /** The outreach record this draft was written for, when the draft recorded one. */
+  outreachRecordId: string | null;
 }
 
 export class EnrollInputRepository {
@@ -58,6 +65,8 @@ export class EnrollInputRepository {
         resolvedBodyHash: emailDraftFinalizations.resolvedBodyHash,
         body: emailDraftFinalizations.resolvedBody,
         subject: emailDrafts.subject,
+        sequenceStep: emailDrafts.sequenceStep,
+        outreachRecordId: emailDrafts.outreachRecordId,
       })
       .from(sendAttempts)
       .innerJoin(gmailDrafts, eq(gmailDrafts.id, sendAttempts.gmailDraftId))
@@ -83,6 +92,8 @@ export class EnrollInputRepository {
       resolvedBodyHash: r.resolvedBodyHash,
       finalizedEmailId: r.finalizedEmailId,
       emailDraftId: r.emailDraftId,
+      sequenceStep: r.sequenceStep,
+      outreachRecordId: r.outreachRecordId,
     };
   }
 }

@@ -11,7 +11,10 @@ import {
 // Bumped once for Phase 7A3B: `competitor_evidence_used` widened from the NONE-only literal to the
 // NONE | APPROVED_COMPETITOR_PATTERN_PACKAGE union. Prospect-only emails (raw model output = NONE)
 // remain fully compatible; the enriched value is set by the deterministic composer on the final artifact.
-export const EMAIL_SCHEMA_VERSION = 'email-copy-schema-3';
+// Bumped again for the sequence-aware reviewer: four fail-closed sequence-job booleans were added
+// (addsClarityNotRestart, compressedNotExpanded, pressureReduced, binaryReplyClose). Writer output
+// is unchanged.
+export const EMAIL_SCHEMA_VERSION = 'email-copy-schema-4';
 
 export const emailWriterSchema = z.object({
   subject_options: z.array(z.string().trim().min(1).max(MAX_SUBJECT_LENGTH)).length(3),
@@ -53,6 +56,12 @@ export const emailReviewSchema = z.object({
   buyerLanguageOnly: z.boolean(),
   conversationNotAudit: z.boolean(),
   confidentObservation: z.boolean(),
+  // Sequence-job gate. Every step reports all four; `isEmailReviewApprovable` enforces exactly the
+  // subset that applies to the step under review (see `email-review-gate.ts`).
+  addsClarityNotRestart: z.boolean(),
+  compressedNotExpanded: z.boolean(),
+  pressureReduced: z.boolean(),
+  binaryReplyClose: z.boolean(),
   problems: z.array(z.string().trim().min(1).max(300)).max(20),
   requiredRevisions: z.array(z.string().trim().min(1).max(300)).max(20),
 });
@@ -112,6 +121,10 @@ export const EMAIL_REVIEW_JSON_SCHEMA = strictObject(
     buyerLanguageOnly: { type: 'boolean' },
     conversationNotAudit: { type: 'boolean' },
     confidentObservation: { type: 'boolean' },
+    addsClarityNotRestart: { type: 'boolean' },
+    compressedNotExpanded: { type: 'boolean' },
+    pressureReduced: { type: 'boolean' },
+    binaryReplyClose: { type: 'boolean' },
     problems: { type: 'array', items: { type: 'string' } },
     requiredRevisions: { type: 'array', items: { type: 'string' } },
   },
@@ -121,6 +134,7 @@ export const EMAIL_REVIEW_JSON_SCHEMA = strictObject(
     'humanStylePass', 'punctuationPass', 'singlePrimaryCta',
     'sufficientlyPersonalized', 'evidenceSupported', 'demoAligned', 'persuasive',
     'singleObservation', 'buyerLanguageOnly', 'conversationNotAudit', 'confidentObservation',
+    'addsClarityNotRestart', 'compressedNotExpanded', 'pressureReduced', 'binaryReplyClose',
     'problems', 'requiredRevisions',
   ],
 );

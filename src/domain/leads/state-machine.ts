@@ -68,7 +68,35 @@ const BASE_TRANSITIONS: Record<LeadStatus, LeadStatus[]> = {
   // timezone or integrity problem parks for manual review.
   DRAFT_CREATED: ['SCHEDULED', 'NEEDS_MANUAL_REVIEW'],
   SCHEDULED: ['DRAFT_CREATED', 'SENT', 'NEEDS_MANUAL_REVIEW'],
-  SENT: ['REPLIED', 'BOUNCED', 'FAILED'],
+  // SENT is not the end of the LEAD when the lead is in a multi-email outreach sequence.
+  //
+  // WHY THIS EDGE EXISTS. `leads.status` is a single-track WORK-QUEUE POINTER: every stage
+  // (compose, review, approve, finalize, draft, schedule, send) selects its work by lead status. An
+  // outreach sequence is multi-track — four emails per lead — so a follow-up must re-enter that same
+  // queue or each stage would need a second, parallel queue, i.e. duplicated business logic and a
+  // second send path. The edge goes to EMAIL_DRAFTED (the composition stage) so every downstream
+  // approval, eligibility, fingerprint, and sending gate is traversed again IN FULL.
+  //
+  // WHAT IT DOES NOT MEAN. It is NOT a claim that the lead was never emailed. `leads.status` never
+  // was the record of what has been sent: `outreach_records` (a deliberately SEPARATE state machine)
+  // and the immutable `pipeline_events` timeline are authoritative for "has this business been
+  // contacted, and how far is its sequence". A lead mid-follow-up-composition therefore reads
+  // EMAIL_DRAFTED here while its outreach record still reads FOLLOW_UP_n_DUE.
+  //
+  // GUARDS (this edge is narrow by construction, not by convention):
+  //   * Only `EmailWriterService` can take it, and ONLY for a follow-up (sequence step >= 1). A
+  //     first email is refused from SENT, so nothing can rewind a lead by mistake.
+  //   * `generate-emails` selects only DEMO_READY / DEMO_DECIDED / OPPORTUNITY_READY, so the bulk
+  //     composer can never pick up a SENT lead.
+  //   * Every lifecycle consumer that must not act on an in-flight lead already blocks EMAIL_DRAFTED
+  //     and SENT identically (decision-maker discovery, contact resolution, lead-fact backfill), so
+  //     the re-entry cannot re-open paid contact work.
+  //   * Rejecting a follow-up in review returns the lead to SENT — it never REJECTS the lead.
+  //
+  // Whether a follow-up may be composed at all is decided by the OUTREACH record, never by this
+  // edge: the outreach state machine and the final pre-send suppression re-check block the sequence
+  // after a reply, bounce, unsubscribe, do-not-contact, booked meeting, or closed deal.
+  SENT: ['REPLIED', 'BOUNCED', 'FAILED', 'EMAIL_DRAFTED'],
   // A lead parked for manual review can be re-accepted or rejected.
   NEEDS_MANUAL_REVIEW: [
     'READY_FOR_QUALIFICATION',

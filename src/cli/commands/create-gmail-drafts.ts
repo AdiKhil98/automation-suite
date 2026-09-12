@@ -35,7 +35,9 @@ export async function createGmailDraftsCommand(ctx: CliContext, cliOpts: CreateG
   const counts = new Map<GmailOutcome, number>();
   for (const lead of leads) {
     const data = await inputRepo.latest(lead.id);
-    const r = await service.createDraft({ leadId: lead.id, leadStatus: lead.status, finalization: data.finalization, subject: data.subject, recipientEmail: data.recipientEmail }, runId);
+    // `threadId` is non-null only for a sequence follow-up, so the follow-up lands in the thread the
+    // recipient already has. A first email passes null and behaves exactly as before.
+    const r = await service.createDraft({ leadId: lead.id, leadStatus: lead.status, finalization: data.finalization, subject: data.subject, recipientEmail: data.recipientEmail, threadId: data.threadId }, runId);
     counts.set(r.outcome, (counts.get(r.outcome) ?? 0) + 1);
   }
   await runs.finish(runId, 'COMPLETED', JSON.stringify(Object.fromEntries(counts)));

@@ -2,26 +2,45 @@ import { utcToLocal, zonedWallClockToUtc } from '../schedule/timezone.js';
 import { OUTREACH_NO_FOLLOWUP, type OutreachStatus } from './status.js';
 
 /**
- * Phase 17A follow-up scheduling — CALCULATION ONLY. This module computes explicit,
- * timezone-aware follow-up due dates and overdue amounts. It NEVER sends: there is no
- * code path here (or anywhere in Phase 17A) that dispatches a follow-up email.
+ * Follow-up scheduling — CALCULATION ONLY. This module computes explicit, timezone-aware
+ * follow-up due dates and overdue amounts. It NEVER sends: no code path here dispatches an
+ * email. Dispatch happens only through the production SendService.
+ *
+ * SEQUENCE NAMING: internal step 1 is the lesson's Follow-up #2, step 2 is Follow-up #3, and
+ * step 3 is Follow-up #4 (the final email). See `sequence.ts` for the complete mapping.
  */
 
-export type FollowupStep = 1 | 2;
+export type FollowupStep = 1 | 2 | 3;
 
 export interface SequencePolicy {
-  /** Whole-day offsets from the previous step's sent time to the next step's due date. */
+  /**
+   * Whole-day offsets from the PREVIOUS sent email to this step's due date. The lesson expresses
+   * the sequence in absolute days (Outreach #1 = day 0, Follow-up #2 = day 2, #3 = day 4,
+   * #4 = day 7); because these delays are relative to the previous send, that becomes 2, 2, 3.
+   */
   step1DelayDays: number;
   step2DelayDays: number;
+  step3DelayDays: number;
   /** Local hour (0-23) in the recipient timezone at which a follow-up becomes due. */
   dueHourLocal: number;
 }
 
+/** Lesson timing: day 0 -> +2 -> +2 -> +3 (absolute days 0, 2, 4, 7). */
 export const DEFAULT_SEQUENCE_POLICY: SequencePolicy = {
-  step1DelayDays: 3,
-  step2DelayDays: 5,
+  step1DelayDays: 2,
+  step2DelayDays: 2,
+  step3DelayDays: 3,
   dueHourLocal: 9,
 };
+
+/** The whole-day delay this step waits after the previous sent email. */
+export function stepDelayDays(step: FollowupStep, policy: SequencePolicy): number {
+  switch (step) {
+    case 1: return policy.step1DelayDays;
+    case 2: return policy.step2DelayDays;
+    case 3: return policy.step3DelayDays;
+  }
+}
 
 /**
  * Compute the UTC instant a follow-up becomes due: `previousSentAt` advanced by the
@@ -34,7 +53,7 @@ export function computeFollowupDueUtc(args: {
   timezone: string;
   policy: SequencePolicy;
 }): Date {
-  const delayDays = args.step === 1 ? args.policy.step1DelayDays : args.policy.step2DelayDays;
+  const delayDays = stepDelayDays(args.step, args.policy);
   const local = utcToLocal(args.timezone, args.previousSentAtMs);
   // Advance the local calendar date by delayDays, then pin to the due hour.
   const base = Date.UTC(local.year, local.month - 1, local.day + delayDays);

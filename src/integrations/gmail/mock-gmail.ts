@@ -25,7 +25,10 @@ export class MockGmailDraftProvider implements GmailDraftProvider {
     this.created.push(req);
     if (this.script.create) return this.script.create;
     const id = `mock-draft-${req.idempotencyFingerprint.slice(0, 16)}`;
-    return { outcome: 'ok', ref: { draftId: id, messageId: `mock-msg-${req.idempotencyFingerprint.slice(0, 12)}`, threadId: `mock-thread-${req.idempotencyFingerprint.slice(0, 12)}` } };
+    // A follow-up supplies the thread it continues; Gmail keeps the draft in that thread, and so
+    // does the mock. A first email has none and gets a fresh mock thread.
+    const threadId = req.threadId ?? `mock-thread-${req.idempotencyFingerprint.slice(0, 12)}`;
+    return { outcome: 'ok', ref: { draftId: id, messageId: `mock-msg-${req.idempotencyFingerprint.slice(0, 12)}`, threadId } };
   }
 
   async verifyAccount(expectedEmail: string): Promise<AccountVerification> {

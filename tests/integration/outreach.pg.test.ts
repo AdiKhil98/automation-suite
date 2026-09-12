@@ -16,7 +16,7 @@ import { outreachDeliveryEvents, outreachMessages, outreachRecords } from '../..
 const testDatabase = requireIntegrationTestDatabase();
 const TZ = 'Europe/Berlin';
 const NOW = Date.parse('2026-07-20T12:00:00Z');
-const policy: SequencePolicy = { step1DelayDays: 3, step2DelayDays: 5, dueHourLocal: 9 };
+const policy: SequencePolicy = { step1DelayDays: 2, step2DelayDays: 2, step3DelayDays: 3, dueHourLocal: 9 };
 
 describe('outreach tracking (PostgreSQL)', () => {
   let handle: DbHandle;
@@ -51,6 +51,63 @@ describe('outreach tracking (PostgreSQL)', () => {
     expect(rows).toHaveLength(2);
     // Exact subject/body preserved; nothing overwritten.
     expect(rows.map((r) => r.subject).sort()).toEqual(['Erste Nachricht', 'Nachfrage']);
+  });
+
+  it('walks the whole four-email sequence through PostgreSQL, ending with nothing scheduled (migration 0044)', async () => {
+    // Exercises the migration's widened CHECK constraints and the confirmed-follow-up bridge through
+    // the REAL Drizzle unit of work, which the in-memory unit tests cannot prove.
+    const { leadId, campaignId } = await seed();
+    const created = await svc().track({ campaignId, leadId, contactEmail: 'seq@clinic.example', timezone: TZ });
+    const recId = created.record!.id;
+
+    await svc().enrollConfirmedSend({
+      outreachRecordId: recId, subject: 'Something I noticed', body: 'Initial body',
+      gmailMessageId: 'g-initial', gmailThreadId: 'thr-seq', sentAt: new Date(NOW),
+      sendAttemptId: 'att-0', policy,
+    });
+
+    const steps: Array<1 | 2 | 3> = [1, 2, 3];
+    for (const step of steps) {
+      await svc().transition(recId, step === 1 ? 'FOLLOW_UP_1_DUE' : step === 2 ? 'FOLLOW_UP_2_DUE' : 'FOLLOW_UP_3_DUE');
+      const r = await svc().enrollConfirmedFollowup({
+        outreachRecordId: recId, expectedStep: step,
+        subject: 'Re: Something I noticed', body: `Follow-up ${String(step)} body`,
+        gmailMessageId: `g-f${String(step)}`, gmailThreadId: 'thr-seq',
+        sentAt: new Date(NOW + step * 86_400_000), sendAttemptId: `att-${String(step)}`, policy,
+      });
+      expect(r.outcome).toBe('ENROLLED');
+      // Step 3 is the final email: nothing further may ever be scheduled.
+      expect(r.nextFollowup === null).toBe(step === 3);
+    }
+
+    const rec = (await handle.db.select().from(outreachRecords).where(eq(outreachRecords.id, recId)))[0];
+    expect(rec?.status).toBe('FOLLOW_UP_3_SENT');
+    expect(rec?.sequenceStep).toBe(3);
+    expect(rec?.nextFollowupAt).toBeNull();
+
+    const msgs = await handle.db.select().from(outreachMessages).where(eq(outreachMessages.outreachRecordId, recId));
+    expect(msgs.map((m) => m.sequenceStep).sort()).toEqual([0, 1, 2, 3]);
+    expect(msgs.filter((m) => m.messageType === 'FOLLOW_UP')).toHaveLength(3);
+  });
+
+  it('the Gmail-message unique index blocks a duplicate confirmed follow-up at the database level', async () => {
+    const { leadId, campaignId } = await seed();
+    const created = await svc().track({ campaignId, leadId, contactEmail: 'idem@clinic.example', timezone: TZ });
+    const recId = created.record!.id;
+    await svc().enrollConfirmedSend({
+      outreachRecordId: recId, subject: 'S', body: 'B', gmailMessageId: 'g-i2', gmailThreadId: 'thr-i',
+      sentAt: new Date(NOW), sendAttemptId: 'a0', policy,
+    });
+    await svc().transition(recId, 'FOLLOW_UP_1_DUE');
+    const input = {
+      outreachRecordId: recId, expectedStep: 1 as const, subject: 'Re: S', body: 'F1',
+      gmailMessageId: 'g-f1-dup', gmailThreadId: 'thr-i', sentAt: new Date(NOW), sendAttemptId: 'a1', policy,
+    };
+    expect((await svc().enrollConfirmedFollowup(input)).outcome).toBe('ENROLLED');
+    // A recovery run re-enrolling the same confirmed Gmail message changes nothing.
+    expect((await svc().enrollConfirmedFollowup(input)).outcome).toBe('ALREADY_ENROLLED');
+    const msgs = await handle.db.select().from(outreachMessages).where(eq(outreachMessages.outreachRecordId, recId));
+    expect(msgs.filter((m) => m.gmailMessageId === 'g-f1-dup')).toHaveLength(1);
   });
 
   it('enforces the duplicate-active unique index at the database level', async () => {

@@ -199,4 +199,49 @@ describe('runScheduledSends self-healing recovery (never sends)', () => {
     // enroll called for the recovered attempt first, then the freshly-sent lead.
     expect(h.calls.enrolled).toEqual([['old', 'att-old'], ['lead-a', 'att-lead-a']]);
   });
+
+  it('heals a confirmed FOLLOW-UP whose tracking crashed, with no resend', async () => {
+    // The recovery sweep is message-type agnostic: it hands the attempt to the SAME idempotent
+    // bridge, which routes on the durable sequence provenance stored with the attempt's own draft.
+    // A follow-up confirmed by Gmail but never tracked is healed exactly like an initial send.
+    const h = harness({ unenrolled: [{ leadId: 'lead-followup', attemptId: 'att-f2' }], due: [] });
+    const r = await runScheduledSends(h.deps);
+    expect(r.recovered).toEqual([{ leadId: 'lead-followup', attemptId: 'att-f2', outcome: 'ENROLLED' }]);
+    expect(h.calls.enrolled).toEqual([['lead-followup', 'att-f2']]);
+    expect(h.calls.sent).toEqual([]); // the email already went out; recovery NEVER resends
+  });
+
+  it('surfaces STEP_MISMATCH as a recovery failure and still never resends', async () => {
+    // Durable provenance disagreed with the outreach state, so the bridge wrote nothing. That is
+    // an alerting condition for a human — never a reason to send the email again.
+    const h = harness({
+      unenrolled: [{ leadId: 'lead-followup', attemptId: 'att-f2' }],
+      enrollResults: { 'att-f2': 'STEP_MISMATCH' },
+      due: [],
+    });
+    const r = await runScheduledSends(h.deps);
+    expect(r.recoveryFailures).toEqual([{ leadId: 'lead-followup', attemptId: 'att-f2', outcome: 'STEP_MISMATCH' }]);
+    expect(r.recovered).toEqual([]);
+    expect(h.calls.sent).toEqual([]);
+  });
+});
+
+describe('runScheduledSends — an outreach-suppressed follow-up', () => {
+  it('is recorded as a non-sent failure and does not stop the run', async () => {
+    // `sendOne` performs the final suppression re-check and reports OUTREACH_SUPPRESSED before any
+    // preflight or provider call, so a follow-up whose prospect replied is simply not sent.
+    const h = harness({
+      due: ['lead-suppressed', 'lead-ok'],
+      sendResults: {
+        'lead-suppressed': { outcome: 'OUTREACH_SUPPRESSED', attemptId: null, reason: 'REPLY_DETECTED:outreach record is REPLIED_POSITIVE' },
+      },
+    });
+    const r = await runScheduledSends(h.deps);
+    expect(r.failures).toEqual([
+      { leadId: 'lead-suppressed', outcome: 'OUTREACH_SUPPRESSED', reason: 'REPLY_DETECTED:outreach record is REPLIED_POSITIVE' },
+    ]);
+    // No attempt was recorded for it, and the run continued to the next lead.
+    expect(r.sent.map((x) => x.leadId)).toEqual(['lead-ok']);
+    expect(h.calls.enrolled).toEqual([['lead-ok', 'att-lead-ok']]);
+  });
 });

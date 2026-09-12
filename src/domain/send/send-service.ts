@@ -11,7 +11,11 @@ import { approvedEnvelopeHash, compareProviderEnvelope, confirmationFingerprint,
 export type SendOutcome = 'READY' | 'SENT_CONFIRMED' | 'SENDING_DISABLED' | 'OUTBOUND_ACTIONS_DISABLED' | 'DRY_RUN_ACTIVE' | 'INVALID_ELIGIBILITY' |
   'READINESS_INVALID' | 'NOT_CONFIRMED' | 'PROVIDER_VERIFICATION_FAILED' | 'BINDING_INVALIDATED' |
   'TOO_LATE' | 'RECIPIENT_SUPPRESSED' | 'NOT_DUE' | 'ALREADY_SENT' | 'DUPLICATE_PREVENTED' |
-  'RATE_LIMITED' | 'DEFINITIVE_FAILURE' | 'AUTH_ERROR' | 'OUTCOME_UNKNOWN' | 'DAILY_CAP_REACHED';
+  'RATE_LIMITED' | 'DEFINITIVE_FAILURE' | 'AUTH_ERROR' | 'OUTCOME_UNKNOWN' | 'DAILY_CAP_REACHED' |
+  // A prepared FOLLOW-UP whose outreach record became blocked (reply/bounce/unsubscribe/DNC/meeting/
+  // closed) between preparation and its due time. Reported by the scheduled runner's final
+  // suppression re-check BEFORE any preflight or provider call — never by the provider.
+  'OUTREACH_SUPPRESSED';
 export type SendAttemptStatus = 'RESERVED' | 'CALL_STARTED' | 'SENT_CONFIRMED' | 'DEFINITIVE_FAILURE' | 'OUTCOME_UNKNOWN' | 'DUPLICATE_PREVENTED';
 export type SendSuppressionScope = 'email' | 'domain' | 'phone' | 'place_id';
 

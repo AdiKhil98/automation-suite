@@ -35,6 +35,7 @@ function sequencePolicy(ctx: CliContext): SequencePolicy {
   return {
     step1DelayDays: ctx.config.OUTREACH_FOLLOWUP_1_DELAY_DAYS,
     step2DelayDays: ctx.config.OUTREACH_FOLLOWUP_2_DELAY_DAYS,
+    step3DelayDays: ctx.config.OUTREACH_FOLLOWUP_3_DELAY_DAYS,
     dueHourLocal: ctx.config.OUTREACH_FOLLOWUP_DUE_HOUR_LOCAL,
   };
 }

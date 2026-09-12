@@ -56,9 +56,9 @@ function compose(over: { pkg?: EnrichmentPackage; d?: EmailWriterParsed } = {}) 
 }
 
 describe('composeEnrichedEmail — final artifact', () => {
-  it('the FINAL artifact (not the raw model output) is schema-3 + APPROVED_COMPETITOR_PATTERN_PACKAGE', () => {
+  it('the FINAL artifact (not the raw model output) is schema-4 + APPROVED_COMPETITOR_PATTERN_PACKAGE', () => {
     const c = compose();
-    expect(c.schemaVersion).toBe('email-copy-schema-3');
+    expect(c.schemaVersion).toBe('email-copy-schema-4');
     expect(c.artifact.competitor_evidence_used).toBe('APPROVED_COMPETITOR_PATTERN_PACKAGE');
     expect(c.schemaOk).toBe(true);
     expect(c.ok).toBe(true);

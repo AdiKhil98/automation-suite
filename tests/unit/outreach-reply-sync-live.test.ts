@@ -53,7 +53,7 @@ async function seededRecord() {
   return { store, svc, rec, threads };
 }
 
-const policy = { step1DelayDays: 3, step2DelayDays: 5, dueHourLocal: 9 };
+const policy = { step1DelayDays: 2, step2DelayDays: 2, step3DelayDays: 3, dueHourLocal: 9 };
 
 describe('live reply sync via HttpGmailThreadReader', () => {
   it('detects an inbound reply and applies it', async () => {
