@@ -69,7 +69,7 @@ describe('dashboard pages', () => {
 
 // --- Review service guards + independence ---
 
-interface Model { demo: { id: string; status: string } | null; email: { id: string; humanDecision: string | null } | null; leadStatus: string; transitions: string[]; demoWrites: string[]; emailWrites: string[]; }
+interface Model { demo: { id: string; status: string } | null; email: { id: string; humanDecision: string | null; sequenceStep: number } | null; leadStatus: string; transitions: string[]; demoWrites: string[]; emailWrites: string[]; }
 
 function fakeStack(m: Model): { uow: ReviewUnitOfWork; read: ReviewReadRepo } {
   const write: ReviewWriteRepo = {
@@ -93,7 +93,7 @@ function fakeStack(m: Model): { uow: ReviewUnitOfWork; read: ReviewReadRepo } {
   return { uow, read };
 }
 const svc = (m: Model) => new ReviewService({ ...fakeStack(m), logger: pino({ level: 'silent' }) });
-const model = (over: Partial<Model> = {}): Model => ({ demo: { id: 'd1', status: 'GENERATED_PENDING_REVIEW' }, email: { id: 'e1', humanDecision: null }, leadStatus: 'READY_FOR_HUMAN_APPROVAL', transitions: [], demoWrites: [], emailWrites: [], ...over });
+const model = (over: Partial<Model> = {}): Model => ({ demo: { id: 'd1', status: 'GENERATED_PENDING_REVIEW' }, email: { id: 'e1', humanDecision: null, sequenceStep: 0 }, leadStatus: 'READY_FOR_HUMAN_APPROVAL', transitions: [], demoWrites: [], emailWrites: [], ...over });
 
 describe('ReviewService', () => {
   it('demo approval only touches the demo; no lead transition, no email write', async () => {
@@ -127,6 +127,29 @@ describe('ReviewService', () => {
       expect(await svc(m).decideEmail('l1', 'REJECTED', 'off-tone')).toBe('DONE');
       expect(m.transitions).toEqual(['REJECTED']);
     }
+  });
+
+  it('a rejected FOLLOW-UP returns the lead to SENT and never REJECTS it', async () => {
+    // Rejecting follow-up copy is a verdict on the DRAFT, not on the prospect. REJECTED is terminal,
+    // so rejecting the lead would destroy a live, already-contacted prospect over one bad draft.
+    const m = model({ email: { id: 'e2', humanDecision: null, sequenceStep: 2 } });
+    expect(await svc(m).decideEmail('l1', 'REJECTED', 'restarts the pitch')).toBe('DONE');
+    expect(m.emailWrites).toEqual(['REJECTED']); // the verdict is still recorded on the draft
+    expect(m.transitions).toEqual(['SENT']);
+    expect(m.transitions).not.toContain('REJECTED');
+    expect(m.leadStatus).toBe('SENT');
+  });
+
+  it('an APPROVED follow-up advances exactly like a first email', async () => {
+    const m = model({ email: { id: 'e2', humanDecision: null, sequenceStep: 1 } });
+    expect(await svc(m).decideEmail('l1', 'APPROVED', null)).toBe('DONE');
+    expect(m.transitions).toEqual(['HUMAN_APPROVED']);
+  });
+
+  it('a rejected FIRST email still rejects the lead (unchanged behaviour)', async () => {
+    const m = model({ email: { id: 'e1', humanDecision: null, sequenceStep: 0 } });
+    expect(await svc(m).decideEmail('l1', 'REJECTED', 'off-tone')).toBe('DONE');
+    expect(m.transitions).toEqual(['REJECTED']);
   });
   it('rejects email action from a non-actionable lead state', async () => {
     const m = model({ leadStatus: 'DEMO_READY' });

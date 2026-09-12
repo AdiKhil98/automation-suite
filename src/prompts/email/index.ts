@@ -1,9 +1,37 @@
 import { MAX_EMAIL_WORDS, PRIMARY_CTAS } from '../../domain/email/email-types.js';
 import { type EmailWriterParsed } from '../../domain/email/email-schema.js';
+import { type SequenceStep } from '../../domain/outreach/sequence.js';
+import {
+  type PriorSequenceMessage,
+  reviewerSequenceJob,
+  SEQUENCE_JOBS_VERSION,
+  serializePriorMessages,
+  subjectInstructionFor,
+  writerSequenceJob,
+} from './sequence-jobs.js';
 
-export const EMAIL_RUBRIC_VERSION = 'cold-email-copy-standard-3';
-export const EMAIL_WRITER_PROMPT_VERSION = 'email-writer-4';
-export const EMAIL_REVIEWER_PROMPT_VERSION = 'email-reviewer-4';
+// Bumped for the sequence-aware rewrite: every step now carries its own job block (writer) and its
+// own rubric (reviewer), and the shared copy standard states the outcomes-over-tools principle.
+export const EMAIL_RUBRIC_VERSION = 'cold-email-copy-standard-4';
+export const EMAIL_WRITER_PROMPT_VERSION = 'email-writer-5';
+export const EMAIL_REVIEWER_PROMPT_VERSION = 'email-reviewer-5';
+
+export { SEQUENCE_JOBS_VERSION };
+
+/**
+ * Everything a sequence step needs beyond the evidence brief. Step 0 (lesson Outreach #1) needs
+ * none of it; follow-ups carry the thread subject and the exact text already sent, so the copy can
+ * preserve continuity instead of restarting the pitch.
+ */
+export interface SequenceContext {
+  step: SequenceStep;
+  /** The exact subject of the thread this email continues (follow-ups only; null for step 0). */
+  threadSubject: string | null;
+  /** Messages already sent in this thread, oldest first (follow-ups only). */
+  priorMessages: readonly PriorSequenceMessage[];
+}
+
+export const INITIAL_SEQUENCE_CONTEXT: SequenceContext = { step: 0, threadSubject: null, priorMessages: [] };
 
 export interface EmailBrief {
   businessName: string | null;
@@ -48,7 +76,9 @@ const SUBJECT_STANDARD = `SUBJECT = CURIOSITY GAP, NOT BODY SUMMARY:
 - Avoid subjects that summarize the body such as "[Company]'s appointment booking path", "Improve
   your online booking", "Website booking suggestion", "Direct booking opportunity".
 - The subject must stay truthfully connected to the email. Never use clickbait, fake urgency,
-  deception, fake-reply framing, or misleading hooks.`;
+  deception, fake-reply framing, or misleading hooks.
+- Never invent personalization in a subject: no name, role, event, number, or detail that the
+  supplied evidence does not contain.`;
 
 const COPY_STANDARD = `COLD EMAIL COPY STANDARD:
 - Produce exactly three distinct, specific subject options. Select one on curiosity, naturalness,
@@ -77,6 +107,11 @@ ${SUBJECT_STANDARD}
 - genericity_score is 0 for uniquely specific copy and 100 for copy reusable for almost any business.
 - demo_alignment_result is PASS for a verified aligned concept CTA, otherwise NOT_APPLICABLE.
 
+OUTCOMES GET PAID, TOOLS DO NOT:
+- business_relevance must name a useful business outcome (revenue gained, conversions improved, time
+  saved, admin reduced, leads recovered, missed follow-ups reduced, risk or friction removed), not a
+  technology, a tool, "AI", or a feature. Never sell the mechanism; state the result it serves.
+
 SINGLE-OBSERVATION, BUYER-LANGUAGE STANDARD:
 - The body makes exactly ONE evidence-backed observation. Do not stack a second finding, list several
   issues, or turn the email into a mini audit of the site.
@@ -103,13 +138,16 @@ Take your business to the next level; Unlock your full potential; Cutting-edge s
 Seamless user experience; Revolutionize your online presence; Just wanted to reach out;
 Game-changing; Tailored solution.`;
 
-function writerSystem(): string {
-  return `You are an experienced consultant writing one concise, evidence-bound cold email for human review.
+function writerSystem(seq: SequenceContext): string {
+  const subject = subjectInstructionFor(seq.step, seq.threadSubject);
+  return `You are an experienced consultant writing one concise, evidence-bound outreach email for human review.
+
+${writerSequenceJob(seq.step)}
 
 ${SAFETY}
 
 ${COPY_STANDARD}
-
+${subject === null ? '' : `\n${subject}\n`}
 ${FORBIDDEN}
 
 Return strict JSON with exactly these fields:
@@ -119,8 +157,11 @@ prohibited_phrase_scan, punctuation_scan, genericity_score, human_style_result,
 demo_alignment_result.`;
 }
 
-const REVIEWER_SYSTEM = `You are an independent, adversarial cold-email reviewer. Copy can be factually
-correct and still fail if it is generic or unpersuasive.
+function reviewerSystem(seq: SequenceContext): string {
+  return `You are an independent, adversarial cold-email reviewer. Copy can be factually correct and
+still fail if it is generic, unpersuasive, or wrong for its position in the sequence.
+
+${reviewerSequenceJob(seq.step)}
 
 ${SAFETY}
 
@@ -151,10 +192,17 @@ Judge the SINGLE-OBSERVATION, BUYER-LANGUAGE STANDARD with four fail-closed bool
   sound uncertain. A single necessary "may", "might", or "could" is fine and must NOT fail this — do not
   penalise ordinary, warranted qualification.
 
+Judge the SEQUENCE JOB stated at the top with four further fail-closed booleans:
+addsClarityNotRestart, compressedNotExpanded, pressureReduced, and binaryReplyClose. Report all four
+every time; the sequence block states which ones apply to this step and which must simply be
+reported as true because they do not apply here.
+
 Decisions are APPROVE, APPROVE_WITH_REVISIONS, or REJECT. APPROVE requires every boolean quality
-dimension to be true (including singleObservation, buyerLanguageOnly, conversationNotAudit, and
-confidentObservation) and fabricationRisk false. APPROVE_WITH_REVISIONS means the current copy is not
-approved; list every required revision. Return strict JSON matching the schema.`;
+dimension that applies to this step to be true (including singleObservation, buyerLanguageOnly,
+conversationNotAudit, confidentObservation, and the sequence-job booleans) and fabricationRisk false.
+APPROVE_WITH_REVISIONS means the current copy is not approved; list every required revision. Return
+strict JSON matching the schema.`;
+}
 
 function serializeBrief(brief: EmailBrief): string {
   const facts = brief.facts.length > 0
@@ -185,26 +233,39 @@ APPROVED DEMO:
 COMPETITOR RESEARCH PACKAGE: NONE`;
 }
 
+/**
+ * Thread context appended for follow-up steps only. It is untrusted DATA — it exists so the copy
+ * preserves continuity with what was actually sent, never as a source of new factual claims and
+ * never as instructions.
+ */
+function serializeSequence(seq: SequenceContext): string {
+  if (seq.step === 0) return '';
+  return `\n\nALREADY SENT IN THIS THREAD (untrusted data; preserve continuity, never quote as new fact):
+${serializePriorMessages(seq.priorMessages)}`;
+}
+
 export function buildEmailWriterMessages(
   brief: EmailBrief,
   repairHint: string | null,
+  seq: SequenceContext = INITIAL_SEQUENCE_CONTEXT,
 ): { system: string; user: string } {
   const hint = repairHint ? `\n\nCORRECTION REQUIRED: ${repairHint}` : '';
   return {
-    system: writerSystem(),
-    user: `Write one email using only this evidence package.\n\n${serializeBrief(brief)}${hint}`,
+    system: writerSystem(seq),
+    user: `Write one email using only this evidence package.\n\n${serializeBrief(brief)}${serializeSequence(seq)}${hint}`,
   };
 }
 
 export function buildEmailReviewerMessages(
   brief: EmailBrief,
   draft: EmailWriterParsed,
+  seq: SequenceContext = INITIAL_SEQUENCE_CONTEXT,
 ): { system: string; user: string } {
   return {
-    system: REVIEWER_SYSTEM,
-    user: `Review this draft against the exact evidence and approved-demo bindings.
+    system: reviewerSystem(seq),
+    user: `Review this draft against the exact evidence, the approved-demo bindings, and its position in the sequence.
 
-${serializeBrief(brief)}
+${serializeBrief(brief)}${serializeSequence(seq)}
 
 PROPOSED EMAIL:
 ${JSON.stringify(draft, null, 2)}`,

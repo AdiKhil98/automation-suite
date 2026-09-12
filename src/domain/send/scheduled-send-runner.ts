@@ -19,7 +19,12 @@ export type ScheduledRunOutcome =
   | 'NO_AUTHORIZATION'
   | 'CAP_REACHED';
 
-export type EnrollmentOutcome = 'ENROLLED' | 'ALREADY_ENROLLED' | 'RECORD_NOT_ENROLLABLE' | 'ENROLL_FAILED';
+/**
+ * `STEP_MISMATCH` means durable sequence provenance and the outreach record's own state disagreed
+ * about which follow-up a confirmed send represented. Like every other non-enrolled outcome it is
+ * surfaced for alerting and NEVER causes a resend — the email already went out.
+ */
+export type EnrollmentOutcome = 'ENROLLED' | 'ALREADY_ENROLLED' | 'RECORD_NOT_ENROLLABLE' | 'STEP_MISMATCH' | 'ENROLL_FAILED';
 
 export interface SendOneResult {
   outcome: SendOutcome;

@@ -38,6 +38,12 @@ export interface GmailInput {
   finalization: { id: string; resolvedBody: string; resolvedBodyHash: string; finalHumanDecision: string | null } | null;
   subject: string;
   recipientEmail: string | null;
+  /**
+   * The existing Gmail thread this email continues (sequence FOLLOW-UPS only). When present the
+   * draft is created INSIDE that thread, so the sequence reads as one conversation. Absent for a
+   * first email — which keeps the pre-threading behaviour exactly.
+   */
+  threadId?: string | null;
 }
 
 export interface GmailDraftRecord {
@@ -166,7 +172,7 @@ export class GmailDraftService {
     await this.deps.store.reserveRun(run);
 
     const raw = buildRawMessage({ fromName: c.senderName, fromEmail: c.gmailAccount, toEmail: recipient, subject: input.subject, body: resolvedBody });
-    const res = await this.deps.provider.createDraft({ rawBase64Url: raw, idempotencyFingerprint: fingerprint });
+    const res = await this.deps.provider.createDraft({ rawBase64Url: raw, idempotencyFingerprint: fingerprint, threadId: input.threadId ?? null });
     if (res.outcome === 'rate_limited') return this.terminal(input, runId, 'RATE_LIMITED', null, 'create_rate_limited', run.id);
     if (res.outcome === 'transient') return this.terminal(input, runId, 'TRANSIENT_ERROR', null, 'create_transient', run.id);
     if (res.outcome === 'auth_error') return this.terminal(input, runId, 'AUTH_ERROR', 'NEEDS_MANUAL_REVIEW', 'auth_error', run.id);

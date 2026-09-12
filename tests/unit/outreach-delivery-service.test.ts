@@ -9,7 +9,7 @@ const TZ = 'Europe/Berlin';
 const NOW = Date.parse('2026-07-22T12:00:00Z');
 const SENT_AT = Date.parse('2026-07-20T09:00:00Z');
 const BOUNCE_AT = Date.parse('2026-07-20T09:01:00Z');
-const policy = { step1DelayDays: 3, step2DelayDays: 5, dueHourLocal: 9 };
+const policy = { step1DelayDays: 2, step2DelayDays: 2, step3DelayDays: 3, dueHourLocal: 9 };
 
 /** Seed a record that has been sent (INITIAL_SENT) with one pending follow-up. */
 async function sentRecord(store: InMemoryOutreachStore, svc: OutreachService) {

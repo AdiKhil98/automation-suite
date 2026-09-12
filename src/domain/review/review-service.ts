@@ -44,7 +44,7 @@ export interface ReviewReadRepo {
 /** Transaction-scoped writes + minimal reads for guarding. */
 export interface ReviewWriteRepo {
   latestDemo(leadId: string): Promise<{ id: string; status: string } | null>;
-  latestEmail(leadId: string): Promise<{ id: string; humanDecision: string | null } | null>;
+  latestEmail(leadId: string): Promise<{ id: string; humanDecision: string | null; sequenceStep: number } | null>;
   setDemoDecision(demoId: string, decision: HumanDecision, notes: string | null, actor: string, now: Date): Promise<void>;
   setEmailHumanDecision(emailId: string, decision: HumanDecision, notes: string | null, actor: string, now: Date): Promise<void>;
   latestFinalization(leadId: string): Promise<{ id: string; finalHumanDecision: string | null } | null>;
@@ -117,7 +117,17 @@ export class ReviewService {
       const now = new Date();
       await repos.write.setEmailHumanDecision(email.id, decision, notes, this.actor, now);
 
-      if (decision === 'REJECTED') {
+      if (decision === 'REJECTED' && email.sequenceStep > 0) {
+        // A rejected FOLLOW-UP is a rejection of THIS COPY, never of the prospect. Rejecting the
+        // lead here would be terminal (REJECTED has no way back except an audited reopen) and would
+        // destroy a live, already-contacted prospect over one unsatisfactory draft. Instead the lead
+        // returns to SENT — exactly where it stood before the sequence re-entry — leaving the
+        // outreach record and its history untouched. The follow-up's own pending row is reconciled
+        // (cancelled) by the unattended preparation runner, which sees the REJECTED draft.
+        if (lead.status === 'READY_FOR_HUMAN_APPROVAL') {
+          await repos.leadService.transition(leadId, 'SENT');
+        }
+      } else if (decision === 'REJECTED') {
         await repos.leadService.transition(leadId, 'REJECTED');
       } else if (lead.status === 'READY_FOR_HUMAN_APPROVAL') {
         // Reply-CTA email (no pending demo URL): the human approval advances the lead.
@@ -125,7 +135,8 @@ export class ReviewService {
       }
       // WAITING_FOR_DEMO_URL + APPROVED: wording approved, but the lead stays waiting for the
       // deployed URL (Phase 11). Not send-ready; no transition.
-      await repos.events.record({ leadId, runId: null, type: 'NOTE', fromStatus: null, toStatus: null, message: `email ${decision.toLowerCase()} (human review${lead.status === 'WAITING_FOR_DEMO_URL' && decision === 'APPROVED' ? ', wording only — awaiting demo URL' : ''})`, data: { emailId: email.id, decision } });
+      const followupNote = email.sequenceStep > 0 ? ` — outreach follow-up step ${String(email.sequenceStep)}${decision === 'REJECTED' ? '; lead returned to SENT, NOT rejected' : ''}` : '';
+      await repos.events.record({ leadId, runId: null, type: 'NOTE', fromStatus: null, toStatus: null, message: `email ${decision.toLowerCase()} (human review${lead.status === 'WAITING_FOR_DEMO_URL' && decision === 'APPROVED' ? ', wording only — awaiting demo URL' : ''})${followupNote}`, data: { emailId: email.id, decision, sequenceStep: email.sequenceStep } });
       return 'DONE';
     });
   }

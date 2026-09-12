@@ -30,7 +30,7 @@ describe('migration 0023 Demo Engine V2 foundation', () => {
     // resolutions: the PERSONAL_VERIFIED / GENERIC_OFFICIAL recipient contract) as the tail.
     const demoV2Entries = journal.entries.filter((entry) => entry.tag.startsWith('00') && entry.tag.includes('demo_v2'));
     expect(demoV2Entries.at(-1)?.tag).toBe('0025_demo_v2_visual_reviews');
-    expect(journal.entries.at(-1)?.tag).toBe('0043_contact_resolutions');
+    expect(journal.entries.at(-1)?.tag).toBe('0044_outreach_sequence_followup_3');
   });
 
   it('creates exactly the 21 isolated approved V2 tables and changes no V1 table', () => {

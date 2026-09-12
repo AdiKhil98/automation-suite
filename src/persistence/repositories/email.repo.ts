@@ -3,6 +3,16 @@ import { type EmailPersist, type EmailRunStore } from '../../domain/email/email-
 import { eq } from 'drizzle-orm';
 import { type DbExecutor } from '../db.js';
 import { emailDrafts, emailFactInputs, emailFindingInputs, modelCalls } from '../schema.js';
+import { isSequenceStep, type SequenceStep } from '../../domain/outreach/sequence.js';
+
+/**
+ * Narrow a stored `sequence_step` to the sequence type. The column is CHECK-constrained to 0..3, so
+ * anything else means the row predates or violates that constraint; fail closed to 0 (INITIAL)
+ * rather than asserting a follow-up position that was never written.
+ */
+function toSequenceStep(value: number): SequenceStep {
+  return isSequenceStep(value) ? value : 0;
+}
 
 /** Persists one email run: the draft (with inline reviewer verdict), relational provenance
  * (fact + finding inputs), and the LLM model_calls (auditRunId = null; per-lead cost). */
@@ -19,6 +29,11 @@ export class EmailRepository implements EmailRunStore {
       demoId: r.demoId, writerPromptVersion: r.writerPromptVersion, schemaVersion: r.schemaVersion,
       rulesVersion: r.rulesVersion, provider: r.provider, requestedWriterModel: r.requestedWriterModel,
       writerResponseId: r.writerResponseId,
+      // Sequence provenance (migration 0044). Pre-existing rows are step 0 by column default. A
+      // threaded follow-up's stored subject already carries its "Re: " prefix, so replaying the
+      // reviewer on it must treat the subject as thread continuity rather than authored copy.
+      sequenceStep: toSequenceStep(r.sequenceStep), outreachRecordId: r.outreachRecordId,
+      threadSubject: r.sequenceStep > 0 ? r.subject : null,
     };
   }
 

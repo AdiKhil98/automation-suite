@@ -10,6 +10,12 @@ export interface CreateDraftRequest {
   rawBase64Url: string;
   /** Our idempotency fingerprint (informational; duplicate prevention is enforced in our DB). */
   idempotencyFingerprint: string;
+  /**
+   * OPTIONAL existing Gmail thread to place this draft in (`message.threadId`). Supplied ONLY for a
+   * sequence FOLLOW-UP, so the recipient sees one continuing conversation rather than four unrelated
+   * emails. Omitted for a first email, which therefore behaves exactly as before this field existed.
+   */
+  threadId?: string | null;
 }
 
 export interface GmailDraftRef {

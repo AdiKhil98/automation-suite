@@ -242,8 +242,8 @@ describe('email schema — competitor_evidence_used widening', () => {
     human_style_result: 'PASS',
     demo_alignment_result: 'NOT_APPLICABLE',
   };
-  it('bumped to email-copy-schema-3', () => {
-    expect(EMAIL_SCHEMA_VERSION).toBe('email-copy-schema-3');
+  it('bumped to email-copy-schema-4', () => {
+    expect(EMAIL_SCHEMA_VERSION).toBe('email-copy-schema-4');
   });
   it('accepts NONE (prospect-only)', () => {
     expect(emailWriterSchema.safeParse({ ...base, competitor_evidence_used: 'NONE' }).success).toBe(true);

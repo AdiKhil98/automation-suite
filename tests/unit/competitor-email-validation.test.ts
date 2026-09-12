@@ -76,9 +76,9 @@ describe('Phase 7A4A — competitor email quality validation harness', () => {
     expect(s.enriched.rendered.body).toContain(s.plan.competitorSentence);
   });
 
-  it('produces a schema-3 enriched artifact in APPROVED_COMPETITOR_PATTERN_PACKAGE mode', async () => {
+  it('produces a schema-4 enriched artifact in APPROVED_COMPETITOR_PATTERN_PACKAGE mode', async () => {
     const s = await successOrThrow();
-    expect(s.enriched.schemaVersion).toBe('email-copy-schema-3');
+    expect(s.enriched.schemaVersion).toBe('email-copy-schema-4');
     expect(s.enriched.schemaOk).toBe(true);
     expect(s.enriched.artifact.competitor_evidence_used).toBe('APPROVED_COMPETITOR_PATTERN_PACKAGE');
     expect(s.baseline.competitorEvidenceUsed).toBe('NONE');

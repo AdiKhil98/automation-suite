@@ -6,6 +6,9 @@ import {
   type SendOneResult,
 } from '../../domain/send/scheduled-send-runner.js';
 import { type SendService } from '../../domain/send/send-service.js';
+import { checkFollowupSendAllowed } from '../../domain/outreach/followup-send-gate.js';
+import { isFollowupStep } from '../../domain/outreach/sequence.js';
+import { FollowupSendContextRepository } from '../../persistence/repositories/followup-send-context.repo.js';
 import { PipelineRunsRepository } from '../../persistence/repositories/runs.repo.js';
 import { SendInputRepository } from '../../persistence/repositories/send-input.repo.js';
 import { SendRepository } from '../../persistence/repositories/send.repo.js';
@@ -27,6 +30,7 @@ export async function runScheduledSendsCommand(ctx: CliContext): Promise<void> {
   const authRepo = new ScheduledSendAuthorizationRepository(ctx.db);
   const sendRepo = new SendRepository(ctx.db);
   const inputRepo = new SendInputRepository(ctx.db);
+  const followupCtxRepo = new FollowupSendContextRepository(ctx.db);
 
   // Lazily-built provider/service/runId so a no-op run (gates off) touches no credentials or DB writes.
   let service: SendService | null = null;
@@ -38,6 +42,26 @@ export async function runScheduledSendsCommand(ctx: CliContext): Promise<void> {
     const lead = await ctx.leads.getById(leadId);
     const data = lead ? await inputRepo.latest(leadId) : null;
     if (!lead || !data?.schedule) return { outcome: 'INVALID_ELIGIBILITY', attemptId: null, reason: 'no_active_schedule' };
+
+    // FINAL suppression re-check for a FOLLOW-UP, before preflight and before any provider call.
+    // The copy was approved and scheduled days ago; the prospect may have replied, unsubscribed,
+    // bounced, booked, or been marked do-not-contact since. The decision made back then is stale by
+    // definition, so the authoritative outreach state is re-read HERE and the send fails closed.
+    // Initial sends (sequence step 0) are untouched by this check.
+    const seqCtx = await followupCtxRepo.forLead(leadId);
+    if (seqCtx && seqCtx.sequenceStep > 0) {
+      if (!isFollowupStep(seqCtx.sequenceStep)) {
+        return { outcome: 'OUTREACH_SUPPRESSED', attemptId: null, reason: `unknown_sequence_step:${String(seqCtx.sequenceStep)}` };
+      }
+      const decision = checkFollowupSendAllowed({
+        status: seqCtx.outreachStatus,
+        doNotContact: seqCtx.outreachDoNotContact,
+        preparedStep: seqCtx.sequenceStep,
+      });
+      if (!decision.allowed) {
+        return { outcome: 'OUTREACH_SUPPRESSED', attemptId: null, reason: `${decision.reason}:${decision.detail}` };
+      }
+    }
     const baseInput = {
       leadId, leadStatus: lead.status, schedule: data.schedule, currentGmailDraft: data.currentGmailDraft,
       finalization: data.finalization, currentFinalizedContentHash: data.currentFinalizedContentHash,
@@ -65,6 +89,9 @@ export async function runScheduledSendsCommand(ctx: CliContext): Promise<void> {
     return { outcome: result.outcome, attemptId, reason: result.reason };
   };
 
+  // The SAME idempotent bridge for both INITIAL and FOLLOW_UP sends: it routes on the durable
+  // sequence provenance stored with the attempt's own draft, so recovery after a crash heals either
+  // kind without ever resending.
   const enroll = async (leadId: string, attemptId: string): Promise<EnrollmentOutcome> => {
     const r = await enrollConfirmedSendFromAttempt(ctx, { lead: leadId, fromAttempt: attemptId, by: 'scheduler' });
     return r.outcome === 'REFUSED' ? 'ENROLL_FAILED' : r.outcome;
@@ -113,6 +140,6 @@ export async function runScheduledSendsCommand(ctx: CliContext): Promise<void> {
   const problems = report.unknown.length > 0
     || report.failures.length > 0
     || report.recoveryFailures.length > 0
-    || report.sent.some((s) => s.enrollment === 'ENROLL_FAILED' || s.enrollment === 'RECORD_NOT_ENROLLABLE');
+    || report.sent.some((s) => s.enrollment === 'ENROLL_FAILED' || s.enrollment === 'RECORD_NOT_ENROLLABLE' || s.enrollment === 'STEP_MISMATCH');
   if (problems) process.exitCode = 1;
 }

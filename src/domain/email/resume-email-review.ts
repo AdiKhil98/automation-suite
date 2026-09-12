@@ -19,6 +19,7 @@ import { type EmailStatus } from './email-types.js';
 import { type EmailModelCall, type EmailPersist } from './email-writer-service.js';
 import { validateEmail } from './email-validation.js';
 import { isEmailReviewApprovable } from './email-review-gate.js';
+import { type SequenceStep } from '../outreach/sequence.js';
 
 /** The persisted email_drafts fields the resume path needs (read-only projection). */
 export interface PersistedDraftRow {
@@ -35,6 +36,11 @@ export interface PersistedDraftRow {
   provider: string;
   requestedWriterModel: string;
   writerResponseId: string | null;
+  /** Sequence provenance carried verbatim from the source draft (0 = INITIAL / Outreach #1). */
+  sequenceStep: SequenceStep;
+  outreachRecordId: string | null;
+  /** The thread subject the source draft continued, when it was a threaded follow-up. */
+  threadSubject: string | null;
 }
 
 export interface ResumeInputs {
@@ -192,7 +198,9 @@ export class ResumeEmailReviewService {
 
     // Exactly one reviewer call — same reviewer contract as the writer service.
     const brief = buildEmailBrief(emailInputs);
-    const rMsgs = buildEmailReviewerMessages(brief, draft);
+    const rMsgs = buildEmailReviewerMessages(brief, draft, {
+      step: draftRow.sequenceStep, threadSubject: draftRow.threadSubject, priorMessages: [],
+    });
     const rRes = await this.deps.provider.generate({
       task: 'email_review', system: rMsgs.system, user: rMsgs.user, images: [], outputSchema: EMAIL_REVIEW_JSON_SCHEMA,
       schemaName: 'email_review', model: c.reviewerModel, reasoningEffort: c.reviewerEffort, store: c.store,
@@ -210,7 +218,9 @@ export class ResumeEmailReviewService {
     const review = rParsed.data;
 
     // The EXISTING approvable gate — shared with the writer service (single source of truth).
-    const approvable = isEmailReviewApprovable(review);
+    const approvable = isEmailReviewApprovable(review, {
+      sequenceStep: draftRow.sequenceStep, subjectIsThreadContinuity: draftRow.threadSubject !== null,
+    });
 
     const route: LeadStatus = rendered.hasDemoUrlPlaceholder ? 'WAITING_FOR_DEMO_URL' : 'READY_FOR_HUMAN_APPROVAL';
     const newDraftId = randomUUID();
@@ -260,6 +270,7 @@ export class ResumeEmailReviewService {
       email: {
         id: newDraftId, leadId: draftRow.leadId, demoId: draftRow.demoId, runId, subject: rendered.subject, body: rendered.body,
         ctaKind: rendered.ctaKind, hasDemoUrlPlaceholder: rendered.hasDemoUrlPlaceholder, status,
+        sequenceStep: draftRow.sequenceStep, outreachRecordId: draftRow.outreachRecordId,
         // Provenance: the writer was NOT re-run, so the original writer columns are carried verbatim.
         writerPromptVersion: draftRow.writerPromptVersion, reviewerPromptVersion: EMAIL_REVIEWER_PROMPT_VERSION,
         schemaVersion: draftRow.schemaVersion, rulesVersion: draftRow.rulesVersion, provider: this.deps.provider.name,

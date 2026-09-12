@@ -98,6 +98,12 @@ const reviewJson = (overrides: Record<string, unknown> = {}) => ({
   buyerLanguageOnly: true,
   conversationNotAudit: true,
   confidentObservation: true,
+  // Sequence-job dimensions. All four are reported at every step; the gate enforces the subset
+  // that applies to the step under review.
+  addsClarityNotRestart: true,
+  compressedNotExpanded: true,
+  pressureReduced: true,
+  binaryReplyClose: true,
   problems: [],
   requiredRevisions: [],
   ...overrides,

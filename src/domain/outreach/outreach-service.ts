@@ -21,6 +21,12 @@ import {
   type OutreachMessageType,
   type OutreachRecord,
 } from './records.js';
+import {
+  followupDueStatus,
+  followupSentStatus,
+  nextFollowupStep,
+  pendingFollowupStep,
+} from './sequence.js';
 import { assertOutreachTransition, canOutreachTransition, cancelsFollowups } from './state-machine.js';
 import { OUTREACH_SEND_BLOCKED, type OutreachStatus } from './status.js';
 
@@ -162,6 +168,57 @@ export interface EnrollConfirmedSendResult {
   record: OutreachRecord;
   message: OutreachMessage | null;
   followup: OutreachFollowup | null;
+}
+
+/**
+ * Input for {@link OutreachService.enrollConfirmedFollowup} — the confirmed-FOLLOW-UP -> outreach
+ * bridge. Identical in spirit to {@link EnrollConfirmedSendInput}, but for a sequence email that is
+ * NOT the first: it updates the EXISTING outreach record instead of creating the initial history.
+ */
+export interface EnrollConfirmedFollowupInput {
+  outreachRecordId: string;
+  /**
+   * The follow-up step this confirmed send represented, read from DURABLE provenance
+   * (`email_drafts.sequence_step` on the attempt's own draft chain) — never guessed from subject
+   * text, a timestamp, the current date, or "the latest email". It is cross-checked against the
+   * record's own state and the whole enrollment fails closed if the two disagree.
+   */
+  expectedStep: FollowupStep;
+  /** Exact sent subject (from the finalized draft). */
+  subject: string;
+  /** Exact sent body (from email_draft_finalizations.resolvedBody). */
+  body: string;
+  /** Gmail identifiers from the confirmed send_attempt. */
+  gmailMessageId: string;
+  gmailThreadId: string;
+  sentAt: Date;
+  emailDraftId?: string | null;
+  finalizedEmailId?: string | null;
+  /** The confirmed send_attempt id (recorded on the events for provenance). */
+  sendAttemptId: string;
+  /** Follow-up sequence policy (from config); the NEXT step is scheduled from it, when there is one. */
+  policy: SequencePolicy;
+}
+
+export type EnrollConfirmedFollowupOutcome =
+  /** The follow-up message, SENT marking, transition, and the next follow-up (if any) were written. */
+  | 'ENROLLED'
+  /** This exact Gmail message id is already enrolled; nothing changed (idempotent). */
+  | 'ALREADY_ENROLLED'
+  /** The record is not waiting on any follow-up (replied/bounced/suppressed/finished); nothing changed. */
+  | 'RECORD_NOT_ENROLLABLE'
+  /** Durable provenance and record state disagree about the step; nothing changed (fail closed). */
+  | 'STEP_MISMATCH';
+
+export interface EnrollConfirmedFollowupResult {
+  outcome: EnrollConfirmedFollowupOutcome;
+  record: OutreachRecord;
+  message: OutreachMessage | null;
+  /** The follow-up row that was marked SENT. */
+  sentFollowup: OutreachFollowup | null;
+  /** The NEXT follow-up that was scheduled, or null after the final step. */
+  nextFollowup: OutreachFollowup | null;
+  reason?: string;
 }
 
 /** The legal approval path an enrolled record is walked through to reach INITIAL_SENT. */
@@ -484,6 +541,161 @@ export class OutreachService {
 
       const record: OutreachRecord = { ...rec, status: 'INITIAL_SENT', lastSentAt: input.sentAt, sequenceStep: 0, nextFollowupAt: dueAt, updatedAt: nowD };
       return { outcome: 'ENROLLED', record, message, followup };
+    });
+  }
+
+  /**
+   * Bridge a CONFIRMED production FOLLOW-UP send into outreach tracking. This is the counterpart to
+   * {@link enrollConfirmedSend}, which is deliberately INITIAL-only: that method creates the initial
+   * history and refuses a record that is already INITIAL_SENT, so it must never be reused for a
+   * follow-up. This one updates the EXISTING record instead.
+   *
+   * Like the initial bridge it NEVER sends — the caller already dispatched through the production
+   * `SendService` and reads the exact subject/body/Gmail ids from the confirmed `send_attempt`.
+   * Everything below is ONE atomic transaction, and the whole thing is idempotent:
+   *
+   *  1. The record is loaded and the Gmail message id is checked first: an already-enrolled message
+   *     changes nothing (`ALREADY_ENROLLED`). The migration-0037 partial-unique index on
+   *     `outreach_messages.gmail_message_id` remains the hard duplicate backstop underneath.
+   *  2. The expected step comes from DURABLE provenance (the caller's `expectedStep`, read from the
+   *     attempt's own draft chain) and is cross-checked against the record's state. A record that is
+   *     not waiting on any follow-up — replied, bounced, unsubscribed, do-not-contact, meeting
+   *     booked, closed, or already finished at FOLLOW_UP_3_SENT — is `RECORD_NOT_ENROLLABLE`, and a
+   *     disagreement between provenance and state is `STEP_MISMATCH`. Both write nothing.
+   *  3. An immutable FOLLOW_UP message carries the exact subject/body/hash, the finalized email ids,
+   *     the Gmail message/thread id, and the sent timestamp.
+   *  4. The matching pending follow-up row is marked SENT.
+   *  5. The record transitions FOLLOW_UP_n_DUE -> FOLLOW_UP_n_SENT through the state machine.
+   *  6. `lastSentAt` and `sequenceStep` advance, and the NEXT follow-up is scheduled — unless this
+   *     was the final step (internal 3 / lesson Follow-up #4), after which `nextFollowupAt` is
+   *     cleared and NO further sequence email is ever scheduled.
+   */
+  async enrollConfirmedFollowup(input: EnrollConfirmedFollowupInput): Promise<EnrollConfirmedFollowupResult> {
+    return this.uow.transaction(async (repos) => {
+      const rec = await this.require(repos, input.outreachRecordId);
+      const nothing = (
+        outcome: EnrollConfirmedFollowupOutcome,
+        reason: string,
+      ): EnrollConfirmedFollowupResult => ({ outcome, record: rec, message: null, sentFollowup: null, nextFollowup: null, reason });
+
+      // 1. Idempotency: this exact Gmail message id is already enrolled — change nothing.
+      const existing = await repos.findMessageByGmailMessageId(input.gmailMessageId);
+      if (existing) {
+        return { outcome: 'ALREADY_ENROLLED', record: rec, message: existing, sentFollowup: null, nextFollowup: null };
+      }
+
+      // 2. Derive the step the record itself is waiting on, and require provenance to agree.
+      const stateStep = pendingFollowupStep(rec.status);
+      if (stateStep === null) {
+        return nothing('RECORD_NOT_ENROLLABLE', `record status ${rec.status} is not awaiting a follow-up`);
+      }
+      if (stateStep !== input.expectedStep) {
+        return nothing('STEP_MISMATCH', `provenance says step ${String(input.expectedStep)} but the record awaits step ${String(stateStep)}`);
+      }
+      const step = stateStep;
+      const nowD = new Date(this.now());
+
+      // 3. Immutable FOLLOW_UP message carrying the confirmed send's exact content + Gmail ids.
+      const message: OutreachMessage = {
+        id: randomUUID(),
+        outreachRecordId: rec.id,
+        messageType: 'FOLLOW_UP',
+        sequenceStep: step,
+        subject: input.subject,
+        body: input.body,
+        contentHash: messageContentHash(input.subject, input.body),
+        emailDraftId: input.emailDraftId ?? null,
+        finalizedEmailId: input.finalizedEmailId ?? null,
+        gmailMessageId: input.gmailMessageId,
+        gmailThreadId: input.gmailThreadId,
+        approvedAt: nowD,
+        sentAt: input.sentAt,
+        createdAt: nowD,
+      };
+      await repos.insertMessage(message);
+      await repos.appendEvent({
+        outreachRecordId: rec.id,
+        type: 'MESSAGE_RECORDED',
+        fromStatus: null,
+        toStatus: null,
+        message: `FOLLOW_UP step ${String(step)} enrolled from confirmed production send`,
+        data: {
+          contentHash: message.contentHash, gmailMessageId: input.gmailMessageId,
+          gmailThreadId: input.gmailThreadId, sendAttemptId: input.sendAttemptId, sequenceStep: step,
+        },
+      });
+
+      // 4. Mark the matching pending follow-up row SENT. It may legitimately be absent if an
+      //    operator cancelled the row while the send was already in flight; the state transition
+      //    below is what actually advances the sequence.
+      const pending = await repos.pendingFollowups(rec.id);
+      const sentFollowup = pending.find((f) => f.step === step) ?? null;
+      if (sentFollowup) {
+        await repos.updateFollowupStatus(sentFollowup.id, 'SENT', null, nowD);
+      }
+
+      // 5. FOLLOW_UP_n_DUE -> FOLLOW_UP_n_SENT, asserted against the state machine.
+      const from = followupDueStatus(step);
+      const to = followupSentStatus(step);
+      assertOutreachTransition(from, to);
+      await repos.appendEvent({
+        outreachRecordId: rec.id,
+        type: 'STATE_TRANSITION',
+        fromStatus: from,
+        toStatus: to,
+        message: `${from} -> ${to} (enroll confirmed follow-up)`,
+        data: { sendAttemptId: input.sendAttemptId, sequenceStep: step },
+      });
+
+      // 6. Schedule the next step, or end the sequence after the final one.
+      const next = nextFollowupStep(step);
+      let nextFollowup: OutreachFollowup | null = null;
+      let nextDueAt: Date | null = null;
+      if (next !== null) {
+        nextDueAt = computeFollowupDueUtc({
+          previousSentAtMs: input.sentAt.getTime(), step: next, timezone: rec.timezone, policy: input.policy,
+        });
+        nextFollowup = {
+          id: randomUUID(),
+          outreachRecordId: rec.id,
+          step: next,
+          dueAt: nextDueAt,
+          timezone: rec.timezone,
+          status: 'DUE',
+          blockedReason: null,
+          cancelledReason: null,
+          createdAt: nowD,
+          updatedAt: nowD,
+        };
+        await repos.insertFollowup(nextFollowup);
+      }
+
+      const patch: Partial<OutreachRecord> = {
+        status: to, lastSentAt: input.sentAt, sequenceStep: step, nextFollowupAt: nextDueAt,
+      };
+      await repos.updateRecord(rec.id, patch, nowD);
+
+      if (nextFollowup !== null && nextDueAt !== null) {
+        await repos.appendEvent({
+          outreachRecordId: rec.id,
+          type: 'FOLLOWUP_SCHEDULED',
+          fromStatus: null,
+          toStatus: null,
+          message: `Follow-up ${String(next)} due ${nextDueAt.toISOString()}`,
+          data: { step: next, dueAt: nextDueAt.toISOString() },
+        });
+      } else {
+        await repos.appendEvent({
+          outreachRecordId: rec.id,
+          type: 'NOTE',
+          fromStatus: null,
+          toStatus: null,
+          message: 'Sequence complete: the final follow-up was sent; no further email is scheduled.',
+          data: { finalStep: step },
+        });
+      }
+
+      return { outcome: 'ENROLLED', record: { ...rec, ...patch, updatedAt: nowD }, message, sentFollowup, nextFollowup };
     });
   }
 

@@ -41,7 +41,10 @@ const approveReview = (over: Record<string, unknown> = {}): Record<string, unkno
   businessRelevanceClear: true, urgencySupported: true, competitorClaimsSupported: true, humanStylePass: true,
   punctuationPass: true, singlePrimaryCta: true, sufficientlyPersonalized: true, evidenceSupported: true,
   demoAligned: true, persuasive: true, singleObservation: true, buyerLanguageOnly: true,
-  conversationNotAudit: true, confidentObservation: true, problems: [], requiredRevisions: [], ...over,
+  conversationNotAudit: true, confidentObservation: true,
+  // Sequence-job dimensions (all reported every time; the gate enforces the step's subset).
+  addsClarityNotRestart: true, compressedNotExpanded: true, pressureReduced: true, binaryReplyClose: true,
+  problems: [], requiredRevisions: [], ...over,
 });
 
 const config: ResumeReviewConfig = {
@@ -73,7 +76,7 @@ function rowFor(draft: EmailWriterOutput, over: Partial<PersistedDraftRow> = {})
     id: DRAFT, leadId: LEAD, runId: RUN, status: 'REVIEW_FAILED', subject: rendered.subject, body: rendered.body,
     demoId: null, writerPromptVersion: 'email-writer-3', schemaVersion: 'email-copy-schema-3',
     rulesVersion: 'email-copy-standard-3', provider: 'openai', requestedWriterModel: 'gpt-5.6-sol',
-    writerResponseId: 'writer-resp-1', ...over,
+    writerResponseId: 'writer-resp-1', sequenceStep: 0, outreachRecordId: null, threadSubject: null, ...over,
   };
 }
 

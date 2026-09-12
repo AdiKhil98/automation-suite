@@ -3,6 +3,7 @@ import { type SequencePolicy } from '../../domain/outreach/followups.js';
 import { buildAllTabs, OUTREACH_TABS, syncSheet } from '../../domain/outreach/sheet-sync.js';
 import { runReplySync } from '../../domain/outreach/reply-sync.js';
 import { overdueDays } from '../../domain/outreach/followups.js';
+import { isFollowupStep } from '../../domain/outreach/sequence.js';
 import { MockGmailThreadReader } from '../../integrations/gmail/mock-reply-provider.js';
 import { HttpGmailThreadReader, liveReplyReadGate, selectReplyReader } from '../../integrations/gmail/http-reply-provider.js';
 import { type GmailThreadReader } from '../../integrations/gmail/reply-provider.js';
@@ -24,6 +25,7 @@ function sequencePolicy(ctx: CliContext): SequencePolicy {
   return {
     step1DelayDays: ctx.config.OUTREACH_FOLLOWUP_1_DELAY_DAYS,
     step2DelayDays: ctx.config.OUTREACH_FOLLOWUP_2_DELAY_DAYS,
+    step3DelayDays: ctx.config.OUTREACH_FOLLOWUP_3_DELAY_DAYS,
     dueHourLocal: ctx.config.OUTREACH_FOLLOWUP_DUE_HOUR_LOCAL,
   };
 }
@@ -171,7 +173,12 @@ export async function outreachScheduleFollowupCommand(
   opts: { record: string; step: string },
 ): Promise<void> {
   if (!requireEnabled(ctx)) return;
-  const step = Number(opts.step) === 2 ? 2 : 1;
+  const parsed = Number(opts.step);
+  if (!isFollowupStep(parsed)) {
+    console.log(`Follow-up not scheduled: step must be 1, 2, or 3 (got ${opts.step}). There is no step 4.`);
+    return;
+  }
+  const step = parsed;
   const r = await service(ctx).scheduleFollowup(opts.record, step, sequencePolicy(ctx));
   if (r.outcome === 'SCHEDULED') console.log(`Follow-up ${String(step)} due ${r.followup?.dueAt.toISOString() ?? ''}`);
   else console.log(`Follow-up not scheduled: ${r.reason ?? 'BLOCKED'}`);

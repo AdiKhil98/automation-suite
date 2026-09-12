@@ -8,7 +8,7 @@ import { InMemoryOutreachStore } from '../support/outreach-memory.js';
 const TZ = 'Europe/Berlin';
 const NOW = Date.parse('2026-07-22T12:00:00Z');
 const SENT_AT = Date.parse('2026-07-20T09:00:00Z');
-const policy = { step1DelayDays: 3, step2DelayDays: 5, dueHourLocal: 9 };
+const policy = { step1DelayDays: 2, step2DelayDays: 2, step3DelayDays: 3, dueHourLocal: 9 };
 
 /** Seed a sent record and return its correlation descriptor. */
 async function sentOutbound(store: InMemoryOutreachStore, svc: OutreachService, over: { contact?: string; threadId?: string; gmailMsgId?: string } = {}) {

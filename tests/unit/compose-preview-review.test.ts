@@ -41,7 +41,10 @@ const approveReview = (over: Record<string, unknown> = {}): Record<string, unkno
   businessRelevanceClear: true, urgencySupported: true, competitorClaimsSupported: true, humanStylePass: true,
   punctuationPass: true, singlePrimaryCta: true, sufficientlyPersonalized: true, evidenceSupported: true,
   demoAligned: true, persuasive: true, singleObservation: true, buyerLanguageOnly: true,
-  conversationNotAudit: true, confidentObservation: true, problems: [], requiredRevisions: [], ...over,
+  conversationNotAudit: true, confidentObservation: true,
+  // Sequence-job dimensions (all reported every time; the gate enforces the step's subset).
+  addsClarityNotRestart: true, compressedNotExpanded: true, pressureReduced: true, binaryReplyClose: true,
+  problems: [], requiredRevisions: [], ...over,
 });
 
 /**

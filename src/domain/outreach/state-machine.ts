@@ -23,11 +23,16 @@ const HAPPY_PATH: Record<OutreachStatus, OutreachStatus[]> = {
   AWAITING_APPROVAL: ['APPROVED_TO_SEND', 'DRAFT_READY'],
   // INITIAL_SENT records that the initial email was already sent (elsewhere).
   APPROVED_TO_SEND: ['INITIAL_SENT'],
+  // The sequence walks step by step; a skip (e.g. INITIAL_SENT -> FOLLOW_UP_2_DUE) is illegal.
+  // FOLLOW_UP_1_* = lesson Follow-up #2, FOLLOW_UP_2_* = #3, FOLLOW_UP_3_* = #4 (final).
   INITIAL_SENT: ['FOLLOW_UP_1_DUE', 'MEETING_BOOKED', 'CLOSED_LOST'],
   FOLLOW_UP_1_DUE: ['FOLLOW_UP_1_SENT', 'MEETING_BOOKED', 'CLOSED_LOST'],
   FOLLOW_UP_1_SENT: ['FOLLOW_UP_2_DUE', 'MEETING_BOOKED', 'CLOSED_LOST'],
   FOLLOW_UP_2_DUE: ['FOLLOW_UP_2_SENT', 'MEETING_BOOKED', 'CLOSED_LOST'],
-  FOLLOW_UP_2_SENT: ['MEETING_BOOKED', 'CLOSED_LOST'],
+  FOLLOW_UP_2_SENT: ['FOLLOW_UP_3_DUE', 'MEETING_BOOKED', 'CLOSED_LOST'],
+  FOLLOW_UP_3_DUE: ['FOLLOW_UP_3_SENT', 'MEETING_BOOKED', 'CLOSED_LOST'],
+  // Final automated sequence state: no further sequence email is ever scheduled from here.
+  FOLLOW_UP_3_SENT: ['MEETING_BOOKED', 'CLOSED_LOST'],
   // A reply can still convert or die; those edges are human-driven outcome edits.
   REPLIED_POSITIVE: ['MEETING_BOOKED', 'CLOSED_WON', 'CLOSED_LOST'],
   REPLIED_NEUTRAL: ['MEETING_BOOKED', 'CLOSED_WON', 'CLOSED_LOST'],

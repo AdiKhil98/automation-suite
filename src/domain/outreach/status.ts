@@ -3,9 +3,14 @@
  * lead lifecycle (`src/domain/leads/status.ts`): a single lead may run in multiple
  * campaigns, and each (lead × campaign × contact) has its own outreach state here.
  *
- * Tracking only — no status in Phase 17A performs any external action. Advancing to
- * a *_SENT status merely records that a send already happened elsewhere; nothing in
- * this module ever calls Gmail or sends email.
+ * Tracking only — no status here performs any external action. Advancing to a *_SENT
+ * status merely records that a send already happened through the production SendService;
+ * nothing in this module ever calls Gmail or sends email.
+ *
+ * SEQUENCE NAMING: the internal FOLLOW_UP_<n>_* statuses are OFFSET BY ONE from the
+ * business/lesson numbering — FOLLOW_UP_1_* is the lesson's Follow-up #2, FOLLOW_UP_2_* is
+ * Follow-up #3, and FOLLOW_UP_3_* is Follow-up #4 (the final one). There is deliberately no
+ * FOLLOW_UP_4_*: the sequence is four emails total. See `sequence.ts` for the full mapping.
  */
 
 export const OUTREACH_STATUSES = [
@@ -17,6 +22,8 @@ export const OUTREACH_STATUSES = [
   'FOLLOW_UP_1_SENT',
   'FOLLOW_UP_2_DUE',
   'FOLLOW_UP_2_SENT',
+  'FOLLOW_UP_3_DUE',
+  'FOLLOW_UP_3_SENT',
   'REPLIED_POSITIVE',
   'REPLIED_NEUTRAL',
   'REPLIED_NEGATIVE',

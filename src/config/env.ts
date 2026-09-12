@@ -419,10 +419,30 @@ const envSchema = z.object({
   // Phase 17A3: the Sheets writer's OWN OAuth credential file (spreadsheets scope), separate from
   // every Gmail credential. Git-ignored, 0600. Populated by the one-time `sheets-auth` command.
   GOOGLE_SHEETS_CREDENTIALS_FILE: z.string().default('./.google-sheets-credentials.json'),
-  // Deterministic default follow-up sequence policy (operator policy; not universal).
-  OUTREACH_FOLLOWUP_1_DELAY_DAYS: z.coerce.number().int().positive().default(3),
-  OUTREACH_FOLLOWUP_2_DELAY_DAYS: z.coerce.number().int().positive().default(5),
+  // Deterministic default follow-up sequence policy (operator policy; not universal). Delays are
+  // RELATIVE to the previous sent email, so the lesson's absolute days 0/2/4/7 (Outreach #1,
+  // Follow-up #2, #3, #4) become +2, +2, +3. Internal step 1 = lesson Follow-up #2, step 2 = #3,
+  // step 3 = #4 (final). There is no step 4.
+  OUTREACH_FOLLOWUP_1_DELAY_DAYS: z.coerce.number().int().positive().default(2),
+  OUTREACH_FOLLOWUP_2_DELAY_DAYS: z.coerce.number().int().positive().default(2),
+  OUTREACH_FOLLOWUP_3_DELAY_DAYS: z.coerce.number().int().positive().default(3),
   OUTREACH_FOLLOWUP_DUE_HOUR_LOCAL: z.coerce.number().int().min(0).max(23).default(9),
+
+  // --- Unattended follow-up automation (both master switches default OFF) ---
+  // These automate everything AROUND human review, never human review itself. Preparation composes
+  // due follow-ups and parks them in the existing review queue; progression advances only
+  // HUMAN-APPROVED follow-ups through finalization -> Gmail draft -> schedule. NEITHER sends:
+  // dispatch remains exclusively `run-scheduled-sends` -> SendService, behind its own separate
+  // gates and durable authorization.
+  FOLLOWUP_PREPARATION_ENABLED: boolString(false),
+  FOLLOWUP_PROGRESSION_ENABLED: boolString(false),
+  // Per-run bounds. Preparation costs model spend (writer + reviewer per follow-up), so it is
+  // deliberately small; progression is free but stays bounded so one run can never fan out.
+  FOLLOWUP_PREPARATION_MAX_PER_RUN: z.coerce.number().int().positive().max(50).default(5),
+  FOLLOWUP_PROGRESSION_MAX_PER_RUN: z.coerce.number().int().positive().max(50).default(10),
+  // The operator recorded against unattended finalizations, so the audit trail never implies a human
+  // reviewed the finalization by hand. The HUMAN approval it derives from is recorded separately.
+  FOLLOWUP_AUTOMATION_ACTOR: z.string().min(1).default('followup-automation'),
 
   // --- Phase 17B: controlled first-send smoke test (exactly ONE tracked send; heavily gated) ---
   // Master switch for the Phase 17B smoke-test send path. Off by default. Even when true, an

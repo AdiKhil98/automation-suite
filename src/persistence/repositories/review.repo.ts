@@ -84,9 +84,11 @@ export class ReviewWriteRepository implements ReviewWriteRepo {
     const d = await latestDemoRow(this.db, leadId);
     return d ? { id: d.id, status: d.status } : null;
   }
-  async latestEmail(leadId: string): Promise<{ id: string; humanDecision: string | null } | null> {
+  async latestEmail(leadId: string): Promise<{ id: string; humanDecision: string | null; sequenceStep: number } | null> {
     const e = await latestEmailRow(this.db, leadId);
-    return e ? { id: e.id, humanDecision: e.humanDecision } : null;
+    // sequenceStep lets the review service tell a first email from a follow-up: rejecting a
+    // follow-up must return the lead to SENT, never REJECT it.
+    return e ? { id: e.id, humanDecision: e.humanDecision, sequenceStep: e.sequenceStep } : null;
   }
   async setDemoDecision(demoId: string, decision: HumanDecision, notes: string | null, actor: string, now: Date): Promise<void> {
     await this.db.update(demos).set({ status: decision, approvedAt: now, approvedBy: actor, approvalSource: 'dashboard', approvalNotes: notes }).where(eq(demos.id, demoId));

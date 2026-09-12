@@ -100,6 +100,7 @@ import {
   outreachTransitionCommand,
 } from './commands/outreach.js';
 import { outreachEnrollSentCommand } from './commands/outreach-enroll-sent.js';
+import { runFollowupAutomationCommand } from './commands/run-followup-automation.js';
 import {
   outreachSmokeApproveCommand,
   outreachSmokeInitCommand,
@@ -877,7 +878,7 @@ program
   .command('outreach-schedule-followup')
   .description('Phase 17A: compute + store a follow-up due date (never sends)')
   .requiredOption('--record <id>', 'outreach record id')
-  .requiredOption('--step <n>', 'follow-up step (1 or 2)')
+  .requiredOption('--step <n>', 'internal follow-up step 1, 2, or 3 (= lesson Follow-up #2, #3, #4)')
   .action((opts: { record: string; step: string }) => withContext((ctx) => outreachScheduleFollowupCommand(ctx, opts)));
 
 program
@@ -896,6 +897,16 @@ program
   .requiredOption('--at <iso>', 'new due instant (ISO 8601)')
   .option('--reason <text>', 'reason')
   .action((opts: { followup: string; record: string; at: string; reason?: string }) => withContext((ctx) => outreachPostponeFollowupCommand(ctx, opts)));
+
+program
+  .command('run-followup-automation')
+  .description('UNATTENDED follow-up automation (timer entry point; NEVER sends). Phase "prepare" composes DUE follow-ups through the SAME writer -> AI reviewer -> gate used for a first email, with the step-specific job (internal step 1 = lesson Follow-up #2 "add clarity", 2 = #3 "compress + reduce pressure", 3 = #4 "binary yes/no close"), and parks the copy in the EXISTING human review queue. Phase "progress" advances only HUMAN-APPROVED follow-ups one stage through the existing reply-finalization -> Gmail draft -> schedule services, then stops. Both fail closed on reply/bounce/unsubscribe/DNC/meeting/closed and are idempotent under repeated timer runs. Sending happens ONLY in run-scheduled-sends. Gated by FOLLOWUP_PREPARATION_ENABLED / FOLLOWUP_PROGRESSION_ENABLED (both default false).')
+  .option('--phase <name>', 'prepare | progress | both (default both)')
+  .option('--limit <n>', 'override the per-run cap for the selected phase(s)')
+  .option('--record <id>', 'preparation only: restrict to one outreach record')
+  .option('--lead <id>', 'progression only: restrict to one lead')
+  .option('--dry-run', 'report what WOULD happen; writes nothing, makes no model call, creates no Gmail draft')
+  .action((opts: { phase?: string; limit?: string; record?: string; lead?: string; dryRun?: boolean }) => withContext((ctx) => runFollowupAutomationCommand(ctx, opts)));
 
 program
   .command('outreach-followups-due')

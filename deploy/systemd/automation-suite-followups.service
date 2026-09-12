@@ -1,0 +1,100 @@
+# PROPOSED — NOT INSTALLED. Committing this file deploys nothing.
+#
+# Unattended outreach follow-up automation: a SECOND service alongside the existing, already-live
+# automation-suite-scheduled-sends.{service,timer}. That live sender is NOT modified by this feature.
+#
+# WHY A SEPARATE UNIT rather than extending the scheduled sender:
+#   1. Different authority. The sender holds the outbound kill switches. This unit holds NONE of
+#      them, so composition and dispatch never share a blast radius.
+#   2. Different failure modes. Composition spends money at an LLM provider and fails transiently;
+#      dispatch must halt on the first OUTCOME_UNKNOWN. They must not share a retry cadence.
+#   3. Different cadence. The sender polls every minute because a schedule can come due any minute;
+#      follow-up due dates are whole local days (see the timer's cadence note).
+#   4. Independent pause. Disabling follow-ups must never pause real sending, and vice versa.
+#
+# ---------------------------------------------------------------------------------------------
+# NO EnvironmentFile= — DELIBERATE, AND LEAD IS THE POINT.
+#
+# systemd applies Environment= and EnvironmentFile= in the order written, and a later assignment
+# WINS. An EnvironmentFile=.../.env listed after these Environment= lines would let the repo .env
+# override the unit's gates — the exact inversion of the production model, where .env stays at safe
+# defaults and the unit supplies the runtime gates.
+#
+# It is also unnecessary. package.json runs the CLI as:
+#     node --env-file-if-exists=.env --import tsx src/cli/index.ts
+# Node's --env-file does NOT overwrite variables already present in the process environment, and it
+# DOES supply everything the process environment omits. Verified empirically:
+#     .env alone                       -> DRY_RUN=true,  DATABASE_URL=<from .env>
+#     .env + process env DRY_RUN=false -> DRY_RUN=false, DATABASE_URL=<from .env>
+# So: systemd Environment= wins for the gates below; DATABASE_URL and every other non-secret default
+# still arrive from /home/opc/automation-suite/.env via WorkingDirectory. This mirrors the working
+# scheduled-send unit.
+# ---------------------------------------------------------------------------------------------
+#
+# THIS UNIT CANNOT SEND. It carries no sending gate, so SendService is unreachable from it. It also
+# does not set DRY_RUN, so .env's DRY_RUN=true is inherited and acts as a second, independent block
+# on the send path inside this process. Composition, Gmail DRAFT creation and scheduling do not
+# consult DRY_RUN and work normally.
+#
+# GATES SHIP OFF. Both FOLLOWUP_* switches are false, so installing and even enabling the timer
+# performs NO work until they are deliberately flipped. That is the intended install state.
+#
+# Install (only after approval):
+#   sudo cp deploy/systemd/automation-suite-followups.{service,timer} /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl start automation-suite-followups.service   # one no-op run to prove wiring
+#   sudo systemctl enable --now automation-suite-followups.timer
+# Inspect:  journalctl -u automation-suite-followups.service -n 200 --no-pager
+# Pause:    sudo systemctl disable --now automation-suite-followups.timer
+#           (the scheduled-send timer is untouched and keeps running)
+
+[Unit]
+Description=Automation Suite — outreach follow-up preparation + progression (NEVER sends)
+Documentation=file:/home/opc/automation-suite/docs/AUTOMATION_PILOT.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=opc
+Group=opc
+WorkingDirectory=/home/opc/automation-suite
+
+Environment=HOME=/home/opc
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+
+# Master switches for this feature. BOTH FALSE ON PURPOSE — flip deliberately, one at a time.
+Environment=FOLLOWUP_PREPARATION_ENABLED=false
+Environment=FOLLOWUP_PROGRESSION_ENABLED=false
+# Required supporting flags. None of these can send.
+Environment=OUTREACH_TRACKING_ENABLED=true
+Environment=EMAIL_GENERATION_ENABLED=true
+Environment=GMAIL_DRAFTS_ENABLED=true
+Environment=GMAIL_DRAFT_ACTIONS_ENABLED=true
+Environment=SCHEDULING_ENABLED=true
+# Per-run bounds. Preparation costs model spend, so keep it small.
+Environment=FOLLOWUP_PREPARATION_MAX_PER_RUN=5
+Environment=FOLLOWUP_PROGRESSION_MAX_PER_RUN=10
+#
+# DELIBERATELY ABSENT — never add these here. They belong exclusively to
+# automation-suite-scheduled-sends.service:
+#   SENDING_ENABLED, OUTBOUND_ACTIONS_ENABLED, SCHEDULED_SEND_ENABLED,
+#   SENDING_PROVIDER=http, DRY_RUN=false
+
+ExecStart=/usr/local/bin/pnpm cli run-followup-automation
+
+# Worst-case runtime, from the actual config defaults:
+#   EMAIL_TIMEOUT_MS=120000 per model call, EMAIL_MAX_RETRIES=0
+#   preparation = 2 calls (writer + reviewer) x 120s          = 240s per follow-up
+#   x FOLLOWUP_PREPARATION_MAX_PER_RUN=5                      = 1200s
+#   progression = 10 x (GMAIL_TIMEOUT_MS=30s + DB)            ~= 300s
+#   total worst case                                          ~= 1500s
+# 1800s leaves ~20% headroom. Type=oneshot means systemd will not start a second instance while one
+# is still running, so a slow run is skipped by the next timer fire rather than overlapping.
+TimeoutStartSec=1800
+
+# Credential/artifact files written by this service stay owner-only.
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

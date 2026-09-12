@@ -1,0 +1,54 @@
+# PROPOSED — NOT INSTALLED. Committing this file deploys nothing.
+#
+# CADENCE — why NOT every minute like the scheduled sender.
+#
+# The sender polls every minute because a send schedule can come due at any minute. Follow-up due
+# dates are whole local calendar days pinned to one local hour, so a minute cadence buys nothing.
+#
+# It would also be actively harmful. When composition fails transiently — a rate-limited or
+# unavailable model provider, a budget block, a malformed model response — the writer persists NO
+# email_drafts row (`failPersist` sets email: null). The preparation runner therefore still sees that
+# follow-up as un-composed and tries again on the next run. At a one-minute cadence that is a retry
+# loop against a paid API, bounded only by FOLLOWUP_PREPARATION_MAX_PER_RUN and the per-lead cost
+# cap. A 15-minute cadence bounds the same pathology to ~4 attempts an hour.
+#
+# (A draft that IS composed but fails deterministic validation or AI review does persist a row, so
+# it is correctly skipped as awaiting human review and never re-composed. Only no-row outcomes retry.)
+#
+# Business hours Mon-Fri: the send window is Mon-Fri, so composing overnight or at the weekend only
+# ages the copy before anyone can review it. 08:00-18:00 covers the 09:00 local due hour and leaves
+# time to approve before the next morning's send pass.
+#
+# VALIDATED with `systemd-analyze calendar` on systemd 252 (AlmaLinux 9) and systemd 239
+# (Oracle Linux 8 — the tz suffix is honoured on both):
+#   "Mon..Fri 08..17:00/15 Europe/London"
+#      -> Mon..Fri *-*-* 08..17:00/15:00 Europe/London ; next elapse Mon 2026-09-14 07:00:00 UTC
+#   "Mon..Fri 18:00 Europe/London"
+#      -> Mon..Fri *-*-* 18:00:00 Europe/London        ; next elapse Mon 2026-09-14 17:00:00 UTC
+#   (07:00 UTC = 08:00 BST, so the London timezone is applied, not the host's.)
+#
+# Two lines because a single "08..18:00/15" would also fire at 18:15/18:30/18:45, overshooting the
+# intended window. This pair gives exactly 08:00, 08:15 ... 17:45, 18:00 = 41 runs per weekday.
+# (Note: "08..17:45/15" is NOT valid systemd syntax — the minute repetition is independent of the
+# hour range. It was tested and rejected: "Failed to parse calendar specification".)
+#
+# Confirm on the VM before installing:
+#   systemd-analyze calendar --iterations=5 "Mon..Fri 08..17:00/15 Europe/London"
+#
+# Persistent=true catches up ONE missed run after a reboot — safe because both phases are idempotent
+# per (outreach record, sequence step).
+
+[Unit]
+Description=Automation Suite — follow-up automation schedule (NEVER sends)
+Documentation=file:/home/opc/automation-suite/docs/AUTOMATION_PILOT.md
+
+[Timer]
+OnCalendar=Mon..Fri 08..17:00/15 Europe/London
+OnCalendar=Mon..Fri 18:00 Europe/London
+# Keeps this off the top-of-minute boundary the scheduled-send timer polls on.
+RandomizedDelaySec=120
+Persistent=true
+Unit=automation-suite-followups.service
+
+[Install]
+WantedBy=timers.target

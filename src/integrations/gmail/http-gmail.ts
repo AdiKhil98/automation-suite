@@ -60,7 +60,11 @@ export class HttpGmailDraftProvider implements GmailDraftProvider {
 
   async createDraft(req: CreateDraftRequest): Promise<GmailResult> {
     try {
-      const res = await this.call('POST', '/gmail/v1/users/me/drafts', { message: { raw: req.rawBase64Url } });
+      // threadId is included ONLY when the caller supplied one (a follow-up continuing its thread);
+      // otherwise the request body is byte-identical to the pre-threading behaviour.
+      const requestMessage: Record<string, unknown> = { raw: req.rawBase64Url };
+      if (req.threadId) requestMessage.threadId = req.threadId;
+      const res = await this.call('POST', '/gmail/v1/users/me/drafts', { message: requestMessage });
       const outcome = this.mapStatus(res.status);
       if (outcome !== 'ok' || !res.json) return { outcome, reason: `drafts.create status ${String(res.status)}` };
       const message = (res.json.message ?? {}) as Record<string, unknown>;

@@ -5,7 +5,7 @@ import { InvalidOutreachTransitionError } from '../../src/utils/errors.js';
 import { InMemoryOutreachStore } from '../support/outreach-memory.js';
 
 const TZ = 'Europe/Berlin';
-const policy: SequencePolicy = { step1DelayDays: 3, step2DelayDays: 5, dueHourLocal: 9 };
+const policy: SequencePolicy = { step1DelayDays: 2, step2DelayDays: 2, step3DelayDays: 3, dueHourLocal: 9 };
 const NOW = Date.parse('2026-07-20T12:00:00Z');
 
 function build(): { store: InMemoryOutreachStore; svc: OutreachService } {
@@ -97,7 +97,7 @@ describe('OutreachService follow-ups and replies', () => {
     await svc.recordMessage({ outreachRecordId: rec.id, messageType: 'INITIAL', sequenceStep: 0, subject: 's', body: 'b', sentAt: new Date(NOW) });
     const ok = await svc.scheduleFollowup(rec.id, 1, policy);
     expect(ok.outcome).toBe('SCHEDULED');
-    expect(ok.followup?.dueAt.toISOString()).toBe('2026-07-23T07:00:00.000Z');
+    expect(ok.followup?.dueAt.toISOString()).toBe('2026-07-22T07:00:00.000Z');
   });
 
   it('a reply cancels all pending follow-ups and sets reply metadata', async () => {
