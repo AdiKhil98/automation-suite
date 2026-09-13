@@ -15,17 +15,28 @@ jobs:
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: outreach
+          # Named *_test so it satisfies the destructive-test-database guard's test-only name
+          # rule. The guard refuses any database whose name is not clearly a test database, which
+          # is what stops a misconfigured run from ever pointing destructive tests at real data.
+          POSTGRES_DB: outreach_test
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U postgres -d outreach"
+          --health-cmd "pg_isready -U postgres -d outreach_test"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
 
     env:
-      DATABASE_URL: postgres://postgres:postgres@localhost:5432/outreach
+      # Job-wide: migrations and the build need an operational database URL. It points at the SAME
+      # ephemeral service container, so `pnpm db:migrate` prepares exactly the schema the
+      # integration tests then run against.
+      #
+      # Deliberately NOT set job-wide: NODE_ENV=test, TEST_DATABASE_URL, and
+      # ALLOW_TEST_DATABASE_DESTRUCTIVE_ACTIONS. Those three together are what unlock destructive
+      # truncation, so they are scoped to the single step that needs them rather than granted to
+      # every step in the job.
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/outreach_test
 
     steps:
       - uses: actions/checkout@v4
@@ -49,6 +60,16 @@ jobs:
         run: pnpm db:migrate
 
       - name: Integration tests (PostgreSQL)
+        # The destructive-test-database capability is granted HERE ONLY. src/persistence/
+        # test-database-guard.ts requires all four of: NODE_ENV=test, this capability flag, an
+        # explicit TEST_DATABASE_URL (there is deliberately no DATABASE_URL fallback), a loopback
+        # host, and a test-only database name. Every one of those is satisfied by the ephemeral
+        # service container above and by nothing else — no remote or production database can be
+        # reached from this step.
+        env:
+          NODE_ENV: test
+          TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/outreach_test
+          ALLOW_TEST_DATABASE_DESTRUCTIVE_ACTIONS: "true"
         run: pnpm test:integration
 
       - name: Build
