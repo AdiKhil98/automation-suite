@@ -11,6 +11,7 @@ import { LocalGmailTokenStore } from '../../integrations/gmail/token-store.js';
 import { DrizzleOutreachUnitOfWork } from '../../persistence/outreach-unit-of-work.js';
 import { OutreachReadRepository } from '../../persistence/repositories/outreach.repo.js';
 import { AppError } from '../../utils/errors.js';
+import { enforceStrictLiveRead } from './outreach.js';
 import { type CliContext } from '../context.js';
 
 function service(ctx: CliContext): OutreachService {
@@ -56,7 +57,7 @@ async function buildLiveBounceReader(
  */
 export async function outreachReconcileDeliveryCommand(
   ctx: CliContext,
-  opts: { record?: string; campaign?: string; confirmGmailRead?: boolean; mock?: boolean; dryReport?: boolean } = {},
+  opts: { record?: string; campaign?: string; confirmGmailRead?: boolean; mock?: boolean; dryReport?: boolean; strictLiveRead?: boolean } = {},
 ): Promise<void> {
   if (!ctx.config.OUTREACH_TRACKING_ENABLED) {
     console.log('Outreach tracking is disabled (OUTREACH_TRACKING_ENABLED=false). No action taken.');
@@ -104,6 +105,15 @@ export async function outreachReconcileDeliveryCommand(
 
   const dryRun = opts.dryReport === true;
   const report = await runDeliveryReconciliation({ reader, service: service(ctx), outbounds, dryRun });
+
+  // Reported for every run; only ENFORCED (non-zero exit) under --strict-live-read on a live read.
+  // Placed before the dry-report early return so a dry run is held to the same read standard.
+  enforceStrictLiveRead({
+    strict: opts.strictLiveRead === true,
+    readExternally: report.readExternally,
+    failures: reader.readFailures(),
+    command: 'outreach-reconcile-delivery',
+  });
 
   console.log(`\nDelivery reconciliation (reader=${report.reader}, external=${String(report.readExternally)}${dryRun ? ', DRY REPORT — no writes' : ''}):`);
   console.log(`  tracked outbounds:    ${String(outbounds.length)}`);

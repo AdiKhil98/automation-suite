@@ -1,4 +1,5 @@
 import { type InboundMessage } from '../../domain/outreach/reply-classification.js';
+import { type GmailReadFailure } from './read-failure.js';
 
 /**
  * Phase 17A Gmail reply boundary — STRICTLY READ-ONLY. The only operation is reading
@@ -18,4 +19,14 @@ export interface GmailThreadReader {
    * reply is inferred).
    */
   readThread(threadId: string): Promise<InboundMessage[]>;
+  /**
+   * Reads that did NOT complete during this run, as structured data rather than log text.
+   *
+   * `readThread` keeps returning [] on failure so a transport error is never mistaken for a
+   * reply. That makes an outage look like "nothing new" at the return value, so a caller who
+   * must distinguish the two — an unattended pre-check gating follow-up automation — consults
+   * this instead. Empty means every selected thread was actually read. A thread that was read
+   * successfully and simply had no reply is NOT recorded.
+   */
+  readFailures(): readonly GmailReadFailure[];
 }
