@@ -144,7 +144,8 @@ describe('operatorEmailApprove (PostgreSQL)', () => {
     const s = await seedOutreachReady();
     const args = { lead: s.leadId, finding: s.findingId, subject: SUBJECT, bodyFile: bodyFile(), by: 'Adi', confirm: true };
     await operatorEmailApproveCommand(ctx(), args);
-    await expect(operatorEmailApproveCommand(ctx(), { ...args, bodyFile: bodyFile() })).rejects.toThrow(/LEAD_NOT_APPROVABLE/);
+    await expect(operatorEmailApproveCommand(ctx(), { ...args, bodyFile: bodyFile() }))
+      .rejects.toMatchObject({ code: 'LEAD_NOT_APPROVABLE' });
     expect(await handle.db.select().from(emailDrafts).where(eq(emailDrafts.leadId, s.leadId))).toHaveLength(1);
   });
 });
