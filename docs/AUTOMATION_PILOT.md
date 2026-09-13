@@ -245,6 +245,72 @@ journalctl -u automation-suite-scheduled-sends.service -n 50 --no-pager   # watc
 Only once the sender is confirmed healthy, install the follow-up unit (both `FOLLOWUP_*` gates
 false), then enable preparation, then run the controlled first-follow-up validation below.
 
+## Inbox freshness before preparation (ExecStartPre chain)
+
+Reply/bounce sync was never scheduled anywhere before this feature, so follow-up preparation could
+otherwise reason about an inbox nobody had read for days. The follow-up unit therefore runs both
+read-only Gmail passes as `ExecStartPre` guards, in a fixed order, before the runner:
+
+```
+1. outreach-sync-replies        --confirm-gmail-read --strict-live-read
+2. outreach-reconcile-delivery  --confirm-gmail-read --strict-live-read
+3. run-followup-automation                      (only if 1 and 2 both succeeded)
+```
+
+systemd runs `ExecStartPre` entries in order and, for `Type=oneshot`, aborts the unit if any exits
+non-zero — so `ExecStart` never runs after a failed guard. Both passes use the SEPARATE read-only
+credential (`.gmail-read-credentials.json`, mode 600); the compose/send credential cannot reach
+them, and neither sends, drafts, labels, archives, or modifies anything in Gmail.
+
+### What this chain guarantees
+
+**Ordering and configuration validity.** Both commands exit non-zero when a live read is REFUSED up
+front: `GMAIL_REPLY_SYNC_ENABLED` off, `--confirm-gmail-read` missing, absent or wrong-scope
+credentials, an unusable token store.
+
+**Proof-of-read, via `--strict-live-read`.** Without that flag the readers return an empty result on
+a failed Gmail call — correct for reply detection, since a transport error must never be mistaken
+for "a reply exists" — but it makes an outage indistinguishable from "inbox checked, nothing new".
+
+Strict mode closes that gap without changing what the readers return. Each failed read is recorded
+as STRUCTURED DATA (`GmailReadFailure`: scope, id, reason, HTTP status, short detail — never parsed
+from logs), and the command exits non-zero if any selected read did not complete. Covered: timeout,
+network error, 401, 403, 429, 5xx, and a 2xx whose body is unusable.
+
+Reading successfully and finding nothing is still success. A message that was read but is not a
+usable DSN is not a failure either.
+
+Partial reads stay applied: if one thread is read and contains a genuine reply while another thread
+fails, the reply is applied (that only ever ADDS suppression) and the command still exits non-zero
+so the unit aborts. Default, non-strict behaviour is byte-identical to before for every manual and
+ad-hoc use.
+
+### Paid model calls
+
+Preparation calls a writer and a reviewer model per follow-up. Two properties keep that bounded:
+
+- **Lazy provider construction.** `run-followup-automation` builds the LLM provider inside `compose`,
+  which the runner reaches only for a candidate that is genuinely due, unsuppressed, not already
+  prepared, and whose lead sits at the `SENT` re-entry point. A timer fire with nothing due
+  constructs no OpenAI client and makes zero paid calls. Pinned by
+  `tests/unit/followup-deployment-safety.test.ts`.
+- **`ALLOW_PAID_LLM_CALLS` lives in a production drop-in, never in git and never in `.env`.** The
+  repository unit ships it `false`. `.env` is the wrong home because it is a GLOBAL paid-call kill
+  switch — arming it there would arm paid calls for every CLI invocation on the box, including
+  ad-hoc manual ones. In the unit's environment it is scoped to this service alone. See
+  `deploy/systemd/automation-suite-followups.service.d/20-preparation-live.conf.example`.
+
+With `LLM_PROVIDER=openai` and `ALLOW_PAID_LLM_CALLS=false`, `buildEmailProvider` throws rather than
+silently falling back to the mock, so a misconfigured box fails visibly instead of producing fake
+copy.
+
+### Adopting the codified unit over the manual drop-ins
+
+`ExecStartPre` is a LIST. Installing the repository unit while
+`/etc/systemd/system/automation-suite-followups.service.d/10-inbox-safety.conf` still exists would
+ACCUMULATE both copies and run each Gmail read twice. Delete that drop-in when adopting the unit;
+keep `20-preparation-live.conf`, which carries the production-only switches.
+
 ## Controlled first-follow-up validation
 
 **The point of no return is the SCHEDULE stage.** Dispatch requires `leads.status='SCHEDULED'` AND an

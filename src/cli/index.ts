@@ -920,7 +920,8 @@ program
   .option('--mock', 'explicitly use the OFFLINE mock reader (no external Gmail access)')
   .option('--record <id>', 'restrict to one tracked outreach record')
   .option('--campaign <name>', 'restrict to one campaign')
-  .action((opts: { confirmGmailRead?: boolean; mock?: boolean; record?: string; campaign?: string }) => withContext((ctx) => outreachSyncRepliesCommand(ctx, opts)));
+  .option('--strict-live-read', 'LIVE reads only: exit NONZERO if any selected Gmail read fails (timeout, 401/403/429/5xx, network, unusable response). Reading successfully and finding nothing is still success. Use for unattended pre-checks that must not let downstream automation act on an inbox that was never actually read.')
+  .action((opts: { confirmGmailRead?: boolean; mock?: boolean; record?: string; campaign?: string; strictLiveRead?: boolean }) => withContext((ctx) => outreachSyncRepliesCommand(ctx, opts)));
 
 program
   .command('sheets-auth')
@@ -962,7 +963,8 @@ program
   .option('--confirm-gmail-read', 'confirm a LIVE read-only Gmail read (only honored with GMAIL_REPLY_SYNC_ENABLED=true)')
   .option('--mock', 'explicitly use the OFFLINE mock bounce reader (no external Gmail access)')
   .option('--dry-report', 'show the proposed correlation + state change; write NOTHING')
-  .action((opts: { record?: string; campaign?: string; confirmGmailRead?: boolean; mock?: boolean; dryReport?: boolean }) =>
+  .option('--strict-live-read', 'LIVE reads only: exit NONZERO if any selected Gmail read fails (timeout, 401/403/429/5xx, network, unusable response). Reading successfully and finding nothing is still success. Use for unattended pre-checks that must not let downstream automation act on an inbox that was never actually read.')
+  .action((opts: { record?: string; campaign?: string; confirmGmailRead?: boolean; mock?: boolean; dryReport?: boolean; strictLiveRead?: boolean }) =>
     withContext((ctx) => outreachReconcileDeliveryCommand(ctx, opts)));
 
 program

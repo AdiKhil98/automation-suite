@@ -68,7 +68,8 @@ describe('setContactEmail (PostgreSQL)', () => {
   it('rejects an invalid source type and a non-email value', async () => {
     const leadId = await seedLead();
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    await expect(setContactEmailCommand(ctx(), { lead: leadId, email: 'info@mayfield-dental.co.uk', sourceType: 'guessed', sourceUrl: 'https://x', confirm: true })).rejects.toThrow(/SOURCE_TYPE_INVALID/);
+    await expect(setContactEmailCommand(ctx(), { lead: leadId, email: 'info@mayfield-dental.co.uk', sourceType: 'guessed', sourceUrl: 'https://x', confirm: true }))
+      .rejects.toMatchObject({ code: 'SOURCE_TYPE_INVALID' });
     await setContactEmailCommand(ctx(), { lead: leadId, email: 'not-an-email', sourceType: 'website', sourceUrl: 'https://x', confirm: true });
     expect(process.exitCode).toBe(1);
     expect(await currentContactEmail(leadId)).toBeUndefined();

@@ -6,6 +6,7 @@ import { type AccessTokenProvider } from './oauth.js';
 import { GMAIL_READONLY_SCOPE } from './oauth.js';
 import { type GmailTokenStore } from './token-store.js';
 import { type GmailThreadReader } from './reply-provider.js';
+import { classifyHttpReadFailure, type GmailReadFailure, GmailReadFailureLog } from './read-failure.js';
 
 /** Fixed Gmail API origin — never configurable. */
 const GMAIL_API_ORIGIN = 'https://gmail.googleapis.com';
@@ -162,6 +163,13 @@ export class HttpGmailThreadReader implements GmailThreadReader {
    * thread, or malformed payload returns [] (fail-closed). The thread id is path-encoded; there
    * is no query search and no `q=` parameter anywhere.
    */
+  private readonly failures = new GmailReadFailureLog();
+
+  /** Structured record of reads that did not complete. See GmailThreadReader.readFailures. */
+  readFailures(): readonly GmailReadFailure[] {
+    return this.failures.list();
+  }
+
   async readThread(threadId: string): Promise<InboundMessage[]> {
     if (!threadId) return [];
     const token = await this.deps.tokens.getAccessToken(); // short-lived; never logged
@@ -173,11 +181,20 @@ export class HttpGmailThreadReader implements GmailThreadReader {
     try {
       res = await this.httpGet(path, token, this.deps.timeoutMs);
     } catch (err) {
+      // Return [] as before — a transport error must never be read as "a reply exists". The
+      // failure is ALSO recorded structurally so a strict caller can tell an outage apart from a
+      // genuinely empty thread. Recording changes nothing about what this method returns.
       this.deps.logger.warn({ threadId, err: err instanceof Error ? err.message : String(err) }, 'gmail thread read failed (fail-closed)');
+      this.failures.record({
+        scope: 'thread', id: threadId, reason: 'transport', status: null,
+        detail: err instanceof Error ? err.message : String(err),
+      });
       return [];
     }
     if (res.status < 200 || res.status >= 300 || !res.json) {
       this.deps.logger.warn({ threadId, status: res.status }, 'gmail thread read non-ok (fail-closed)');
+      const { reason, status } = classifyHttpReadFailure(res.status, !!res.json);
+      this.failures.record({ scope: 'thread', id: threadId, reason, status, detail: `gmail thread read returned ${String(res.status)}` });
       return [];
     }
 

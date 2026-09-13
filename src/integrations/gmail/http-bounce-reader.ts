@@ -4,6 +4,7 @@ import { type RawDeliveryNotification, type TrackedOutbound } from '../../domain
 import { normalizeEmail } from '../../domain/outreach/reply-classification.js';
 import { type AccessTokenProvider, GMAIL_READONLY_SCOPE } from './oauth.js';
 import { type GmailBounceReader } from './bounce-reader.js';
+import { classifyHttpReadFailure, type GmailReadFailure, GmailReadFailureLog } from './read-failure.js';
 import { type GmailHttpGet, type ReadAccessCheck } from './http-reply-provider.js';
 import { type GmailTokenStore } from './token-store.js';
 
@@ -109,6 +110,13 @@ export class HttpGmailBounceReader implements GmailBounceReader {
     return { ok: true };
   }
 
+  private readonly failures = new GmailReadFailureLog();
+
+  /** Structured record of reads that did not complete. See GmailBounceReader.readFailures. */
+  readFailures(): readonly GmailReadFailure[] {
+    return this.failures.list();
+  }
+
   async findDeliveryNotifications(input: { outbounds: readonly TrackedOutbound[] }): Promise<RawDeliveryNotification[]> {
     const recipients = [...new Set(input.outbounds.map((o) => normalizeEmail(o.contactEmail)).filter(Boolean))];
     // Nothing tracked to connect a DSN to → do not search the mailbox at all.
@@ -142,10 +150,20 @@ export class HttpGmailBounceReader implements GmailBounceReader {
     try {
       res = await this.httpGet(path, await this.deps.tokens.getAccessToken(), this.deps.timeoutMs);
     } catch (err) {
+      // [] as before — no bounce is ever inferred from an error — plus a structured record so a
+      // strict caller can tell "search failed" from "search matched nothing".
       this.deps.logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'gmail bounce search failed (fail-closed)');
+      this.failures.record({
+        scope: 'search', id: null, reason: 'transport', status: null,
+        detail: err instanceof Error ? err.message : String(err),
+      });
       return [];
     }
-    if (res.status < 200 || res.status >= 300 || !res.json) return [];
+    if (res.status < 200 || res.status >= 300 || !res.json) {
+      const { reason, status } = classifyHttpReadFailure(res.status, !!res.json);
+      this.failures.record({ scope: 'search', id: null, reason, status, detail: `gmail bounce search returned ${String(res.status)}` });
+      return [];
+    }
     const messages = Array.isArray(res.json.messages) ? res.json.messages : [];
     const ids: string[] = [];
     for (const m of messages as { id?: unknown }[]) {
@@ -162,9 +180,19 @@ export class HttpGmailBounceReader implements GmailBounceReader {
       res = await this.httpGet(path, await this.deps.tokens.getAccessToken(), this.deps.timeoutMs);
     } catch (err) {
       this.deps.logger.warn({ id, err: err instanceof Error ? err.message : String(err) }, 'gmail bounce fetch failed (fail-closed)');
+      this.failures.record({
+        scope: 'message', id, reason: 'transport', status: null,
+        detail: err instanceof Error ? err.message : String(err),
+      });
       return null;
     }
-    if (res.status < 200 || res.status >= 300 || !res.json) return null;
+    if (res.status < 200 || res.status >= 300 || !res.json) {
+      const { reason, status } = classifyHttpReadFailure(res.status, !!res.json);
+      this.failures.record({ scope: 'message', id, reason, status, detail: `gmail bounce fetch returned ${String(res.status)}` });
+      return null;
+    }
+    // A message that WAS read but is not a usable DSN is not a read failure: mapMessage may
+    // legitimately return null, and that is never recorded.
     return this.mapMessage(res.json as GmailFullMessage);
   }
 

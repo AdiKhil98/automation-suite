@@ -202,7 +202,8 @@ describe('deterministicFindingApprove (PostgreSQL)', () => {
 
     // Second attempt: lead is no longer NEEDS_MANUAL_REVIEW, so it fails closed before any duplicate write.
     process.exitCode = 0;
-    await expect(deterministicFindingApproveCommand(ctx(), args)).rejects.toThrow(/LEAD_NOT_APPROVABLE/);
+    await expect(deterministicFindingApproveCommand(ctx(), args))
+      .rejects.toMatchObject({ code: 'LEAD_NOT_APPROVABLE' });
     expect(await handle.db.select().from(deterministicFindings).where(eq(deterministicFindings.leadId, s.leadId))).toHaveLength(1);
     err.mockRestore();
   });

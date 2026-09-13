@@ -7,6 +7,7 @@ import { isFollowupStep } from '../../domain/outreach/sequence.js';
 import { MockGmailThreadReader } from '../../integrations/gmail/mock-reply-provider.js';
 import { HttpGmailThreadReader, liveReplyReadGate, selectReplyReader } from '../../integrations/gmail/http-reply-provider.js';
 import { type GmailThreadReader } from '../../integrations/gmail/reply-provider.js';
+import { type GmailReadFailure, summarizeGmailReadFailures } from '../../integrations/gmail/read-failure.js';
 import { AppError } from '../../utils/errors.js';
 import { loadGmailClientCredentials } from '../../integrations/gmail/client-config.js';
 import { GoogleOAuthClient } from '../../integrations/gmail/oauth.js';
@@ -224,6 +225,48 @@ export async function outreachFollowupsDueCommand(ctx: CliContext): Promise<void
 }
 
 /**
+ * Enforce strict live-read semantics after a run.
+ *
+ * Normal mode is unchanged: a failed Gmail read yields an empty result so nothing is ever inferred
+ * from an error, and the command exits 0. That is right for ad-hoc and manual use, where a partial
+ * read is better than none.
+ *
+ * Strict mode exists for the unattended pre-check that gates follow-up automation. There, "I could
+ * not read the inbox" and "the inbox has nothing new" must NOT look alike: composing a follow-up
+ * against an inbox that was never actually read is exactly the situation the pre-check prevents.
+ * So when a LIVE read was selected and any selected read failed, the command exits non-zero.
+ *
+ * Reading successfully and finding nothing is never a failure. Only genuine read failures —
+ * transport, 401/403/429/5xx, and unusable 2xx bodies — are recorded by the readers, as structured
+ * data rather than log text.
+ *
+ * Anything already applied from reads that DID succeed stays applied: a real reply or bounce that
+ * was found is genuine, and acting on it only ever adds suppression.
+ */
+export function enforceStrictLiveRead(args: {
+  strict: boolean;
+  readExternally: boolean;
+  failures: readonly GmailReadFailure[];
+  command: string;
+}): void {
+  if (args.failures.length > 0) {
+    console.log(`\n  Gmail reads that did NOT complete: ${String(args.failures.length)}`);
+    console.log(`   • ${summarizeGmailReadFailures(args.failures)}`);
+  }
+  if (!args.strict) return;
+  if (!args.readExternally) {
+    // Strict governs LIVE reads. The mock cannot have an outage, so there is nothing to enforce.
+    return;
+  }
+  if (args.failures.length === 0) return;
+  throw new AppError(
+    'GMAIL_READ_INCOMPLETE',
+    `${args.command}: --strict-live-read was requested but ${String(args.failures.length)} Gmail read(s) did not complete: ${summarizeGmailReadFailures(args.failures)}. `
+    + 'The inbox was not fully read, so downstream automation must not treat this state as current. Nothing further ran.',
+  );
+}
+
+/**
  * Build the guarded LIVE read-only Gmail reader. Returns a fail-closed reason instead of a
  * reader unless BOTH gates are satisfied: GMAIL_REPLY_SYNC_ENABLED=true AND --confirm-gmail-read.
  * The reader uses the SEPARATE readonly credential; a compose/send credential can never reach it.
@@ -262,7 +305,7 @@ async function buildLiveReader(
  */
 export async function outreachSyncRepliesCommand(
   ctx: CliContext,
-  opts: { confirmGmailRead?: boolean; mock?: boolean; record?: string; campaign?: string } = {},
+  opts: { confirmGmailRead?: boolean; mock?: boolean; record?: string; campaign?: string; strictLiveRead?: boolean } = {},
 ): Promise<void> {
   if (!requireEnabled(ctx)) return;
   const read = new OutreachReadRepository(ctx.db);
@@ -312,6 +355,13 @@ export async function outreachSyncRepliesCommand(
   for (const r of report.repliesApplied) {
     console.log(`  ${r.threadId}: ${r.classification} from ${r.fromEmail}`);
   }
+  // Reported for every run; only ENFORCED (non-zero exit) under --strict-live-read on a live read.
+  enforceStrictLiveRead({
+    strict: opts.strictLiveRead === true,
+    readExternally: report.readExternally,
+    failures: reader.readFailures(),
+    command: 'outreach-sync-replies',
+  });
   if (!report.readExternally) {
     console.log('Note: mock reader explicitly selected — no live Gmail access occurred. Enable GMAIL_REPLY_SYNC_ENABLED=true and pass --confirm-gmail-read (after `gmail-read-auth`) for a live read-only sync.');
   }

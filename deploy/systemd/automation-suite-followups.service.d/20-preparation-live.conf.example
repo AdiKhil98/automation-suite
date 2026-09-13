@@ -1,0 +1,35 @@
+# EXAMPLE production drop-in — NOT INSTALLED, and deliberately NOT the live file.
+#
+# Copy to /etc/systemd/system/automation-suite-followups.service.d/20-preparation-live.conf
+# (drop the .example suffix) when you decide to turn preparation on.
+#
+# WHY THIS LIVES IN A DROP-IN RATHER THAN THE UNIT IN GIT
+#
+# The base unit ships every one of these OFF. Two of them commit real-world resources:
+#   * ALLOW_PAID_LLM_CALLS  -> spends money at the model provider
+#   * FOLLOWUP_PREPARATION_ENABLED -> is what makes those calls happen
+# Version control should never carry "spend money" as a default, for the same reason it never
+# carries "send email" as a default. Keeping them here makes enabling them an explicit, dated,
+# auditable act on one machine instead of a property of the repository.
+#
+# It also scopes the blast radius. ALLOW_PAID_LLM_CALLS is a GLOBAL paid-call kill switch consulted
+# by the audit, composer, and email services alike. Setting it in this unit's environment affects
+# ONLY this unit's process. Putting it in /home/opc/automation-suite/.env would instead arm paid
+# calls for every CLI invocation on the box, including ad-hoc manual ones and anything the
+# scheduled-send unit shells out to. Keep it here, never in .env.
+#
+# systemd applies drop-ins AFTER the main unit file, and for Environment= the last assignment of a
+# given variable wins — so these override the base unit's false values. VERIFY the resolved result
+# on the box rather than trusting that from memory:
+#     systemctl show -p Environment automation-suite-followups.service
+#
+# FOLLOWUP_PROGRESSION_ENABLED stays FALSE here on purpose. Preparation only composes copy and parks
+# it in the human review queue. Progression is what advances approved copy toward a send schedule,
+# and the first real follow-up must stop after Gmail DRAFT creation for manual thread inspection —
+# so progression is run BY HAND, one stage at a time, until threading is verified. See
+# "Controlled first-follow-up validation" in docs/AUTOMATION_PILOT.md.
+
+[Service]
+Environment=FOLLOWUP_PREPARATION_ENABLED=true
+Environment=FOLLOWUP_PROGRESSION_ENABLED=false
+Environment=ALLOW_PAID_LLM_CALLS=true

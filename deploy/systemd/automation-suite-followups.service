@@ -39,9 +39,17 @@
 # GATES SHIP OFF. Both FOLLOWUP_* switches are false, so installing and even enabling the timer
 # performs NO work until they are deliberately flipped. That is the intended install state.
 #
+# MIGRATING FROM THE MANUAL DROP-INS: ExecStartPre is a LIST, not a scalar. Installing this unit
+# while /etc/systemd/system/automation-suite-followups.service.d/10-inbox-safety.conf still exists
+# would ACCUMULATE both copies and run each Gmail read TWICE. Delete that drop-in when adopting this
+# unit (the 20-preparation-live.conf drop-in stays — it carries the production-only switches).
+#
 # Install (only after approval):
+#   sudo rm -f /etc/systemd/system/automation-suite-followups.service.d/10-inbox-safety.conf
 #   sudo cp deploy/systemd/automation-suite-followups.{service,timer} /etc/systemd/system/
 #   sudo systemctl daemon-reload
+#   systemctl cat automation-suite-followups.service          # confirm ExecStartPre appears TWICE total
+#   systemctl show -p Environment automation-suite-followups.service   # confirm resolved gates
 #   sudo systemctl start automation-suite-followups.service   # one no-op run to prove wiring
 #   sudo systemctl enable --now automation-suite-followups.timer
 # Inspect:  journalctl -u automation-suite-followups.service -n 200 --no-pager
@@ -72,15 +80,51 @@ Environment=EMAIL_GENERATION_ENABLED=true
 Environment=GMAIL_DRAFTS_ENABLED=true
 Environment=GMAIL_DRAFT_ACTIONS_ENABLED=true
 Environment=SCHEDULING_ENABLED=true
+# Read-only Gmail. Required by BOTH ExecStartPre guards below; grants no write/send capability.
+Environment=GMAIL_REPLY_SYNC_ENABLED=true
 # Per-run bounds. Preparation costs model spend, so keep it small.
 Environment=FOLLOWUP_PREPARATION_MAX_PER_RUN=5
 Environment=FOLLOWUP_PROGRESSION_MAX_PER_RUN=10
+#
+# PAID-CALL KILL SWITCH — shipped OFF in version control on purpose.
+# Preparation calls a writer + reviewer model per follow-up, which costs real money. Spending is a
+# deliberate production decision, exactly like sending, so git never carries "spend money" as a
+# default. Production turns it on in a drop-in (see the .service.d example in this directory).
+# With LLM_PROVIDER=openai and this false, buildEmailProvider THROWS rather than silently falling
+# back to the mock, so a misconfigured box produces a visible failure, never a fake email.
+Environment=ALLOW_PAID_LLM_CALLS=false
 #
 # DELIBERATELY ABSENT — never add these here. They belong exclusively to
 # automation-suite-scheduled-sends.service:
 #   SENDING_ENABLED, OUTBOUND_ACTIONS_ENABLED, SCHEDULED_SEND_ENABLED,
 #   SENDING_PROVIDER=http, DRY_RUN=false
 
+# --- INBOX FRESHNESS CHAIN (codified from the 10-inbox-safety.conf production drop-in) ---
+#
+# Follow-up preparation must never reason about a stale inbox. systemd runs ExecStartPre entries in
+# order and, for Type=oneshot, ABORTS the unit if any exits non-zero — so ExecStart is skipped and
+# no follow-up is composed unless both read-only Gmail checks complete first:
+#
+#     1. reply sync            -> a reply cancels pending follow-ups
+#     2. delivery reconciliation -> a permanent bounce marks the record BOUNCED and cancels them
+#     3. only then             -> run-followup-automation
+#
+# Both are STRICTLY READ-ONLY: they use the separate read-only credential
+# (.gmail-read-credentials.json, mode 600) and the compose/send credential can never reach them.
+# Neither sends, drafts, labels, archives, or modifies anything in Gmail.
+#
+# --strict-live-read CLOSES THE PROOF-OF-READ GAP. Without it these commands exit ZERO when the
+# Gmail API itself fails mid-run: the readers return an empty result so a transport error can never
+# be mis-read as "a reply exists", which makes an OUTAGE look identical to "inbox checked, nothing
+# new". In strict mode the readers still return empty (nothing is ever inferred from an error) but
+# each failed read is recorded as STRUCTURED DATA, and the command exits non-zero if any selected
+# read did not complete. A read that succeeds and finds nothing is still success.
+#
+# So the chain now guarantees ordering, configuration validity, AND that the inbox was actually
+# read. Any timeout, 401/403, 429, 5xx, network error, or unusable response aborts the unit and
+# run-followup-automation does not execute.
+ExecStartPre=/usr/local/bin/pnpm cli outreach-sync-replies --confirm-gmail-read --strict-live-read
+ExecStartPre=/usr/local/bin/pnpm cli outreach-reconcile-delivery --confirm-gmail-read --strict-live-read
 ExecStart=/usr/local/bin/pnpm cli run-followup-automation
 
 # Worst-case runtime, from the actual config defaults:
@@ -89,9 +133,13 @@ ExecStart=/usr/local/bin/pnpm cli run-followup-automation
 #   x FOLLOWUP_PREPARATION_MAX_PER_RUN=5                      = 1200s
 #   progression = 10 x (GMAIL_TIMEOUT_MS=30s + DB)            ~= 300s
 #   total worst case                                          ~= 1500s
-# 1800s leaves ~20% headroom. Type=oneshot means systemd will not start a second instance while one
+# TimeoutStartSec covers ExecStartPre AND ExecStart, so the two read-only Gmail passes count too:
+#   reply sync + delivery reconciliation, GMAIL_TIMEOUT_MS=30s per request over the tracked
+#   threads/notifications                                     ~= 300s
+#   grand total worst case                                    ~= 1800s
+# 2400s leaves ~25% headroom. Type=oneshot means systemd will not start a second instance while one
 # is still running, so a slow run is skipped by the next timer fire rather than overlapping.
-TimeoutStartSec=1800
+TimeoutStartSec=2400
 
 # Credential/artifact files written by this service stay owner-only.
 UMask=0077

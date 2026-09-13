@@ -1,4 +1,5 @@
 import { type RawDeliveryNotification, type TrackedOutbound } from '../../domain/outreach/delivery.js';
+import { type GmailReadFailure } from './read-failure.js';
 
 /**
  * Phase 17C Gmail bounce-reconciliation boundary — STRICTLY READ-ONLY. The only
@@ -22,4 +23,11 @@ export interface GmailBounceReader {
   findDeliveryNotifications(input: {
     outbounds: readonly TrackedOutbound[];
   }): Promise<RawDeliveryNotification[]>;
+  /**
+   * Reads (the scoped search and each notification fetch) that did NOT complete during this run,
+   * as structured data rather than log text. Empty means every read actually completed. A search
+   * that succeeded and matched nothing, or a message that was read but is not a usable DSN, is
+   * NOT a failure and is never recorded.
+   */
+  readFailures(): readonly GmailReadFailure[];
 }
