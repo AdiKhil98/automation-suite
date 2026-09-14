@@ -323,6 +323,9 @@ export class ResumeEmailReviewService {
     const position: EmailSequencePosition = {
       step: draftRow.sequenceStep,
       threadSubject: isFollowup ? thread.threadSubject : draftRow.threadSubject,
+      // Re-validating with the CURRENT validator means the anti-repetition gate runs here too, so a
+      // resumed follow-up is judged against the same thread the preparation path would have used.
+      priorMessageBodies: thread.priorMessages.map((m) => m.body),
     };
     const emailInputs: EmailInputs = {
       facts: inputs.facts, findings: inputs.findings, demo: inputs.demo,

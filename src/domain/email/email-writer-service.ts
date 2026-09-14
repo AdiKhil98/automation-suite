@@ -214,7 +214,11 @@ export class EmailWriterService {
     const seq: SequenceContext = input.sequence ?? INITIAL_SEQUENCE_CONTEXT;
     // ONE sequence position drives both the rendered subject and the subject validation, so the
     // renderer and the validator can never disagree about whether this is a threaded follow-up.
-    const position: EmailSequencePosition = { step: seq.step, threadSubject: seq.threadSubject };
+    const position: EmailSequencePosition = {
+      step: seq.step,
+      threadSubject: seq.threadSubject,
+      priorMessageBodies: seq.priorMessages.map((m) => m.body),
+    };
     const emailInputs: EmailInputs = { facts: input.facts, findings: safeFindings, demo: input.demo,
       recipient: input.recipient ?? null, threadSubject: position.threadSubject };
     const ctx = buildEmailContext(emailInputs, position);

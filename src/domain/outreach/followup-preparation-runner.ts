@@ -39,7 +39,13 @@ export interface FollowupCandidateView {
    * repeated timer run a no-op; its human decision is what distinguishes "still awaiting review"
    * from "the operator rejected this copy".
    */
-  existingDraft: { id: string; humanDecision: string | null } | null;
+  existingDraft: { id: string; humanDecision: string | null; createdAtMs: number } | null;
+  /**
+   * When the PENDING follow-up row was created. Compared against a rejected draft's age to tell
+   * "this rejection belongs to the row in front of me" from "an operator rescheduled this step AFTER
+   * rejecting the old copy, and wants fresh copy for it".
+   */
+  followupCreatedAtMs: number;
 }
 
 export type FollowupPrepareAction =
@@ -79,7 +85,17 @@ export function decideFollowupPreparation(c: FollowupCandidateView): FollowupPre
   if (!suppression.allowed) {
     return { action: 'BLOCKED', reason: suppression.reason, detail: suppression.detail };
   }
-  if (c.existingDraft) {
+  // A rejected draft older than the pending row is a PREVIOUS attempt at this step: the operator
+  // rejected that copy and then deliberately re-scheduled the step through the normal path, which is
+  // the only way a replacement is ever requested. Treating that rejection as if it applied to the
+  // new row would cancel the freshly-scheduled follow-up on the next timer fire — regeneration would
+  // be impossible without editing the database by hand. The rejected row itself is never touched,
+  // and migration 0044's index permits the new draft precisely because REJECTED rows are excluded.
+  const rejectionSupersededByReschedule = c.existingDraft !== null
+    && c.existingDraft.humanDecision === 'REJECTED'
+    && c.existingDraft.createdAtMs < c.followupCreatedAtMs;
+
+  if (c.existingDraft && !rejectionSupersededByReschedule) {
     if (c.existingDraft.humanDecision === 'REJECTED') {
       return {
         action: 'CANCEL_REJECTED',

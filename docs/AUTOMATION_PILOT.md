@@ -408,6 +408,29 @@ skip the record as `AWAITING_HUMAN_REVIEW` while the failed draft is the newest 
 follow-up step. Resume requires the lead at `EMAIL_REVIEW_FAILED`, the draft at `REVIEW_FAILED`, and
 the debug record for its run to still exist (`EMAIL_DEBUG_DIR`, 7-day TTL).
 
+## Follow-up #2 must add something (anti-repetition)
+
+A follow-up that says the first email again in different words is worthless, and one reached human
+review in production. Three layers now answer it:
+
+| layer | what it does | what it cannot do |
+|---|---|---|
+| writer prompt (step 1) | must state what the first email established, then add ONE new layer; reference the issue, never restate it | nothing forces a model to comply |
+| deterministic gate | compares the candidate body with everything already sent; `followup_repeats_prior_message` on a replayed clause, pervasive phrase reuse, or too little new content. Free, runs before the reviewer | cannot see a true synonym rewrite |
+| reviewer (`addsClarityNotRestart`) | answers "what new understanding does the prospect gain?"; false for paraphrase, repeated evidence, or a consequence restated in synonyms | judgement, not arithmetic |
+
+The gate is deliberately conservative — naming the same issue ("cookie banner", "mobile", the
+business name, the thread subject) is continuity, not repetition, and is never penalised. Thresholds
+live in `REPETITION_LIMITS` with the measurements that set them.
+
+**Regenerating rejected copy.** Rejecting a follow-up rejects THAT COPY: the lead returns to SENT,
+the outreach record and its history are untouched, and the rejected draft is preserved. The pending
+row is then cancelled by the preparation runner. To get replacement copy, re-schedule that step
+(`outreach schedule-followup`); the next preparation run composes fresh copy for it, because a
+rejection older than the pending row belongs to the previous attempt. No writer call happens until
+preparation runs, and migration 0044's index allows the new draft because REJECTED rows are excluded
+from it.
+
 ## Controlled first-follow-up validation
 
 **The point of no return is the SCHEDULE stage.** Dispatch requires `leads.status='SCHEDULED'` AND an

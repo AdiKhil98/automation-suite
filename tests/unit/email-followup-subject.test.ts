@@ -36,8 +36,11 @@ const ctx = (sequence: EmailSequencePosition): EmailValidationContext => ({
   language: 'en',
 });
 
-const followup = (step: SequenceStep, threadSubject: string | null): EmailValidationContext =>
-  ctx({ step, threadSubject });
+const followup = (
+  step: SequenceStep,
+  threadSubject: string | null,
+  priorMessageBodies: readonly string[] = [],
+): EmailValidationContext => ctx({ step, threadSubject, priorMessageBodies });
 
 /** The writer output shape a correctly-behaved follow-up produces: the thread subject, three times. */
 const echoing = (threadSubject: string, over: Partial<EmailWriterOutput> = {}): EmailWriterOutput => ({

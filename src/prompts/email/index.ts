@@ -14,8 +14,13 @@ import {
 // Bumped for the sequence-aware rewrite: every step now carries its own job block (writer) and its
 // own rubric (reviewer), and the shared copy standard states the outcomes-over-tools principle.
 export const EMAIL_RUBRIC_VERSION = 'cold-email-copy-standard-4';
-export const EMAIL_WRITER_PROMPT_VERSION = 'email-writer-5';
-export const EMAIL_REVIEWER_PROMPT_VERSION = 'email-reviewer-5';
+// Bumped together with `SEQUENCE_JOBS_VERSION` for the Follow-up #2 clarity rewrite: the step-1
+// writer job and the step-1 reviewer rubric both changed materially (reference vs restate; "what new
+// understanding does the prospect gain?"). The JSON contract is unchanged, so EMAIL_SCHEMA_VERSION
+// deliberately stays where it is — and drafts written under the old instructions keep the versions
+// they recorded.
+export const EMAIL_WRITER_PROMPT_VERSION = 'email-writer-6';
+export const EMAIL_REVIEWER_PROMPT_VERSION = 'email-reviewer-6';
 
 export { SEQUENCE_JOBS_VERSION };
 

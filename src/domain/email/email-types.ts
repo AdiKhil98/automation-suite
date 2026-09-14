@@ -21,10 +21,19 @@ export interface EmailSequencePosition {
   step: SequenceStep;
   /** The exact subject of the thread a follow-up continues. Always null for step 0. */
   threadSubject: string | null;
+  /**
+   * The bodies already SENT in this thread, oldest first. Required, because the deterministic
+   * anti-repetition gate compares a follow-up against them: a step >= 1 composed with an empty list
+   * cannot be checked for repetition at all, so the omission has to be a deliberate `[]` rather than
+   * a forgotten field.
+   */
+  priorMessageBodies: readonly string[];
 }
 
-/** A first email: the model authors the subject and there is no thread to continue. */
-export const INITIAL_EMAIL_SEQUENCE: EmailSequencePosition = { step: 0, threadSubject: null };
+/** A first email: the model authors the subject, and there is no thread to continue or repeat. */
+export const INITIAL_EMAIL_SEQUENCE: EmailSequencePosition = {
+  step: 0, threadSubject: null, priorMessageBodies: [],
+};
 
 /**
  * Deterministic reply subject: prefix once, never twice. This is the ONLY rule in the system for

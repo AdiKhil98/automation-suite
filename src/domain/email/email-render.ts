@@ -97,6 +97,21 @@ const SIGNOFF_TEXT: Record<EmailLanguage, string> = {
   de: 'Beste Grüße',
 };
 
+/**
+ * Every fixed phrase the renderer adds around the model's copy. Exported so the deterministic
+ * anti-repetition gate can subtract them before comparing a follow-up with what was already sent:
+ * a shared greeting, CTA sentence or signoff is the system's own wording, never evidence that the
+ * model repeated itself.
+ */
+export const RENDER_BOILERPLATE_PHRASES: readonly string[] = [
+  ...Object.values(NEUTRAL_GREETING),
+  ...Object.values(SIGNOFF_TEXT),
+  ...Object.values(CTA_SENTENCE).flatMap((byCta) => Object.values(byCta)),
+  SENDER_NAME_TOKEN,
+  // The named greeting is a prefix; the name itself is a lead fact, not repeated copy.
+  ...Object.values(NAMED_GREETING).map((build) => build('').trim()),
+];
+
 export function demoLinkAllowed(demo: EmailDemoMeta | null): boolean {
   return demo !== null && demo.status === 'APPROVED';
 }

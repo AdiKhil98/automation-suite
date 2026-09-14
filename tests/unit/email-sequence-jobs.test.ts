@@ -2,9 +2,13 @@ import { describe, expect, it } from 'vitest';
 import {
   buildEmailReviewerMessages,
   buildEmailWriterMessages,
+  EMAIL_REVIEWER_PROMPT_VERSION,
+  EMAIL_WRITER_PROMPT_VERSION,
   type EmailBrief,
   type SequenceContext,
 } from '../../src/prompts/email/index.js';
+import { SEQUENCE_JOBS_VERSION } from '../../src/prompts/email/sequence-jobs.js';
+import { EMAIL_SCHEMA_VERSION } from '../../src/domain/email/email-schema.js';
 import { type EmailReviewParsed } from '../../src/domain/email/email-schema.js';
 import { isEmailReviewApprovable, sequenceJobSatisfied } from '../../src/domain/email/email-review-gate.js';
 import { type EmailWriterParsed } from '../../src/domain/email/email-schema.js';
@@ -222,5 +226,80 @@ describe('thread continuity', () => {
     expect(replySubject('Something I noticed')).toBe('Re: Something I noticed');
     expect(replySubject('Re: Something I noticed')).toBe('Re: Something I noticed');
     expect(replySubject('RE: Something I noticed')).toBe('RE: Something I noticed');
+  });
+});
+
+describe('Follow-up #2 clarity contract (production regression)', () => {
+  // The step-1 job used to say "Preserve continuity with the original email: same observation, same
+  // angle, same outcome" — an instruction a model satisfies by rewriting Outreach #1, which is
+  // exactly what shipped. Both prompts now demand a NEW layer and name the failure mode.
+  const writerStep1 = (): string => buildEmailWriterMessages(brief, null, seq(1)).system;
+  const reviewerStep1 = (): string => buildEmailReviewerMessages(brief, draft, seq(1)).system;
+
+  it('no longer tells the writer to reproduce the same observation and outcome', () => {
+    expect(writerStep1()).not.toContain('same observation, same angle, same outcome');
+  });
+
+  it('makes the reference-vs-restate distinction explicit for the writer', () => {
+    const system = writerStep1();
+    expect(system).toContain('REFERENCE THE PREVIOUS ISSUE — DO NOT RESTATE IT');
+    expect(system).toMatch(/REFERENCE \(required\)/);
+    expect(system).toMatch(/RESTATE \(forbidden\)/);
+    // Synonyms are named as the trap they are.
+    expect(system).toMatch(/fresh synonyms is still saying the same thing/i);
+  });
+
+  it('tells the writer to work out what the first email already established', () => {
+    const system = writerStep1();
+    expect(system).toMatch(/what it ALREADY established/);
+    expect(system).toMatch(/WHAT COUNTS AS A NEW LAYER/);
+    // ...and that a new layer is not licence to invent evidence.
+    expect(system).toMatch(/A new LAYER is not a new CLAIM: invent nothing/);
+  });
+
+  it('keeps the step-1 constraints that already worked', () => {
+    const system = writerStep1();
+    expect(system).toContain('just following up');
+    expect(system).toContain('Do NOT restart the pitch');
+    expect(system).toMatch(/SHORTER and easier to read than the first email/);
+    expect(system).toMatch(/No pressure, no deadline, no scarcity/);
+  });
+
+  it('gives the reviewer the question that decides the verdict', () => {
+    const system = reviewerStep1();
+    expect(system).toMatch(/WHAT NEW UNDERSTANDING DOES THE PROSPECT GAIN/);
+    expect(system).toMatch(/If the honest answer is "none"/);
+  });
+
+  it('names every way a step-1 email can fail by adding nothing', () => {
+    const system = reviewerStep1();
+    expect(system).toMatch(/paraphrases the previous observation/);
+    expect(system).toMatch(/repeats the same evidence without adding a clarification/);
+    expect(system).toMatch(/restates the same business consequence in synonyms/);
+    expect(system).toMatch(/knowing essentially nothing they did not know before/);
+    expect(system).toMatch(/Fluent rewriting is not clarity/);
+  });
+
+  it('does not weaken the fabrication and honesty rules', () => {
+    const system = reviewerStep1();
+    expect(system).toContain('fabricationRisk');
+    expect(system).toMatch(/Never invent customer behavior, revenue, performance/);
+    expect(system).toContain('SINGLE-OBSERVATION, BUYER-LANGUAGE STANDARD');
+  });
+
+  it('leaves steps 2 and 3 with their own jobs', () => {
+    expect(buildEmailWriterMessages(brief, null, seq(2)).system).toContain('COMPRESS THE ISSUE AND REDUCE PRESSURE');
+    expect(buildEmailWriterMessages(brief, null, seq(3)).system).toContain('create ONE clean YES / NO decision');
+    // The step-1 clarity block belongs to step 1 only.
+    expect(buildEmailWriterMessages(brief, null, seq(2)).system).not.toContain('REFERENCE THE PREVIOUS ISSUE');
+    expect(buildEmailWriterMessages(brief, null, seq(0)).system).not.toContain('REFERENCE THE PREVIOUS ISSUE');
+  });
+
+  it('records the version bump so a stored draft traces to the instructions that produced it', () => {
+    expect(SEQUENCE_JOBS_VERSION).toBe('sequence-jobs-2');
+    expect(EMAIL_WRITER_PROMPT_VERSION).toBe('email-writer-6');
+    expect(EMAIL_REVIEWER_PROMPT_VERSION).toBe('email-reviewer-6');
+    // The JSON contract did not change, so the schema version deliberately did not move.
+    expect(EMAIL_SCHEMA_VERSION).toBe('email-copy-schema-5');
   });
 });

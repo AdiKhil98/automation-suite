@@ -6,6 +6,7 @@ import {
   type EmailWriterOutput,
 } from './email-types.js';
 import { type EmailLanguage, hasForeignLanguage } from './email-language.js';
+import { analyzeFollowupRepetition } from './followup-repetition.js';
 
 export interface EmailValidationContext {
   availableEvidenceIds: Set<string>;
@@ -182,6 +183,32 @@ function validateSubjects(
 }
 
 /**
+ * A follow-up must CONTRIBUTE something. Deterministic, model-free comparison against the bodies
+ * already sent in this thread: a step >= 1 that replays a clause from an earlier email, recycles most
+ * of its phrasing, or adds essentially no new content is refused before the reviewer is ever called.
+ *
+ * Referencing the same issue is explicitly fine — the shared subject of the conversation is the
+ * whole point of a thread. What is refused is REPLAYING it. See `followup-repetition.ts` for the
+ * thresholds, the normalisation, and the boundary this gate deliberately does not cross.
+ */
+function validateFollowupAddsSomething(body: string, sequence: EmailSequencePosition): string[] {
+  if (sequence.step === 0 || sequence.priorMessageBodies.length === 0) return [];
+  const analysis = analyzeFollowupRepetition({
+    candidateBody: body,
+    priorBodies: sequence.priorMessageBodies,
+    threadSubject: sequence.threadSubject,
+  });
+  if (!analysis.repeats) return [];
+  return [
+    'followup_repeats_prior_message',
+    // Diagnostic companion: which rule fired and on what measurement, so a rejected draft can be
+    // understood without re-running anything.
+    `followup_repetition:${analysis.reason ?? 'UNKNOWN'}:run=${String(analysis.longestSharedRun)}`
+      + `:reuse=${analysis.sharedBigramRatio.toFixed(2)}:novel=${String(analysis.novelContentTokens)}`,
+  ];
+}
+
+/**
  * Fail-closed deterministic copy gate. It checks objective syntax, provenance, CTA, competitor,
  * urgency, genericity, and approved-demo bindings before the independent reviewer is called.
  */
@@ -199,6 +226,7 @@ export function validateEmail(out: EmailWriterOutput, ctx: EmailValidationContex
   const allModelText = [...copySegments, ...strategySegments].join('\n');
 
   violations.push(...validateSubjects(out, subjects, ctx.sequence));
+  violations.push(...validateFollowupAddsSomething(body, ctx.sequence));
   if (out.genericity_score > 40) violations.push(`genericity_score_too_high:${String(out.genericity_score)}`);
 
   const paragraphs = body.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);

@@ -6,6 +6,35 @@ All notable changes per phase. Format loosely follows Keep a Changelog.
 
 ### Fixed
 
+- **Follow-up #2 could restate Outreach #1 and be approved.** The step-1 writer job ended with
+  "Preserve continuity with the original email: same observation, same angle, same outcome" — an
+  instruction a model satisfies by rewriting the first email, and in production one did: the same
+  cookie-banner observation and the same friction consequence in fresh words. Nothing stopped it.
+  The reviewer's `addsClarityNotRestart` only listed ways of RESTARTING (restart the pitch,
+  re-introduce, recap, "just following up", switch angle) — none of which a fluent paraphrase does —
+  and no deterministic check ever compared the candidate with what had already been sent. Three
+  changes:
+  * the step-1 writer job now requires naming what the first email established and adding exactly
+    one new layer (distinction, concrete implication, specific moment, or an artefact offered), and
+    makes the REFERENCE-vs-RESTATE line explicit, including that synonyms are still restating;
+  * the step-1 reviewer rubric is decided by one question — "what new understanding does the
+    prospect gain that they did not already have?" — and `addsClarityNotRestart` is false for a
+    paraphrase, repeated evidence, a consequence restated in synonyms, or a message that leaves the
+    prospect knowing nothing new. Fabrication and honesty rules are untouched;
+  * a deterministic, model-free anti-repetition gate (`followup-repetition.ts`) compares the
+    candidate body with the bodies already sent and emits `followup_repeats_prior_message` before the
+    reviewer is ever called.
+- **A rejected follow-up could not be regenerated.** Rejecting step-1 copy correctly returns the lead
+  to SENT and cancels the pending row, but the preparation runner then treated that rejection as
+  applying to any FUTURE row for the same step: re-scheduling step 1 — the only way to ask for
+  replacement copy — was cancelled again on the next timer fire. A rejection older than the pending
+  row is now recognised as a previous attempt, so the rescheduled step composes fresh copy. The
+  rejected draft is never touched and migration 0044 is unchanged: its partial index already excludes
+  REJECTED rows, so the replacement occupies the slot legally.
+- Prompt versions bumped (`sequence-jobs-2`, `email-writer-6`, `email-reviewer-6`). The JSON contract
+  did not change, so `EMAIL_SCHEMA_VERSION` deliberately stays at `email-copy-schema-5`, and drafts
+  written under the old instructions keep the versions they recorded.
+
 - **The reviewer-only retry budget was per-call, not per-draft.** Because failed reviewer attempts
   now deliberately increment `total_cost_usd`, admitting a retry on "this one call fits under the
   cap" would let unlimited retries walk past the per-lead budget while each call looked affordable.

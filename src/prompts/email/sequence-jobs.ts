@@ -14,7 +14,11 @@ import { type SequenceStep } from '../../domain/outreach/sequence.js';
  *
  * Versioned so a stored email can always be traced back to the exact instructions that produced it.
  */
-export const SEQUENCE_JOBS_VERSION = 'sequence-jobs-1';
+// Bumped for the Follow-up #2 clarity rewrite: the step-1 job used to say "same observation, same
+// angle, same outcome", which invited a reworded copy of Outreach #1 — and produced one in
+// production. Step 1 now has to state what the first email already established and add a
+// materially new layer, and the reviewer judges exactly that.
+export const SEQUENCE_JOBS_VERSION = 'sequence-jobs-2';
 
 /**
  * The commercial principle that governs every step: we are paid for outcomes, not for tools. Copy
@@ -40,18 +44,42 @@ THE JOB OF THIS EMAIL: earn attention and permission, and open a conversation.
 ${OUTCOMES_PRINCIPLE}`;
 
 const STEP_1 = `SEQUENCE POSITION: Follow-up #2 (internal sequence step 1). Outreach #1 was already
-sent to this recipient in this same email thread and received no reply.
+sent to this recipient in this same email thread and received no reply. Its exact text is supplied
+to you below under ALREADY SENT IN THIS THREAD.
 
-THE JOB OF THIS EMAIL: ADD CLARITY. Nothing else.
+THE JOB OF THIS EMAIL: ADD CLARITY — exactly one new layer of understanding on top of the
+conversation that already exists.
+
+BEFORE YOU WRITE, work out from the sent email:
+  (a) what it ALREADY established — the observation, the evidence it cited, and the business
+      consequence it drew; and
+  (b) what a reader could still be unclear, sceptical, or curious about after reading it.
+This email exists to answer (b). If you cannot name something in (b), you have nothing to send.
+
+REFERENCE THE PREVIOUS ISSUE — DO NOT RESTATE IT. The difference decides whether this email is worth
+sending:
+- REFERENCE (required): name the issue briefly so the reader knows what this is about, then move
+  past it. "The banner I mentioned" is a reference.
+- RESTATE (forbidden): describe the same observation again, cite the same evidence again, or draw
+  the same business consequence again — in ANY wording, however rephrased. Saying the same thing in
+  fresh synonyms is still saying the same thing, and the recipient learns nothing.
+
+WHAT COUNTS AS A NEW LAYER (pick exactly ONE, drawn only from the supplied evidence):
+- a DISTINCTION that corrects a likely misreading ("the issue isn't X itself, it's that ...");
+- a CONSEQUENCE made concrete for one specific moment in the customer journey that the first email
+  left general;
+- an IMPLICATION the first email did not state;
+- a CONCRETE ARTEFACT you can offer to show, when the evidence supports its existence.
+
+HARD RULES:
 - Assume the first email was read. Do NOT restart the pitch and do NOT re-introduce yourself.
-- Make the ORIGINAL observation easier to understand, clarify what was meant, or make the useful
-  outcome more concrete. That is the entire purpose.
-- Preserve continuity with the original email: same observation, same angle, same outcome.
-- Do NOT introduce a completely unrelated angle, a second finding, or new material.
+- Do NOT introduce an unrelated angle, a second finding, or any material the evidence does not
+  support. A new LAYER is not a new CLAIM: invent nothing.
 - Never write "just following up", "circling back", "bumping this", "checking in", or any variant.
-- No recap of the previous email. No summary of what you already said. No apology for writing again.
+- No recap or summary of the previous email. No apology for writing again.
 - No pressure, no deadline, no scarcity. Exactly one simple next action.
-- Shorter than the first email.
+- SHORTER and easier to read than the first email.
+- The system writes the subject line for you; produce only the body.
 
 ${OUTCOMES_PRINCIPLE}`;
 
@@ -121,11 +149,26 @@ The step-specific booleans addsClarityNotRestart, compressedNotExpanded, pressur
 binaryReplyClose do NOT apply to a first email — report all four as true.`;
 
 const REVIEWER_STEP_1 = `SEQUENCE REVIEW — Follow-up #2 (internal step 1). The first email already
-went out in this thread. Judge the JOB of THIS email: does it ADD CLARITY?
-- addsClarityNotRestart: false when the email restarts the pitch, re-introduces the sender, recaps
-  the previous email, opens with "just following up"/"circling back"/"checking in", or switches to a
-  completely unrelated angle or a second finding. True ONLY when it clarifies the ORIGINAL
-  observation or makes its outcome more concrete while preserving continuity.
+went out in this thread and its exact text is supplied to you.
+Judge the JOB of THIS email: does it ADD CLARITY?
+
+THE TEST THAT DECIDES addsClarityNotRestart. Read the sent email, then read this one, then answer in
+your own head: WHAT NEW UNDERSTANDING DOES THE PROSPECT GAIN FROM THIS MESSAGE THAT THEY DID NOT
+ALREADY HAVE? If the honest answer is "none", or if you can only answer by pointing at wording that
+is different rather than at understanding that is new, then addsClarityNotRestart is FALSE.
+
+- addsClarityNotRestart: FALSE when the email
+    * paraphrases the previous observation, however well written;
+    * repeats the same evidence without adding a clarification, distinction or implication;
+    * restates the same business consequence in synonyms;
+    * leaves the prospect knowing essentially nothing they did not know before;
+    * restarts the pitch, re-introduces the sender, recaps the previous email, opens with
+      "just following up"/"circling back"/"checking in";
+    * or switches to a completely unrelated angle or a second finding.
+  TRUE ONLY when the email names the existing issue and then ADDS one materially new layer — a
+  distinction, a concrete implication, a specific moment it affects, or an artefact offered — that
+  the sent email did not contain. Fluent rewriting is not clarity. Being a reasonable email is not
+  enough: at this position, adding nothing is a failure.
 - compressedNotExpanded: false when this email is longer or heavier than a first email would be.
 - pressureReduced: false when it applies pressure, urgency, guilt, a deadline, or scarcity, or when
   it asks for more than one simple next action.
