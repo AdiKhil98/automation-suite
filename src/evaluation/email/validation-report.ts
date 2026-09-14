@@ -17,6 +17,7 @@ import { type ClaimSpan } from '../../domain/email/competitor-enrichment.js';
 import { categoryPoints, scoreEmail, type RubricInput, type RubricScore } from './email-quality-rubric.js';
 import { ACCEPTANCE, COMPETITOR_EMAIL_VALIDATION_RULES_VERSION } from './constants.js';
 import { type HarnessOutcome, type HarnessSuccess } from './harness.js';
+import { INITIAL_EMAIL_SEQUENCE } from '../../domain/email/email-types.js';
 
 export type ValidationResultKind = 'PASS' | 'REVISE' | 'FAIL';
 
@@ -87,7 +88,7 @@ function buildEnrichedRubricInput(result: HarnessSuccess): RubricInput {
   const enriched = result.enriched;
   const plan = result.plan;
   const sections = enriched.sections;
-  const ctx = buildEmailContext(result.emailInputs);
+  const ctx = buildEmailContext(result.emailInputs, INITIAL_EMAIL_SEQUENCE);
   const prospectEntry = enriched.ledger.find((e) => e.claimType === 'PROSPECT_OBSERVATION');
   const competitorEntry = enriched.ledger.find((e) => e.claimType === 'COMPETITOR_PATTERN');
   const ev = enriched.enrichedValidation.violations;
@@ -130,7 +131,7 @@ function buildEnrichedRubricInput(result: HarnessSuccess): RubricInput {
 }
 
 function buildBaselineRubricInput(result: HarnessSuccess): RubricInput {
-  const ctx = buildEmailContext(result.emailInputs);
+  const ctx = buildEmailContext(result.emailInputs, INITIAL_EMAIL_SEQUENCE);
   const baseDraft = result.baseDraft;
   const paras = baseDraft.email_body.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
   const prospectCited =

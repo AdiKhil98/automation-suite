@@ -1,6 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { type Logger } from 'pino';
-import { buildEmailReviewerMessages, EMAIL_REVIEWER_PROMPT_VERSION } from '../../prompts/email/index.js';
+import {
+  buildEmailReviewerMessages,
+  EMAIL_REVIEWER_PROMPT_VERSION,
+  type PriorSequenceMessage,
+} from '../../prompts/email/index.js';
 import { type LlmProvider, type LlmResult, type ReasoningEffort } from '../../integrations/llm/provider.js';
 import { worstCaseCostUsd } from '../../integrations/llm/pricing.js';
 import { type EmailDebugReader } from '../../integrations/email/email-debug-store.js';
@@ -16,7 +20,12 @@ import {
   emailWriterSchema,
 } from './email-schema.js';
 import { type EmailStatus } from './email-types.js';
-import { type EmailModelCall, type EmailPersist } from './email-writer-service.js';
+import {
+  type EmailModelCall,
+  type EmailPersist,
+  type EmailReviewOutcomeUpdate,
+} from './email-writer-service.js';
+import { type EmailSequencePosition } from './email-types.js';
 import { validateEmail } from './email-validation.js';
 import { isEmailReviewApprovable } from './email-review-gate.js';
 import { type SequenceStep } from '../outreach/sequence.js';
@@ -41,6 +50,18 @@ export interface PersistedDraftRow {
   outreachRecordId: string | null;
   /** The thread subject the source draft continued, when it was a threaded follow-up. */
   threadSubject: string | null;
+  /** Spend already recorded on this draft (the writer attempt). Resume adds the reviewer call. */
+  totalCostUsd: number;
+}
+
+/**
+ * The authoritative thread a follow-up continues, read from `outreach_messages` — the SAME source
+ * the preparation path uses. Never reconstructed from the failed draft: the draft is the email the
+ * reviewer must judge, not evidence of what was already sent.
+ */
+export interface ResumeThreadContext {
+  threadSubject: string | null;
+  priorMessages: readonly PriorSequenceMessage[];
 }
 
 export interface ResumeInputs {
@@ -58,7 +79,11 @@ export type ResumeAbortCode =
   | 'LEAD_NOT_REVIEW_FAILED'
   | 'DEBUG_RECORD_MISSING'
   | 'DEBUG_DRAFT_INVALID'
-  | 'RENDER_MISMATCH';
+  | 'RENDER_MISMATCH'
+  /** A follow-up draft carries no outreach record, so its thread cannot be resolved. */
+  | 'FOLLOWUP_OUTREACH_RECORD_MISSING'
+  /** The outreach record resolved to no thread: no original subject, or nothing sent yet. */
+  | 'FOLLOWUP_THREAD_CONTEXT_MISSING';
 
 export class ResumeReviewAbort extends Error {
   constructor(public readonly code: ResumeAbortCode, message: string) {
@@ -85,7 +110,10 @@ export interface ResumeReviewResult {
   callsMade: number;
   violations: string[];
   review: EmailReviewParsed | null;
+  /** Set only when a NEW row was appended (unbound drafts). Null for in-place recovery. */
   newDraftId: string | null;
+  /** The draft that now carries the reviewer outcome — the new row, or the recovered source row. */
+  resultDraftId: string | null;
   newLeadStatus: LeadStatus | null;
 }
 
@@ -105,16 +133,43 @@ export interface ResumeReviewPorts {
   loadDraft(draftId: string): Promise<PersistedDraftRow | null>;
   loadLeadStatus(leadId: string): Promise<string | null>;
   loadInputs(leadId: string): Promise<ResumeInputs>;
+  /**
+   * The authoritative thread context for a follow-up's outreach record. Called ONLY for steps 1-3,
+   * and before the reviewer: a follow-up whose thread cannot be resolved aborts rather than being
+   * judged against an empty history.
+   */
+  loadThreadContext(outreachRecordId: string): Promise<ResumeThreadContext | null>;
 }
 
-/** Atomic commit of the appended review outcome: supported lead-state transitions + a NEW
- * immutable email_drafts row (the original REVIEW_FAILED row is never mutated) + provenance
- * + the single model_call + an audit NOTE. Provided by the CLI (real UoW) or a test spy. */
+/**
+ * How the reviewer outcome reaches the database. Which one applies is decided by the SLOT the draft
+ * occupies, not by preference:
+ *
+ *  - `APPEND` — the draft is not bound to an outreach record (a first email / pre-sequence draft).
+ *    Nothing constrains it, so the historic behaviour stands: a NEW row is appended and the original
+ *    REVIEW_FAILED row is preserved untouched.
+ *
+ *  - `RECOVER_IN_PLACE` — the draft IS bound to (outreach record, sequence step). Migration 0044
+ *    declares at most ONE live draft per slot, so that row is the canonical draft for it and a
+ *    second row would be a duplicate competing for the same send slot (and would violate
+ *    `email_drafts_outreach_sequence_uk`). The reviewer outcome is therefore written ONTO that row.
+ *    The writer was not re-run, so every writer column, the subject, the body, the evidence
+ *    bindings, and the row id are unchanged; `human_decision` is untouched, because no human has
+ *    decided anything and forging a REJECTED decision to slip past the index would corrupt the
+ *    review trail.
+ */
+export type ResumeDraftWrite =
+  | { kind: 'APPEND'; persist: EmailPersist; newDraftId: string }
+  | { kind: 'RECOVER_IN_PLACE'; draftId: string; update: EmailReviewOutcomeUpdate; modelCalls: EmailModelCall[] };
+
+/** Atomic commit of the review outcome: supported lead-state transitions + the draft write above
+ * + the single model_call + an immutable audit NOTE. Provided by the CLI (real UoW) or a test spy. */
 export interface ResumeCommitPlan {
   leadId: string;
   approved: boolean;
   route: LeadStatus;
-  persist: EmailPersist;
+  /** How the outcome is written: a new row, or recovery of the canonical sequence draft. */
+  write: ResumeDraftWrite;
   sourceDraftId: string;
   reviewerDecision: string;
   costUsd: number;
@@ -171,9 +226,50 @@ export class ResumeEmailReviewService {
     }
     const draft = parsed.data;
 
+    // ---- Authoritative thread context for a follow-up (steps 1-3) ----
+    // The reviewer's rubric for a follow-up is about CONTINUITY: add clarity without restarting
+    // (step 1), compress without re-explaining (step 2), close without reopening (step 3). None of
+    // that can be judged against "(none)" prior messages, so the real thread is loaded from
+    // `outreach_messages` — the same source the preparation path uses — and a follow-up whose
+    // thread cannot be resolved aborts BEFORE the paid reviewer call rather than being judged blind.
+    const isFollowup = draftRow.sequenceStep > 0;
+    let thread: ResumeThreadContext = { threadSubject: null, priorMessages: [] };
+    if (isFollowup) {
+      if (draftRow.outreachRecordId === null) {
+        throw new ResumeReviewAbort(
+          'FOLLOWUP_OUTREACH_RECORD_MISSING',
+          `Draft ${draftId} is sequence step ${String(draftRow.sequenceStep)} but carries no outreach record; its thread cannot be resolved.`,
+        );
+      }
+      const loaded = await this.deps.ports.loadThreadContext(draftRow.outreachRecordId);
+      if (!loaded || loaded.threadSubject === null || loaded.threadSubject.trim() === '' || loaded.priorMessages.length === 0) {
+        throw new ResumeReviewAbort(
+          'FOLLOWUP_THREAD_CONTEXT_MISSING',
+          `No thread context for outreach record ${draftRow.outreachRecordId}; refusing to review a follow-up against an empty thread.`,
+        );
+      }
+      thread = loaded;
+    }
+
     const inputs = await this.deps.ports.loadInputs(leadId);
-    const emailInputs: EmailInputs = { facts: inputs.facts, findings: inputs.findings, demo: inputs.demo };
-    const ctx = buildEmailContext(emailInputs);
+    // Sequence provenance carried from the persisted row. Without it a threaded follow-up would be
+    // re-rendered with a NEW model-authored subject (failing the integrity gate below) and
+    // re-validated under the first-email subject rules — the same initial-vs-follow-up assumption
+    // that rejected correctly-threaded follow-ups in the writer.
+    //
+    // The thread subject comes from the AUTHORITATIVE thread for a follow-up (the original sent
+    // subject), and from the stored row only for an unbound draft. `replySubject` is idempotent, so
+    // the raw subject and the stored `Re: `-prefixed one render and compare identically — and the
+    // integrity gate below still proves the re-render matches the persisted row byte for byte.
+    const position: EmailSequencePosition = {
+      step: draftRow.sequenceStep,
+      threadSubject: isFollowup ? thread.threadSubject : draftRow.threadSubject,
+    };
+    const emailInputs: EmailInputs = {
+      facts: inputs.facts, findings: inputs.findings, demo: inputs.demo,
+      threadSubject: position.threadSubject,
+    };
+    const ctx = buildEmailContext(emailInputs, position);
 
     // Integrity gate: the reloaded draft must render byte-identically to the persisted row.
     const rendered = renderEmail(draft, emailInputs);
@@ -199,7 +295,11 @@ export class ResumeEmailReviewService {
     // Exactly one reviewer call — same reviewer contract as the writer service.
     const brief = buildEmailBrief(emailInputs);
     const rMsgs = buildEmailReviewerMessages(brief, draft, {
-      step: draftRow.sequenceStep, threadSubject: draftRow.threadSubject, priorMessages: [],
+      step: draftRow.sequenceStep,
+      threadSubject: position.threadSubject,
+      // The exact messages already sent in this thread. Without them the sequence-job rubric is
+      // unjudgeable; with them the resumed review sees what the preparation path's review saw.
+      priorMessages: thread.priorMessages,
     });
     const rRes = await this.deps.provider.generate({
       task: 'email_review', system: rMsgs.system, user: rMsgs.user, images: [], outputSchema: EMAIL_REVIEW_JSON_SCHEMA,
@@ -219,21 +319,56 @@ export class ResumeEmailReviewService {
 
     // The EXISTING approvable gate — shared with the writer service (single source of truth).
     const approvable = isEmailReviewApprovable(review, {
-      sequenceStep: draftRow.sequenceStep, subjectIsThreadContinuity: draftRow.threadSubject !== null,
+      sequenceStep: draftRow.sequenceStep, subjectIsThreadContinuity: position.threadSubject !== null,
     });
 
     const route: LeadStatus = rendered.hasDemoUrlPlaceholder ? 'WAITING_FOR_DEMO_URL' : 'READY_FOR_HUMAN_APPROVAL';
-    const newDraftId = randomUUID();
     const modelCall = this.modelCall(rRes);
-    const persist = this.buildPersist({ newDraftId, runId, draftRow, rendered, review, approvable, cost, modelCall, rRes });
+    const status: EmailStatus = approvable ? 'APPROVED' : 'REVIEW_FAILED';
+
+    // WHICH ROW receives the outcome is decided by the slot the draft occupies, never by preference.
+    // A sequence-bound draft is the canonical draft for its (outreach record, sequence step) slot —
+    // migration 0044 allows exactly one — so appending a second row would both violate that index
+    // and create two drafts competing for one send slot. Recovery writes onto the canonical row.
+    const write: ResumeDraftWrite = draftRow.outreachRecordId === null
+      ? (() => {
+          const newDraftId = randomUUID();
+          return {
+            kind: 'APPEND' as const,
+            newDraftId,
+            persist: this.buildPersist({ newDraftId, runId, draftRow, rendered, review, approvable, cost, modelCall, rRes }),
+          };
+        })()
+      : {
+          kind: 'RECOVER_IN_PLACE' as const,
+          draftId: draftRow.id,
+          update: {
+            status,
+            reviewerPromptVersion: EMAIL_REVIEWER_PROMPT_VERSION,
+            requestedReviewerModel: c.reviewerModel,
+            reviewerResponseId: rRes.responseId,
+            reviewerDecision: review.decision,
+            fabricationRisk: review.fabricationRisk,
+            personalizationSupported: review.evidenceSupported && review.sufficientlyPersonalized,
+            claimHonest: review.urgencySupported && review.competitorClaimsSupported && !review.fabricationRisk,
+            reviewerProblems: [...review.problems, ...review.requiredRevisions],
+            // Honest cumulative accounting: the writer attempt already on the row, plus this call.
+            totalCostUsd: draftRow.totalCostUsd + cost,
+          },
+          modelCalls: [modelCall],
+        };
 
     await this.deps.commit({
-      leadId, approved: approvable, route, persist, sourceDraftId: draftId,
+      leadId, approved: approvable, route, write, sourceDraftId: draftId,
       reviewerDecision: review.decision, costUsd: cost, runId,
     });
 
     const newLeadStatus: LeadStatus = approvable ? route : 'EMAIL_REVIEW_FAILED';
-    return this.result(leadId, draftId, approvable ? 'REVIEWED_APPROVED' : 'REVIEWED_REJECTED', cost, 1, [], review, newDraftId, newLeadStatus);
+    const newDraftId = write.kind === 'APPEND' ? write.newDraftId : null;
+    return this.result(
+      leadId, draftId, approvable ? 'REVIEWED_APPROVED' : 'REVIEWED_REJECTED', cost, 1, [], review,
+      newDraftId, newLeadStatus, write.kind === 'APPEND' ? write.newDraftId : draftRow.id,
+    );
   }
 
   private modelCall(res: LlmResult): EmailModelCall {
@@ -292,7 +427,8 @@ export class ResumeEmailReviewService {
   private result(
     leadId: string, sourceDraftId: string, outcome: ResumeOutcome, costUsd: number, callsMade: number,
     violations: string[], review: EmailReviewParsed | null, newDraftId: string | null, newLeadStatus: LeadStatus | null,
+    resultDraftId: string | null = null,
   ): ResumeReviewResult {
-    return { leadId, sourceDraftId, outcome, costUsd, callsMade, violations, review, newDraftId, newLeadStatus };
+    return { leadId, sourceDraftId, outcome, costUsd, callsMade, violations, review, newDraftId, resultDraftId, newLeadStatus };
   }
 }

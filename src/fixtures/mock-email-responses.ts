@@ -6,7 +6,28 @@ const DEMO_ALLOWED_LINE = /^- link allowed: (YES|NO)$/m;
 const FACT_EVIDENCE = /^- evidence_id=(\S+) type=(\S+) value=/gm;
 const FINDING_EVIDENCE = /^- evidence_id=(\S+) finding_ref=(\S+) category=(\S+)/gm;
 
-function writerResponse(user: string): Record<string, unknown> {
+/**
+ * The exact line `subjectInstructionFor` puts in the writer system prompt for a threaded follow-up.
+ * The mock honours the same contract a live model is given — echo the thread subject into all three
+ * options and into selected_subject — so a mock-driven follow-up exercises the REAL validation path
+ * instead of authoring a fresh hook that `validateEmail` would (correctly) reject.
+ */
+const THREAD_SUBJECT_LINE = /^THREAD SUBJECT \(use verbatim\): (.*)$/m;
+
+function threadSubjectFrom(system: string): string | null {
+  const raw = THREAD_SUBJECT_LINE.exec(system)?.[1]?.trim();
+  if (raw === undefined) return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return typeof parsed === 'string' && parsed.trim() !== '' ? parsed : null;
+  } catch {
+    // Not a parseable subject line: fall through to an authored subject, which a follow-up's
+    // deterministic validation then rejects loudly rather than sending an off-thread email.
+    return null;
+  }
+}
+
+function writerResponse(user: string, system: string): Record<string, unknown> {
   const business = BUSINESS_LINE.exec(user)?.[1]?.trim() || 'the business';
   const german = (LANGUAGE_LINE.exec(user)?.[1] ?? '').startsWith('German');
   const demoAllowed = (DEMO_ALLOWED_LINE.exec(user)?.[1] ?? 'NO') === 'YES';
@@ -16,8 +37,20 @@ function writerResponse(user: string): Record<string, unknown> {
   const findingId = findingMatches[0]?.[1];
   const evidenceIds = [businessFactId, findingId].filter((id): id is string => id !== undefined);
 
+  const threadSubject = threadSubjectFrom(system);
+  /** A follow-up's subject fields are a contract echo, never copy. */
+  const withSubject = (resp: Record<string, unknown>): Record<string, unknown> =>
+    threadSubject === null
+      ? resp
+      : {
+          ...resp,
+          subject_options: [threadSubject, threadSubject, threadSubject],
+          selected_subject: threadSubject,
+          selected_subject_reason: 'Thread continuity is preserved.',
+        };
+
   if (german) {
-    return {
+    return withSubject({
       subject_options: [
         `Ein klarerer Kontaktweg für ${business}`,
         `Der schwer auffindbare Terminschritt bei ${business}`,
@@ -43,10 +76,10 @@ function writerResponse(user: string): Record<string, unknown> {
       genericity_score: 12,
       human_style_result: 'PASS',
       demo_alignment_result: demoAllowed ? 'PASS' : 'NOT_APPLICABLE',
-    };
+    });
   }
 
-  return {
+  return withSubject({
     subject_options: [
       `A clearer contact path for ${business}`,
       `The hard-to-find enquiry step at ${business}`,
@@ -72,11 +105,11 @@ function writerResponse(user: string): Record<string, unknown> {
     genericity_score: 12,
     human_style_result: 'PASS',
     demo_alignment_result: demoAllowed ? 'PASS' : 'NOT_APPLICABLE',
-  };
+  });
 }
 
 export const defaultMockEmailResponder: MockResponder = (request) => {
-  if (request.task === 'email_write') return { rawJson: writerResponse(request.user) };
+  if (request.task === 'email_write') return { rawJson: writerResponse(request.user, request.system) };
   return {
     rawJson: {
       decision: 'APPROVE',

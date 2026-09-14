@@ -28,6 +28,7 @@ import { LeadFactsRepository } from '../../persistence/repositories/lead-facts.r
 import { buildEmailProvider } from './email-build.js';
 import { recheckSupportingEvidence, reconstructPackage, resolvePatternInput } from './competitor-pattern-build.js';
 import { type CliContext } from '../context.js';
+import { INITIAL_EMAIL_SEQUENCE } from '../../domain/email/email-types.js';
 
 export interface ComposePreviewOptions {
   lead?: string;
@@ -91,7 +92,7 @@ export async function outreachComposePreviewCommand(ctx: CliContext, opts: Compo
   const demo = await new EmailInputRepository(ctx.db).latestDemo(leadId);
   const safeFindings: EmailFinding[] = composerFindings.findings.filter((f) => f.safeForOutreach);
   const emailInputs: EmailInputs = { facts, findings: safeFindings, demo };
-  const validationCtx = buildEmailContext(emailInputs);
+  const validationCtx = buildEmailContext(emailInputs, INITIAL_EMAIL_SEQUENCE);
 
   // --- prospect-only model draft (mock by default; no live call unless the paid gate is fully open) ---
   const provider = buildEmailProvider(ctx);

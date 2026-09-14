@@ -21,6 +21,7 @@ import { EMAIL_SCHEMA_VERSION, EMAIL_REVIEW_JSON_SCHEMA, EMAIL_WRITER_JSON_SCHEM
 import { buildEmailBrief } from './email-brief.js';
 import { buildEmailContext, type EmailDemoMeta, type EmailFinding, type EmailInputs, type EmailRecipientContext, renderEmail } from './email-render.js';
 import { EMAIL_WRITER_RULES_VERSION, type EmailStatus } from './email-types.js';
+import { type EmailSequencePosition } from './email-types.js';
 import { validateEmail } from './email-validation.js';
 import { isEmailReviewApprovable } from './email-review-gate.js';
 
@@ -112,6 +113,29 @@ export interface EmailPersist {
 
 export interface EmailRunStore {
   persist(record: EmailPersist): Promise<void>;
+  /**
+   * Recovery of an EXISTING draft row: write the reviewer outcome onto the draft that is already
+   * the canonical draft for its (outreach record, sequence step) slot, and append the reviewer's
+   * model_call. Used by the reviewer-only resume path for a sequence-bound draft, where appending a
+   * second row would violate migration 0044's one-live-draft-per-slot index. The writer columns,
+   * subject, body, evidence bindings, and row id are left exactly as the writer produced them.
+   */
+  applyReviewOutcome(draftId: string, update: EmailReviewOutcomeUpdate, modelCalls: EmailModelCall[]): Promise<void>;
+}
+
+/** The reviewer-outcome columns of an email draft. Nothing the writer produced appears here. */
+export interface EmailReviewOutcomeUpdate {
+  status: EmailStatus;
+  reviewerPromptVersion: string;
+  requestedReviewerModel: string;
+  reviewerResponseId: string | null;
+  reviewerDecision: string;
+  fabricationRisk: boolean;
+  personalizationSupported: boolean;
+  claimHonest: boolean;
+  reviewerProblems: string[];
+  /** Cumulative spend on this draft: the original writer attempt plus this reviewer call. */
+  totalCostUsd: number;
 }
 export interface EmailTxRepos {
   leads: LeadStore;
@@ -178,9 +202,12 @@ export class EmailWriterService {
 
     const safeFindings = input.findings.filter((f) => f.safeForOutreach);
     const seq: SequenceContext = input.sequence ?? INITIAL_SEQUENCE_CONTEXT;
+    // ONE sequence position drives both the rendered subject and the subject validation, so the
+    // renderer and the validator can never disagree about whether this is a threaded follow-up.
+    const position: EmailSequencePosition = { step: seq.step, threadSubject: seq.threadSubject };
     const emailInputs: EmailInputs = { facts: input.facts, findings: safeFindings, demo: input.demo,
-      recipient: input.recipient ?? null, threadSubject: seq.threadSubject };
-    const ctx = buildEmailContext(emailInputs);
+      recipient: input.recipient ?? null, threadSubject: position.threadSubject };
+    const ctx = buildEmailContext(emailInputs, position);
     const brief = this.brief(input, safeFindings);
 
     const canCall = (model: string): boolean => {

@@ -45,6 +45,7 @@ import {
   InMemoryPatternStore,
   InMemoryResearchStore,
 } from './inmemory-competitor-stores.js';
+import { INITIAL_EMAIL_SEQUENCE } from '../../domain/email/email-types.js';
 import {
   baseEmailDraft,
   competitorCandidates,
@@ -336,7 +337,7 @@ export async function runValidationHarness(baseDraft: EmailWriterParsed = baseEm
 
   // --- Stage 6: baseline + enriched composition (both from the SAME pinned base draft). ---
   const emailInputs: EmailInputs = { facts: leadFacts, findings: safeFindings, demo: null };
-  const validationCtx = buildEmailContext(emailInputs);
+  const validationCtx = buildEmailContext(emailInputs, INITIAL_EMAIL_SEQUENCE);
 
   const baselineParsed = emailWriterSchema.safeParse(baseDraft);
   const baselineRendered = renderEmail(baseDraft, emailInputs);

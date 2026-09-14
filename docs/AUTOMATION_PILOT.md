@@ -360,6 +360,39 @@ an ACTIVE (DUE) row whose due instant has passed
 Promotion runs automatically as the first step of `--phase prepare` (and of the default `both`), and
 can be run alone with `--phase promote` for inspection. Both accept `--record <id>`.
 
+## Follow-up subject continuity (who owns the subject)
+
+A follow-up never authors a subject. `renderEmail` builds it deterministically from the thread
+subject (`Re: <original>`, prefixed once), and the writer prompt tells the model to echo the supplied
+thread subject into all three options and into `selected_subject`. Deterministic validation enforces
+exactly that contract for steps 1-3 — it does not merely skip subject checks:
+
+| what the follow-up did | outcome |
+|---|---|
+| echoed the thread subject (with or without its `Re: ` prefix) | passes |
+| invented a fresh hook, or mutated the subject text or case | `followup_subject_not_thread_subject:<n>` |
+| selected something other than the thread subject | `followup_selected_subject_not_thread_subject` |
+| was composed with no thread subject at all | `followup_thread_subject_missing` |
+
+Step 0 is unchanged: three distinct options, the selected one among them, none generic or revealing.
+
+**How a resumed follow-up is persisted.** Migration 0044 allows ONE live draft per (outreach record,
+sequence step) — `email_drafts_outreach_sequence_uk`, which excludes only `REJECTED` rows. The failed
+draft is `human_decision = NULL`, so it occupies that slot and IS the canonical draft for it.
+`resume-email-review` therefore writes the reviewer outcome onto that row instead of appending a
+second one: same row id, same subject/body, same writer provenance and evidence bindings, and
+`human_decision` untouched (no forged rejection to slip past the index). Preparation still sees one
+draft awaiting review, and progression picks up that same row once a human approves it. A draft with
+no outreach record is unconstrained and still appends a new row.
+
+**Retrying a follow-up that failed deterministic validation.** The writer call is already paid for
+and the original writer output is preserved in the debug record, so the retry is
+`resume-email-review` (one reviewer call, no writer call) — NOT a re-run of preparation, which will
+skip the record as `AWAITING_HUMAN_REVIEW` while the failed draft is the newest one for that
+(record, step). Rejecting the failed draft is not a retry: a `REJECTED` human decision cancels that
+follow-up step. Resume requires the lead at `EMAIL_REVIEW_FAILED`, the draft at `REVIEW_FAILED`, and
+the debug record for its run to still exist (`EMAIL_DEBUG_DIR`, 7-day TTL).
+
 ## Controlled first-follow-up validation
 
 **The point of no return is the SCHEDULE stage.** Dispatch requires `leads.status='SCHEDULED'` AND an

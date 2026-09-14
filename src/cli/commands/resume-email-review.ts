@@ -10,6 +10,7 @@ import { DrizzleEmailUnitOfWork } from '../../persistence/email-unit-of-work.js'
 import { DemoInputRepository } from '../../persistence/repositories/demo-input.repo.js';
 import { EmailInputRepository } from '../../persistence/repositories/email-input.repo.js';
 import { EmailRepository } from '../../persistence/repositories/email.repo.js';
+import { FollowupPreparationRepository } from '../../persistence/repositories/followup-preparation.repo.js';
 import { LeadFactsRepository } from '../../persistence/repositories/lead-facts.repo.js';
 import { PipelineRunsRepository } from '../../persistence/repositories/runs.repo.js';
 import { AppError } from '../../utils/errors.js';
@@ -45,6 +46,7 @@ export async function resumeEmailReviewCommand(ctx: CliContext, opts: ResumeEmai
   const factsRepo = new LeadFactsRepository(ctx.db);
   const auditRepo = new DemoInputRepository(ctx.db);
   const demoRepo = new EmailInputRepository(ctx.db);
+  const followupRepo = new FollowupPreparationRepository(ctx.db);
   const uow = new DrizzleEmailUnitOfWork(ctx.db);
 
   const commit: ResumeCommit = async (plan) => {
@@ -59,13 +61,22 @@ export async function resumeEmailReviewCommand(ctx: CliContext, opts: ResumeEmai
           await repos.leadService.transition(plan.leadId, 'EMAIL_REVIEW_FAILED');
         }
       }
-      await repos.emails.persist(plan.persist);
+      // An unbound draft appends a new row; a sequence-bound draft IS the canonical draft for its
+      // (outreach record, sequence step) slot, so its reviewer outcome is written onto that row.
+      if (plan.write.kind === 'APPEND') {
+        await repos.emails.persist(plan.write.persist);
+      } else {
+        await repos.emails.applyReviewOutcome(plan.write.draftId, plan.write.update, plan.write.modelCalls);
+      }
       await repos.events.record({
         leadId: plan.leadId, runId: plan.runId, type: 'NOTE', fromStatus: null, toStatus: null,
         message: `resume-email-review: ${plan.approved ? 'APPROVED' : 'REVIEW_REJECTED'} (writer not re-run; source draft ${plan.sourceDraftId})`,
         data: {
           sourceDraftId: plan.sourceDraftId, writerReRun: false, reviewerDecision: plan.reviewerDecision,
-          approved: plan.approved, costUsd: plan.costUsd, newDraftId: plan.persist.email?.id ?? null,
+          approved: plan.approved, costUsd: plan.costUsd,
+          draftWrite: plan.write.kind,
+          // The draft that now carries the outcome: a new row, or the recovered canonical row.
+          resultDraftId: plan.write.kind === 'APPEND' ? plan.write.persist.email?.id ?? null : plan.write.draftId,
         },
       });
     });
@@ -83,6 +94,9 @@ export async function resumeEmailReviewCommand(ctx: CliContext, opts: ResumeEmai
         const demo = await demoRepo.latestDemo(id);
         return { facts, findings: audit?.findings ?? [], demo };
       },
+      // The SAME authoritative thread the preparation path reads, so a resumed follow-up review
+      // sees exactly the messages already sent — never a reconstruction from the failed draft.
+      loadThreadContext: (outreachRecordId) => followupRepo.threadContext(outreachRecordId),
     },
     commit,
     logger: ctx.logger,
@@ -112,6 +126,7 @@ export async function resumeEmailReviewCommand(ctx: CliContext, opts: ResumeEmai
       console.log(`  reviewer decision:     ${r.review.decision} (fabricationRisk=${String(r.review.fabricationRisk)})`);
     }
     if (r.newDraftId) console.log(`  new draft id:          ${r.newDraftId}`);
+    else if (r.resultDraftId) console.log(`  recovered draft id:    ${r.resultDraftId} (canonical sequence draft, updated in place)`);
     if (r.newLeadStatus) console.log(`  lead status:           ${r.newLeadStatus}`);
     console.log('\n  No writer call. No Gmail draft. No send. Human review still required.');
   } catch (err) {

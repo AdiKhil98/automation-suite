@@ -21,9 +21,10 @@ import { type LeadFact } from '../../src/domain/lead-facts/lead-fact.js';
 import { type Lead } from '../../src/domain/leads/lead.js';
 import { type LeadService } from '../../src/domain/leads/lead-service.js';
 import { defaultMockEmailResponder } from '../../src/fixtures/mock-email-responses.js';
-import { MockLlmProvider } from '../../src/integrations/llm/mock-llm.js';
+import { MockLlmProvider, type MockResponder } from '../../src/integrations/llm/mock-llm.js';
 import { type LlmRequest } from '../../src/integrations/llm/provider.js';
 import { EMAIL_COPY_FIXTURES } from '../fixtures/email-copy-standard.js';
+import { INITIAL_EMAIL_SEQUENCE } from '../../src/domain/email/email-types.js';
 
 const fact = (id: string, factType: string, value: string): LeadFact => ({
   id,
@@ -67,6 +68,7 @@ const validationContext = (
   demoAllowed = false,
   approvedDemoFindingIds: string[] = [],
 ): EmailValidationContext => ({
+  sequence: INITIAL_EMAIL_SEQUENCE,
   availableEvidenceIds: new Set(['fact-business', 'fact-city', 'fact-services', 'finding-cta', 'finding-other']),
   factEvidenceIds: new Set(['fact-business', 'fact-city', 'fact-services']),
   acceptedFindingIds: new Set(['finding-cta', 'finding-other']),
@@ -269,6 +271,7 @@ describe('Norwood canary revalidation (both false positives removed)', () => {
   };
 
   const norwoodContext: EmailValidationContext = {
+    sequence: INITIAL_EMAIL_SEQUENCE,
     availableEvidenceIds: new Set([
       '3d62f702-ffe1-4573-930b-4fe24edd75d2',
       '4e8a7b19-775e-47a5-98b1-1248c285759f',
@@ -421,7 +424,7 @@ describe('email rendering and language', () => {
     const demoInputs = inputs({
       demo: { id: 'demo-1', status: 'APPROVED', ctaKind: 'booking', approvedFindingRefs: ['F1'] },
     });
-    expect(validateEmail(writer, buildEmailContext(demoInputs)).ok).toBe(true);
+    expect(validateEmail(writer, buildEmailContext(demoInputs, INITIAL_EMAIL_SEQUENCE)).ok).toBe(true);
     const rendered = renderEmail(writer, demoInputs);
     expect(rendered.ctaKind).toBe('demo_link');
     expect(rendered.body).toContain(DEMO_URL_TOKEN);
@@ -440,7 +443,10 @@ function fakeUow(sink: EmailPersist[], leadStatus = 'DEMO_READY'): EmailUnitOfWo
           },
         } as never,
         leadService,
-        emails: { async persist(record: EmailPersist) { sink.push(record); } },
+        emails: {
+          async persist(record: EmailPersist) { sink.push(record); },
+          async applyReviewOutcome() { throw new Error('the writer path never recovers an existing draft'); },
+        },
         events: { async record() { /* no-op */ } },
       });
     },
@@ -607,6 +613,87 @@ describe('EmailWriterService quality gates', () => {
   });
 });
 
+describe('EmailWriterService — threaded follow-up composition (production regression)', () => {
+  // Internal step 1 = lesson Follow-up #2. The writer is handed the thread subject and must echo it;
+  // the renderer then builds the outgoing subject deterministically. Before the step-aware subject
+  // rules, this exact path died at deterministic validation with `subject_options_not_unique`,
+  // having already paid for the writer call and never reaching the reviewer.
+  const THREAD_SUBJECT = 'Something I noticed on Complete Dentistry’s mobile site';
+
+  const followupInput = (step: 1 | 2 | 3 = 1) => serviceInput({
+    sequence: { step, threadSubject: THREAD_SUBJECT, priorMessages: [] },
+    outreachRecordId: 'rec-1',
+  });
+
+  it.each([1, 2, 3] as const)('composes step %i and renders the threaded subject', async (step) => {
+    const sink: EmailPersist[] = [];
+    const service = new EmailWriterService({
+      provider: new MockLlmProvider(defaultMockEmailResponder),
+      // SENT is the sequence re-entry point a follow-up composes from.
+      uow: fakeUow(sink, 'SENT'),
+      logger,
+      config: config(),
+    });
+
+    const result = await service.write(followupInput(step), 'run-followup');
+
+    expect(result.outcome).toBe('APPROVED_READY');
+    expect(sink[0]!.email?.subject).toBe(`Re: ${THREAD_SUBJECT}`);
+    expect(sink[0]!.email?.sequenceStep).toBe(step);
+    expect(sink[0]!.email?.outreachRecordId).toBe('rec-1');
+  });
+
+  it('fails closed when the model authors a fresh subject instead of continuing the thread', async () => {
+    const freshHook: MockResponder = (req, index) => {
+      const res = defaultMockEmailResponder(req, index);
+      if (req.task !== 'email_write') return res;
+      return {
+        ...res,
+        rawJson: {
+          ...(res.rawJson as Record<string, unknown>),
+          subject_options: ['A brand new hook', 'Another new hook', 'A third new hook'],
+          selected_subject: 'A brand new hook',
+        },
+      };
+    };
+
+    const sink: EmailPersist[] = [];
+    const service = new EmailWriterService({
+      provider: new MockLlmProvider(freshHook),
+      uow: fakeUow(sink, 'SENT'),
+      logger,
+      config: config(),
+    });
+
+    const result = await service.write(followupInput(), 'run-followup');
+
+    expect(result.outcome).toBe('VALIDATION_FAILED');
+    // The reviewer is never reached: exactly one (writer) call.
+    expect(result.callsMade).toBe(1);
+    const violations = sink[0]!.modelCalls[0]?.validationViolations ?? [];
+    expect(violations).toContain('followup_subject_not_thread_subject:1');
+    expect(violations).toContain('followup_selected_subject_not_thread_subject');
+    // The first-email rule must NOT be what rejected it.
+    expect(violations).not.toContain('subject_options_not_unique');
+  });
+
+  it('a first email is unaffected: the model still authors three distinct subjects', async () => {
+    const sink: EmailPersist[] = [];
+    const service = new EmailWriterService({
+      provider: new MockLlmProvider(defaultMockEmailResponder),
+      uow: fakeUow(sink),
+      logger,
+      config: config(),
+    });
+
+    const result = await service.write(serviceInput(), 'run-initial');
+
+    expect(result.outcome).toBe('APPROVED_READY');
+    expect(sink[0]!.email?.sequenceStep).toBe(0);
+    expect(sink[0]!.email?.subject.startsWith('Re: ')).toBe(false);
+  });
+});
+
 describe('EmailWriterService — no-demo OPPORTUNITY_READY path', () => {
   // A uow that records the exact transition sequence the writer requests.
   function spyingUow(sink: EmailPersist[], leadStatus: string, transitions: string[]): EmailUnitOfWork {
@@ -616,7 +703,10 @@ describe('EmailWriterService — no-demo OPPORTUNITY_READY path', () => {
         return fn({
           leads: { async getById() { return { id: 'lead-1', status: leadStatus } as unknown as Lead; } } as never,
           leadService,
-          emails: { async persist(record: EmailPersist) { sink.push(record); } },
+          emails: {
+          async persist(record: EmailPersist) { sink.push(record); },
+          async applyReviewOutcome() { throw new Error('the writer path never recovers an existing draft'); },
+        },
           events: { async record() { /* no-op */ } },
         });
       },

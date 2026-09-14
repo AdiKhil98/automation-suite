@@ -4,6 +4,7 @@ import { planEnrichment, type EnrichmentPackage, type EnrichmentPattern, type En
 import { type EmailWriterParsed } from '../../../src/domain/email/email-schema.js';
 import { type EmailValidationContext } from '../../../src/domain/email/email-validation.js';
 import { type EmailInputs } from '../../../src/domain/email/email-render.js';
+import { INITIAL_EMAIL_SEQUENCE } from '../../../src/domain/email/email-types.js';
 
 function pattern(over: Partial<EnrichmentPattern> = {}): EnrichmentPattern {
   return {
@@ -39,6 +40,7 @@ function draft(over: Partial<EmailWriterParsed> = {}): EmailWriterParsed {
 }
 
 const validationCtx: EmailValidationContext = {
+  sequence: INITIAL_EMAIL_SEQUENCE,
   availableEvidenceIds: new Set(['f1']),
   factEvidenceIds: new Set(),
   acceptedFindingIds: new Set(['f1']),
