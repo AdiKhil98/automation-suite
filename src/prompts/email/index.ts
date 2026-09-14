@@ -1,6 +1,7 @@
 import { MAX_EMAIL_WORDS, PRIMARY_CTAS } from '../../domain/email/email-types.js';
 import { type EmailWriterParsed } from '../../domain/email/email-schema.js';
 import { type SequenceStep } from '../../domain/outreach/sequence.js';
+export { type PriorSequenceMessage } from './sequence-jobs.js';
 import {
   type PriorSequenceMessage,
   reviewerSequenceJob,
@@ -80,14 +81,24 @@ const SUBJECT_STANDARD = `SUBJECT = CURIOSITY GAP, NOT BODY SUMMARY:
 - Never invent personalization in a subject: no name, role, event, number, or detail that the
   supplied evidence does not contain.`;
 
-const COPY_STANDARD = `COLD EMAIL COPY STANDARD:
+/**
+ * SUBJECT AUTHORING — for the FIRST email only (step 0), where the model actually writes the
+ * subject. A follow-up continues an existing Gmail thread: its subject is deterministic thread
+ * continuity produced by code, so instructing it to invent three distinct subjects would contradict
+ * its own job block, contradict `renderEmail`, and contradict deterministic validation (which
+ * requires all three options to equal the thread subject). This block is therefore attached per
+ * step, never globally. See `subjectInstructionFor` for the follow-up contract that replaces it.
+ */
+const SUBJECT_AUTHORING_STANDARD = `SUBJECT LINE (you author it for this email):
 - Produce exactly three distinct, specific subject options. Select one on curiosity, naturalness,
   relevance, and body-reveal risk.
 - selected_subject_reason must explain why the chosen subject preserves the information gap.
 - Reject generic subjects such as "Website idea", "Quick question", "Improve your website",
   "New website concept", and "A suggestion for your website".
 
-${SUBJECT_STANDARD}
+${SUBJECT_STANDARD}`;
+
+const COPY_STANDARD = `COLD EMAIL COPY STANDARD:
 - Start email_body with a verified observation. No introduction, fake compliment, fake customer
   pose, or "I hope this email finds you well".
 - Explain why the issue matters in the customer or patient journey using clear business language.
@@ -138,8 +149,50 @@ Take your business to the next level; Unlock your full potential; Cutting-edge s
 Seamless user experience; Revolutionize your online presence; Just wanted to reach out;
 Game-changing; Tailored solution.`;
 
+/**
+ * The subject instructions for ONE step, for the writer.
+ *
+ * Step 0 authors the subject and gets the full authoring + curiosity-gap standard. Steps 1-3 get
+ * ONLY the thread-continuity contract: echo the supplied thread subject, do not invent a hook. They
+ * must never receive the three-distinct-subjects rule — it is the exact contradiction that made a
+ * correctly-threaded follow-up fail deterministic validation.
+ *
+ * A follow-up with no resolvable thread subject gets NEITHER block: there is no thread to continue
+ * and inventing one would start a second conversation, so nothing is asked of the model and
+ * `validateEmail` fails the composition closed (`followup_thread_subject_missing`).
+ */
+function writerSubjectBlock(seq: SequenceContext): string {
+  if (seq.step === 0) return SUBJECT_AUTHORING_STANDARD;
+  return subjectInstructionFor(seq.step, seq.threadSubject) ?? '';
+}
+
+/**
+ * The same split for the reviewer. It must not judge — or reject — a follow-up's subject: that
+ * subject is code-generated thread continuity, and `isEmailReviewApprovable` ignores the two
+ * subject dimensions for a threaded follow-up. Telling the reviewer to report them as true keeps
+ * the prompt, the schema (which always requires both booleans), and the gate consistent.
+ */
+function reviewerSubjectBlock(seq: SequenceContext): string {
+  if (seq.step === 0 || seq.threadSubject === null) {
+    return `${SUBJECT_AUTHORING_STANDARD}
+
+Set subjectCuriosityGap to false when the selected subject summarizes or reveals the core finding,
+gives away the recommendation or pitch before the open, is banal or generic, lacks a meaningful
+information gap, or reads as obvious marketing copy. Set it to true only when the subject creates
+natural curiosity, stays truthfully connected to the email, remains relevant to the prospect, sounds
+human, and uses no clickbait, fake urgency, deception, or fake-reply tactics.`;
+  }
+  return `SUBJECT LINE FOR THIS FOLLOW-UP (do not judge it):
+- This email continues the EXISTING thread. The system reuses the original subject verbatim as a
+  reply subject; the subject fields you see are a contract echo, not authored copy.
+- The three subject options are SUPPOSED to be identical to the thread subject. Never reject,
+  criticise, or require a revision because they repeat, because there is no curiosity gap, or
+  because the subject is not specific to this message.
+- Report subjectSpecific and subjectCuriosityGap as true: they do not apply to a threaded follow-up.
+- Judge the BODY and the sequence job only.`;
+}
+
 function writerSystem(seq: SequenceContext): string {
-  const subject = subjectInstructionFor(seq.step, seq.threadSubject);
   return `You are an experienced consultant writing one concise, evidence-bound outreach email for human review.
 
 ${writerSequenceJob(seq.step)}
@@ -147,7 +200,9 @@ ${writerSequenceJob(seq.step)}
 ${SAFETY}
 
 ${COPY_STANDARD}
-${subject === null ? '' : `\n${subject}\n`}
+
+${writerSubjectBlock(seq)}
+
 ${FORBIDDEN}
 
 Return strict JSON with exactly these fields:
@@ -167,18 +222,14 @@ ${SAFETY}
 
 ${COPY_STANDARD}
 
+${reviewerSubjectBlock(seq)}
+
 ${FORBIDDEN}
 
-Reject or require revisions when the subject or opening is generic, business relevance is unclear,
+Reject or require revisions when the opening is generic, business relevance is unclear,
 urgency is fabricated, competitor language is unsupported, AI-style language or punctuation fails,
 there is more than one CTA, the email could be sent unchanged to almost any business, evidence does
 not support every claim, or the email promises more than the approved demo visibly delivers.
-
-Set subjectCuriosityGap to false when the selected subject summarizes or reveals the core finding,
-gives away the recommendation or pitch before the open, is banal or generic, lacks a meaningful
-information gap, or reads as obvious marketing copy. Set it to true only when the subject creates
-natural curiosity, stays truthfully connected to the email, remains relevant to the prospect, sounds
-human, and uses no clickbait, fake urgency, deception, or fake-reply tactics.
 
 Judge the SINGLE-OBSERVATION, BUYER-LANGUAGE STANDARD with four fail-closed booleans:
 - singleObservation: false when the body makes more than one distinct observation, stacks findings, or

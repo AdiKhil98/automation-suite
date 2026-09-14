@@ -113,6 +113,29 @@ export interface EmailPersist {
 
 export interface EmailRunStore {
   persist(record: EmailPersist): Promise<void>;
+  /**
+   * Recovery of an EXISTING draft row: write the reviewer outcome onto the draft that is already
+   * the canonical draft for its (outreach record, sequence step) slot, and append the reviewer's
+   * model_call. Used by the reviewer-only resume path for a sequence-bound draft, where appending a
+   * second row would violate migration 0044's one-live-draft-per-slot index. The writer columns,
+   * subject, body, evidence bindings, and row id are left exactly as the writer produced them.
+   */
+  applyReviewOutcome(draftId: string, update: EmailReviewOutcomeUpdate, modelCalls: EmailModelCall[]): Promise<void>;
+}
+
+/** The reviewer-outcome columns of an email draft. Nothing the writer produced appears here. */
+export interface EmailReviewOutcomeUpdate {
+  status: EmailStatus;
+  reviewerPromptVersion: string;
+  requestedReviewerModel: string;
+  reviewerResponseId: string | null;
+  reviewerDecision: string;
+  fabricationRisk: boolean;
+  personalizationSupported: boolean;
+  claimHonest: boolean;
+  reviewerProblems: string[];
+  /** Cumulative spend on this draft: the original writer attempt plus this reviewer call. */
+  totalCostUsd: number;
 }
 export interface EmailTxRepos {
   leads: LeadStore;

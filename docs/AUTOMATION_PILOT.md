@@ -376,6 +376,15 @@ exactly that contract for steps 1-3 — it does not merely skip subject checks:
 
 Step 0 is unchanged: three distinct options, the selected one among them, none generic or revealing.
 
+**How a resumed follow-up is persisted.** Migration 0044 allows ONE live draft per (outreach record,
+sequence step) — `email_drafts_outreach_sequence_uk`, which excludes only `REJECTED` rows. The failed
+draft is `human_decision = NULL`, so it occupies that slot and IS the canonical draft for it.
+`resume-email-review` therefore writes the reviewer outcome onto that row instead of appending a
+second one: same row id, same subject/body, same writer provenance and evidence bindings, and
+`human_decision` untouched (no forged rejection to slip past the index). Preparation still sees one
+draft awaiting review, and progression picks up that same row once a human approves it. A draft with
+no outreach record is unconstrained and still appends a new row.
+
 **Retrying a follow-up that failed deterministic validation.** The writer call is already paid for
 and the original writer output is preserved in the debug record, so the retry is
 `resume-email-review` (one reviewer call, no writer call) — NOT a re-run of preparation, which will

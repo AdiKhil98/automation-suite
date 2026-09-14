@@ -6,6 +6,31 @@ All notable changes per phase. Format loosely follows Keep a Changelog.
 
 ### Fixed
 
+- **Resumed follow-up reviews judged continuity against an empty thread.** `resume-email-review`
+  passed `priorMessages: []` to the reviewer for every step, while the step rubric asks it to judge
+  exactly what the earlier messages make possible (add clarity without restarting, compress without
+  re-explaining, close without reopening). It now loads the authoritative thread from
+  `outreach_messages` — the same source preparation uses — and aborts BEFORE the paid reviewer call
+  when a follow-up carries no outreach record (`FOLLOWUP_OUTREACH_RECORD_MISSING`) or resolves to no
+  thread (`FOLLOWUP_THREAD_CONTEXT_MISSING`). Step 0 is unchanged.
+- **Resuming a sequence-bound draft would have violated migration 0044.** The resume path always
+  appended a NEW `email_drafts` row; for a draft bound to an outreach record that is a guaranteed
+  `email_drafts_outreach_sequence_uk` violation (the failed row is `human_decision = NULL`, so it is
+  inside the partial index) and would put two drafts in one send slot. A sequence-bound draft is now
+  recognised as the CANONICAL draft for its (outreach record, sequence step) slot and is recovered
+  IN PLACE: the reviewer outcome, the reviewer `model_call`, and an immutable pipeline event are
+  written, while the row id, subject, body, writer provenance, evidence bindings and — critically —
+  `human_decision` are untouched. Unbound drafts keep appending, exactly as before. No schema change
+  and no migration: the index stays as it is, and the recovered row is what preparation already
+  treats as awaiting review and what progression picks up after a human approves it.
+- **The copy standard contradicted the follow-up subject contract in both prompts.** "Produce
+  exactly three distinct, specific subject options" and the curiosity-gap rubric were global, while
+  the step blocks told steps 1-3 to repeat the thread subject. Subject instructions are now attached
+  per step: step 0 gets the authoring + curiosity rules, steps 1-3 get only the thread-continuity
+  contract, and the reviewer is explicitly told not to judge a threaded subject and to report
+  `subjectSpecific`/`subjectCuriosityGap` as true (matching the approvable gate). All other copy
+  rules are unchanged at every step.
+
 - **Follow-up subject validation contradicted the follow-up prompt.** `sequence-jobs.ts` instructs a
   follow-up writer to continue the existing Gmail thread by echoing the supplied thread subject into
   all three subject options and into `selected_subject`, and `renderEmail` builds the outgoing

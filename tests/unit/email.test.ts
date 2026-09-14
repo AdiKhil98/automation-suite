@@ -443,7 +443,10 @@ function fakeUow(sink: EmailPersist[], leadStatus = 'DEMO_READY'): EmailUnitOfWo
           },
         } as never,
         leadService,
-        emails: { async persist(record: EmailPersist) { sink.push(record); } },
+        emails: {
+          async persist(record: EmailPersist) { sink.push(record); },
+          async applyReviewOutcome() { throw new Error('the writer path never recovers an existing draft'); },
+        },
         events: { async record() { /* no-op */ } },
       });
     },
@@ -700,7 +703,10 @@ describe('EmailWriterService — no-demo OPPORTUNITY_READY path', () => {
         return fn({
           leads: { async getById() { return { id: 'lead-1', status: leadStatus } as unknown as Lead; } } as never,
           leadService,
-          emails: { async persist(record: EmailPersist) { sink.push(record); } },
+          emails: {
+          async persist(record: EmailPersist) { sink.push(record); },
+          async applyReviewOutcome() { throw new Error('the writer path never recovers an existing draft'); },
+        },
           events: { async record() { /* no-op */ } },
         });
       },
