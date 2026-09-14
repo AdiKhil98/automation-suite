@@ -1,5 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import {
+  runFollowupDuePromotion,
+  type FollowupPromotionCandidateView,
+  type FollowupPromotionDeps,
+  type FollowupPromotionReport,
+  type PromoteResult,
+} from '../../domain/outreach/followup-due-promotion.js';
+import {
   runFollowupPreparation,
   type ComposeResult,
   type FollowupCandidateView,
@@ -13,6 +20,7 @@ import {
   type ProgressionCandidateView,
   type StageResult,
 } from '../../domain/outreach/followup-progression-runner.js';
+import { assertUnattendedPreparationProvider } from '../../domain/email/llm-provider-policy.js';
 import { OutreachService } from '../../domain/outreach/outreach-service.js';
 import { lessonEmailLabel } from '../../domain/outreach/sequence.js';
 import { computeReplyFinalization, validateReplyFinalization } from '../../domain/email/reply-finalization.js';
@@ -26,7 +34,7 @@ import { PipelineRepository } from '../../persistence/repositories/pipeline.repo
 import { PipelineRunsRepository } from '../../persistence/repositories/runs.repo.js';
 import { ReplyFinalizationRepository } from '../../persistence/repositories/reply-finalization.repo.js';
 import { ScheduleInputRepository } from '../../persistence/repositories/schedule-input.repo.js';
-import { buildEmailService } from './email-build.js';
+import { buildEmailService, emailProviderConfigView } from './email-build.js';
 import { buildGmailService } from './gmail-build.js';
 import { buildScheduleService } from './schedule-build.js';
 import { type CliContext } from '../context.js';
@@ -41,7 +49,13 @@ export interface RunFollowupAutomationOptions {
 
 /**
  * UNATTENDED follow-up automation — the timer entry point. It automates everything AROUND human
- * review and nothing of human review itself, in two independently-gated phases:
+ * review and nothing of human review itself, in three ordered, gated phases:
+ *
+ *   Phase A0 (due-state promotion): a record whose scheduled follow-up row has COME DUE is moved
+ *     from "follow-up N was scheduled" to "follow-up N is due" (`FOLLOW_UP_N_DUE`), driven only by
+ *     an active, actually-due row and only along one legal state-machine hop. Without this the
+ *     sequence could not run unattended at all: preparation's suppression re-check requires that
+ *     status, and nothing else in the system produces it automatically.
  *
  *   Phase A (preparation): compose DUE follow-ups through the EXISTING writer -> deterministic
  *     validation -> independent adversarial reviewer -> gate, with the step-specific job and rubric,
@@ -50,11 +64,12 @@ export interface RunFollowupAutomationOptions {
  *   Phase B (progression): take follow-ups a HUMAN has approved and advance them one stage through
  *     the EXISTING services — reply finalization -> Gmail draft -> send schedule — then stop.
  *
- * NEITHER phase sends. Dispatch remains exclusively `run-scheduled-sends` -> `SendService`, behind
+ * NO phase sends. Dispatch remains exclusively `run-scheduled-sends` -> `SendService`, behind
  * its own separate gates, durable authorization, preflight, and daily cap. This command has no send
  * provider and no path to one.
  *
- * Both phases are idempotent and safe to run on a repeating timer: preparation is keyed on
+ * All three phases are idempotent and safe to run on a repeating timer: promotion is a
+ * compare-and-set that a second run finds already applied; preparation is keyed on
  * (outreach record, sequence step) and backed by migration 0044's partial unique index; progression
  * executes exactly one stage per lead per run, and every stage is gated on durable state that the
  * stage itself advances.
@@ -62,10 +77,14 @@ export interface RunFollowupAutomationOptions {
 export async function runFollowupAutomationCommand(ctx: CliContext, cliOpts: RunFollowupAutomationOptions): Promise<void> {
   const c = ctx.config;
   const phase = (cliOpts.phase ?? 'both').toLowerCase();
+  // Promotion is preparation's own first step, never a separate feature: "prepare" without it would
+  // silently compose nothing for a record that has not been hand-transitioned. It is also offered
+  // alone, so a first controlled follow-up can be promoted, inspected, and only then composed.
+  const wantPromote = phase === 'both' || phase === 'prepare' || phase === 'promote';
   const wantPrepare = phase === 'both' || phase === 'prepare';
   const wantProgress = phase === 'both' || phase === 'progress';
-  if (!wantPrepare && !wantProgress) {
-    console.log(`Unknown --phase "${cliOpts.phase ?? ''}". Use prepare, progress, or both.`);
+  if (!wantPromote && !wantPrepare && !wantProgress) {
+    console.log(`Unknown --phase "${cliOpts.phase ?? ''}". Use promote, prepare, progress, or both.`);
     process.exitCode = 1;
     return;
   }
@@ -76,8 +95,44 @@ export async function runFollowupAutomationCommand(ctx: CliContext, cliOpts: Run
   let runId: string | null = null;
   const getRunId = async (): Promise<string> => (runId ??= await runs.start('outreach:followup-automation', c.DRY_RUN));
 
+  let promoReport: FollowupPromotionReport | null = null;
   let prepReport: FollowupPreparationReport | null = null;
   let progReport: FollowupProgressionReport | null = null;
+
+  // ---------------- Phase A0: due-state promotion ----------------
+  // Moves a record whose scheduled follow-up row has come due from "follow-up N was scheduled"
+  // (INITIAL_SENT / FOLLOW_UP_{N-1}_SENT) to "follow-up N is due" (FOLLOW_UP_N_DUE) — the state
+  // preparation's suppression re-check requires. At most one status change plus one event per
+  // record; no model call, no Gmail call, no external request of any kind.
+  if (wantPromote) {
+    const outreach = new OutreachService(new DrizzleOutreachUnitOfWork(ctx.db));
+
+    const promote = async (cand: FollowupPromotionCandidateView): Promise<PromoteResult> => {
+      if (dryRun) {
+        return { promoted: false, outcome: `DRY_RUN: would promote record ${cand.outreachRecordId} for step ${String(cand.step)} — nothing written` };
+      }
+      // The service re-reads and re-decides inside its own transaction; this snapshot is only a
+      // worklist entry, never the authority for the write.
+      const r = await outreach.promoteFollowupDue({
+        followupId: cand.followupId,
+        outreachRecordId: cand.outreachRecordId,
+        actor: c.FOLLOWUP_AUTOMATION_ACTOR,
+      });
+      return { promoted: r.outcome === 'PROMOTED', outcome: `${r.outcome}: ${r.detail}` };
+    };
+
+    const deps: FollowupPromotionDeps = {
+      now: () => Date.now(),
+      gates: {
+        followupPromotionEnabled: c.FOLLOWUP_PREPARATION_ENABLED,
+        outreachTrackingEnabled: c.OUTREACH_TRACKING_ENABLED,
+      },
+      maxPerRun: cliOpts.limit ? Number.parseInt(cliOpts.limit, 10) : c.FOLLOWUP_PREPARATION_MAX_PER_RUN,
+      candidates: (nowMs, limit) => prepRepo.promotionCandidates(nowMs, limit, { recordId: cliOpts.record }),
+      promote,
+    };
+    promoReport = await runFollowupDuePromotion(deps);
+  }
 
   // ---------------- Phase A: preparation ----------------
   if (wantPrepare) {
@@ -127,6 +182,16 @@ export async function runFollowupAutomationCommand(ctx: CliContext, cliOpts: Run
         followupPreparationEnabled: c.FOLLOWUP_PREPARATION_ENABLED,
         outreachTrackingEnabled: c.OUTREACH_TRACKING_ENABLED,
         emailGenerationEnabled: c.EMAIL_GENERATION_ENABLED,
+      },
+      // Runs after the gates and before any candidate is listed. A dry run composes nothing, so it
+      // needs no provider; every other armed run must prove it is on the intended live provider
+      // before a single piece of fixture copy could reach the human review queue.
+      preflight: () => {
+        if (dryRun) return;
+        assertUnattendedPreparationProvider({
+          ...emailProviderConfigView(c),
+          allowMockLlm: c.FOLLOWUP_PREPARATION_ALLOW_MOCK_LLM,
+        });
       },
       maxPerRun: cliOpts.limit ? Number.parseInt(cliOpts.limit, 10) : c.FOLLOWUP_PREPARATION_MAX_PER_RUN,
       dueCandidates: (nowMs, limit) => prepRepo.dueCandidates(nowMs, limit, { recordId: cliOpts.record }),
@@ -234,11 +299,19 @@ export async function runFollowupAutomationCommand(ctx: CliContext, cliOpts: Run
   }
 
   if (runId) {
-    await runs.finish(runId, 'COMPLETED', JSON.stringify({ prepare: prepReport?.outcome, progress: progReport?.outcome }));
+    await runs.finish(runId, 'COMPLETED', JSON.stringify({ promote: promoReport?.outcome, prepare: prepReport?.outcome, progress: progReport?.outcome }));
   }
 
   // ---------------- Operator output ----------------
   console.log(`\nFollow-up automation run (dry-run=${String(dryRun)}):`);
+  if (promoReport) {
+    console.log(`\n  DUE PROMOTION: ${promoReport.outcome} (considered=${String(promoReport.considered)})`);
+    for (const e of promoReport.promoted) console.log(`    PROMOTED    ${label(e.leadId, e.step)} — ${e.detail}`);
+    for (const e of promoReport.unchanged) console.log(`    UNCHANGED   ${label(e.leadId, e.step)} — ${e.detail}`);
+    for (const e of promoReport.blocked) console.log(`    BLOCKED     ${label(e.leadId, e.step)} — ${e.detail}`);
+    for (const e of promoReport.skipped) console.log(`    SKIP        ${label(e.leadId, e.step)} — ${e.detail}`);
+    for (const e of promoReport.failures) console.log(`    FAILED      ${label(e.leadId, e.step)} — ${e.detail}`);
+  }
   if (prepReport) {
     console.log(`\n  PREPARATION: ${prepReport.outcome} (considered=${String(prepReport.considered)})`);
     for (const e of prepReport.prepared) console.log(`    PREPARED    ${label(e.leadId, e.step)} — ${e.detail}; awaiting HUMAN approval`);
@@ -255,12 +328,14 @@ export async function runFollowupAutomationCommand(ctx: CliContext, cliOpts: Run
     for (const e of progReport.skipped) console.log(`    SKIP        ${label(e.leadId, e.sequenceStep)} — ${e.detail}`);
     for (const e of progReport.failures) console.log(`    FAILED      ${label(e.leadId, e.sequenceStep)} [${e.stage ?? '-'}] — ${e.detail}`);
   }
-  console.log(`\nSUMMARY_JSON ${JSON.stringify({ prepare: prepReport, progress: progReport })}`);
+  console.log(`\nSUMMARY_JSON ${JSON.stringify({ promote: promoReport, prepare: prepReport, progress: progReport })}`);
   console.log('\n  Nothing was sent. Sending happens ONLY in run-scheduled-sends -> SendService.');
 
   // Non-zero exit surfaces problems to the scheduler's error handler. A BLOCKED follow-up is normal
   // operation (the prospect replied), so it is deliberately NOT a failure.
-  const problems = (prepReport?.failures.length ?? 0) > 0 || (progReport?.failures.length ?? 0) > 0;
+  const problems = (promoReport?.failures.length ?? 0) > 0
+    || (prepReport?.failures.length ?? 0) > 0
+    || (progReport?.failures.length ?? 0) > 0;
   if (problems) process.exitCode = 1;
 }
 

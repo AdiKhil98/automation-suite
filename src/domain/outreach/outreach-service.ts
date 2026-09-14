@@ -3,6 +3,10 @@ import { AppError } from '../../utils/errors.js';
 import { type DeliveryPermanence, type DeliveryStatus } from './delivery.js';
 import { type NewOutreachEvent } from './events.js';
 import {
+  decideFollowupPromotion,
+  type FollowupPromotionCandidateView,
+} from './followup-due-promotion.js';
+import {
   computeFollowupDueUtc,
   followupBlockedReason,
   type FollowupStep,
@@ -48,6 +52,18 @@ export interface OutreachTxRepos {
   hasDoNotContact(contactEmail: string): Promise<boolean>;
   insertRecord(rec: OutreachRecord): Promise<void>;
   updateRecord(id: string, patch: Partial<OutreachRecord>, now: Date): Promise<void>;
+  /**
+   * Compare-and-set update: applies `patch` ONLY while the record is still in `expectedStatus`,
+   * and reports whether it matched. This is the serialization point for unattended state changes —
+   * two concurrent runs cannot both observe the same "before" status and both write, because the
+   * loser's WHERE clause no longer matches once the winner commits.
+   */
+  updateRecordIfStatus(
+    id: string,
+    expectedStatus: OutreachStatus,
+    patch: Partial<OutreachRecord>,
+    now: Date,
+  ): Promise<boolean>;
   insertMessage(msg: OutreachMessage): Promise<void>;
   insertReply(reply: {
     id: string;
@@ -60,6 +76,8 @@ export interface OutreachTxRepos {
     preview: string;
   }): Promise<void>;
   insertFollowup(f: OutreachFollowup): Promise<void>;
+  /** One follow-up row by id, re-read inside the transaction (null when it does not exist). */
+  getFollowup(id: string): Promise<OutreachFollowup | null>;
   /** Find a stored message by its Gmail message id (enrollment idempotency; null if none). */
   findMessageByGmailMessageId(gmailMessageId: string): Promise<OutreachMessage | null>;
   updateFollowupStatus(
@@ -287,6 +305,33 @@ export interface CorrectDeliveryEventsResult {
   /** Records whose timeline got a DELIVERY_RECONCILIATION_CORRECTED event (apply only). */
   recordsAnnotated: string[];
 }
+
+/** Identifies the ONE due follow-up row a promotion attempt is bound to. */
+export interface PromoteFollowupDueInput {
+  followupId: string;
+  outreachRecordId: string;
+  /** Recorded on the event so the timeline never implies a human made this transition. */
+  actor: string;
+}
+
+export interface PromoteFollowupDueResult {
+  outcome: PromoteFollowupDueOutcome;
+  from: OutreachStatus | null;
+  to: OutreachStatus | null;
+  detail: string;
+}
+
+export type PromoteFollowupDueOutcome =
+  /** The record was moved to `FOLLOW_UP_N_DUE` and exactly one event was appended. */
+  | 'PROMOTED'
+  /** The record already announced this step as due. Nothing was written. */
+  | 'ALREADY_DUE'
+  /** Suppressed by authoritative state (reply/bounce/unsubscribe/DNC/meeting/closed). */
+  | 'BLOCKED'
+  /** The row or record did not justify a promotion (not due, inactive, mismatched, missing). */
+  | 'SKIPPED'
+  /** A concurrent writer changed the record between the re-read and the compare-and-set. */
+  | 'RACE_LOST';
 
 /**
  * Phase 17A outreach tracking service. Owns state transitions, immutable message
@@ -746,6 +791,85 @@ export class OutreachService {
         data: { step, dueAt: dueAt.toISOString() },
       });
       return { outcome: 'SCHEDULED', followup };
+    });
+  }
+
+  /**
+   * Promote a record to "follow-up N is due" because its scheduled follow-up row has come due.
+   * This is the unattended equivalent of the manual `INITIAL_SENT -> FOLLOW_UP_1_DUE` transition,
+   * and it is the ONLY automated writer of a `FOLLOW_UP_N_DUE` status.
+   *
+   * It grants no new authority: both statuses are non-sending, the follow-up row is not modified,
+   * no due date moves, and composing/drafting/scheduling/sending all stay behind their own gates.
+   *
+   * ATOMICITY. The caller's candidate snapshot is stale by definition, so nothing from it is
+   * trusted. Inside ONE transaction this method re-reads the follow-up row and the record, re-runs
+   * the SAME pure decision ({@link decideFollowupPromotion}) against that fresh state, and applies
+   * the change with a compare-and-set on the expected source status. If a reply, bounce, or a
+   * concurrent run moved the record in between, the CAS matches nothing, `RACE_LOST` is returned,
+   * and NO event is written — so the immutable timeline can never record a transition that did not
+   * happen. The state machine is asserted as a final backstop before the write.
+   */
+  async promoteFollowupDue(input: PromoteFollowupDueInput): Promise<PromoteFollowupDueResult> {
+    return this.uow.transaction(async (repos) => {
+      const followup = await repos.getFollowup(input.followupId);
+      if (!followup || followup.outreachRecordId !== input.outreachRecordId) {
+        return {
+          outcome: 'SKIPPED', from: null, to: null,
+          detail: `FOLLOWUP_NOT_FOUND: no follow-up ${input.followupId} on record ${input.outreachRecordId}`,
+        };
+      }
+      const rec = await repos.getRecord(input.outreachRecordId);
+      const snapshot: FollowupPromotionCandidateView = {
+        followupId: followup.id,
+        outreachRecordId: input.outreachRecordId,
+        leadId: rec?.leadId ?? '',
+        step: followup.step,
+        followupStatus: followup.status,
+        dueAtMs: followup.dueAt.getTime(),
+        recordStatus: rec?.status ?? null,
+        doNotContact: rec?.doNotContact ?? false,
+      };
+      const decision = decideFollowupPromotion(snapshot, this.now());
+      if (decision.action === 'ALREADY_DUE') {
+        return { outcome: 'ALREADY_DUE', from: rec?.status ?? null, to: rec?.status ?? null, detail: decision.detail };
+      }
+      if (decision.action === 'BLOCKED') {
+        return { outcome: 'BLOCKED', from: rec?.status ?? null, to: null, detail: `${decision.reason}: ${decision.detail}` };
+      }
+      if (decision.action === 'SKIP') {
+        return { outcome: 'SKIPPED', from: rec?.status ?? null, to: null, detail: `${decision.reason}: ${decision.detail}` };
+      }
+
+      // Backstop: the decision derives both ends from the step, so this can only fire if the
+      // sequence map and the state machine ever disagree. Throwing rolls the transaction back.
+      assertOutreachTransition(decision.from, decision.to);
+      const nowD = new Date(this.now());
+      const applied = await repos.updateRecordIfStatus(
+        input.outreachRecordId, decision.from, { status: decision.to }, nowD,
+      );
+      if (!applied) {
+        return {
+          outcome: 'RACE_LOST', from: decision.from, to: null,
+          detail: `record left ${decision.from} before the promotion could be applied; nothing written`,
+        };
+      }
+      await repos.appendEvent({
+        outreachRecordId: input.outreachRecordId,
+        type: 'STATE_TRANSITION',
+        fromStatus: decision.from,
+        toStatus: decision.to,
+        message: `${decision.from} -> ${decision.to} (follow-up ${String(decision.step)} came due, ${input.actor})`,
+        data: {
+          trigger: 'FOLLOWUP_DUE',
+          automated: true,
+          promotedBy: input.actor,
+          followupId: followup.id,
+          step: decision.step,
+          dueAt: followup.dueAt.toISOString(),
+        },
+      });
+      return { outcome: 'PROMOTED', from: decision.from, to: decision.to, detail: `promoted to ${decision.to}` };
     });
   }
 

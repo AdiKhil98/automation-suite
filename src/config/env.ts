@@ -440,6 +440,12 @@ const envSchema = z.object({
   // deliberately small; progression is free but stays bounded so one run can never fan out.
   FOLLOWUP_PREPARATION_MAX_PER_RUN: z.coerce.number().int().positive().max(50).default(5),
   FOLLOWUP_PROGRESSION_MAX_PER_RUN: z.coerce.number().int().positive().max(50).default(10),
+  // Unattended preparation persists its output into the HUMAN REVIEW QUEUE as a real draft for a
+  // real prospect, so it refuses to run on a mock provider: `ALLOW_PAID_LLM_CALLS=true` only PERMITS
+  // spending, it does not SELECT a provider, and `LLM_PROVIDER` defaults to mock. Production states
+  // the provider explicitly (LLM_PROVIDER=openai, in the follow-up systemd drop-in). Set this only
+  // to deliberately accept MOCK copy in the review queue — e.g. a local end-to-end rehearsal.
+  FOLLOWUP_PREPARATION_ALLOW_MOCK_LLM: boolString(false),
   // The operator recorded against unattended finalizations, so the audit trail never implies a human
   // reviewed the finalization by hand. The HUMAN approval it derives from is recorded separately.
   FOLLOWUP_AUTOMATION_ACTOR: z.string().min(1).default('followup-automation'),

@@ -118,6 +118,13 @@ export interface FollowupPreparationGates {
 export interface FollowupPreparationDeps {
   now(): number;
   gates: FollowupPreparationGates;
+  /**
+   * Fail-closed preflight, run AFTER the gates pass and BEFORE any candidate is listed or composed.
+   * It exists so a misconfigured box (most importantly: armed for production but still on the MOCK
+   * model provider) aborts the whole run loudly, instead of quietly persisting fixture copy into
+   * the human review queue one candidate at a time. Throwing here writes nothing.
+   */
+  preflight(): Promise<void> | void;
   /** Hard bound on model spend per run. */
   maxPerRun: number;
   /** Due follow-ups, oldest first, already bounded by `maxPerRun`. */
@@ -155,7 +162,7 @@ export interface FollowupPreparationReport {
 /**
  * Execute one unattended preparation run.
  *
- * Fail-closed at every gate. Composition is bounded by `maxPerRun` (model spend). A candidate that
+ * Fail-closed at every gate, and at the preflight that follows them. Composition is bounded by `maxPerRun` (model spend). A candidate that
  * throws is recorded as a failure and the run continues — one bad lead never stalls the queue, and
  * nothing about a failure can cause a send.
  */
@@ -167,6 +174,9 @@ export async function runFollowupPreparation(deps: FollowupPreparationDeps): Pro
   if (!g.followupPreparationEnabled) { report.outcome = 'MASTER_DISABLED'; return report; }
   if (!g.outreachTrackingEnabled) { report.outcome = 'TRACKING_DISABLED'; return report; }
   if (!g.emailGenerationEnabled) { report.outcome = 'EMAIL_GENERATION_DISABLED'; return report; }
+  // Deliberately propagates: a preflight failure must abort the run (and fail the systemd unit),
+  // never degrade into a partially-composed batch.
+  await deps.preflight();
 
   const candidates = await deps.dueCandidates(deps.now(), deps.maxPerRun);
   report.considered = candidates.length;

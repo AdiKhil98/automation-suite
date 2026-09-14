@@ -95,6 +95,7 @@ function prepHarness(opts: {
       followupPreparationEnabled: true, outreachTrackingEnabled: true, emailGenerationEnabled: true,
       ...opts.gates,
     },
+    preflight: () => { /* provider config is a CLI concern; nothing to check here */ },
     maxPerRun: 5,
     dueCandidates: async () => opts.candidates ?? [candidate()],
     cancelFollowup: async (id) => { calls.cancelled.push(id); },

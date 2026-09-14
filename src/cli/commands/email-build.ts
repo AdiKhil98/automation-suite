@@ -1,10 +1,13 @@
 import { EmailWriterService } from '../../domain/email/email-writer-service.js';
+import {
+  type EmailProviderConfigView,
+  requireLiveEmailProviderConfig,
+} from '../../domain/email/llm-provider-policy.js';
 import { worstCaseEmailInputTokens } from '../../domain/email/email-token-budget.js';
 import { defaultMockEmailResponder } from '../../fixtures/mock-email-responses.js';
 import { LocalEmailDebugStore } from '../../integrations/email/email-debug-store.js';
 import { MockLlmProvider } from '../../integrations/llm/mock-llm.js';
 import { OpenAiResponsesProvider } from '../../integrations/llm/openai-responses.js';
-import { priceKnown, PRICE_VERIFIED_AT } from '../../integrations/llm/pricing.js';
 import { type LlmProvider } from '../../integrations/llm/provider.js';
 import { DrizzleEmailUnitOfWork } from '../../persistence/email-unit-of-work.js';
 import { type CliContext } from '../context.js';
@@ -19,14 +22,22 @@ export interface BuiltEmail {
 export function buildEmailProvider(ctx: CliContext): LlmProvider {
   const c = ctx.config;
   if (c.LLM_PROVIDER === 'openai') {
-    if (!c.ALLOW_PAID_LLM_CALLS) throw new Error('LLM_PROVIDER=openai requires ALLOW_PAID_LLM_CALLS=true (paid-call kill switch is off).');
-    if (!c.OPENAI_API_KEY) throw new Error('LLM_PROVIDER=openai requires OPENAI_API_KEY.');
-    if (!PRICE_VERIFIED_AT) throw new Error('LLM price table not verified; reconcile pricing.ts before any paid call.');
-    if (!priceKnown(c.EMAIL_WRITER_MODEL)) throw new Error(`No verified price for email writer model "${c.EMAIL_WRITER_MODEL}".`);
-    if (!priceKnown(c.EMAIL_REVIEWER_MODEL)) throw new Error(`No verified price for email reviewer model "${c.EMAIL_REVIEWER_MODEL}".`);
-    return new OpenAiResponsesProvider({ apiKey: c.OPENAI_API_KEY, logger: ctx.logger });
+    // Identical preconditions to the eager preflight in `run-followup-automation`, from one place.
+    const { apiKey } = requireLiveEmailProviderConfig(emailProviderConfigView(c));
+    return new OpenAiResponsesProvider({ apiKey, logger: ctx.logger });
   }
   return new MockLlmProvider(defaultMockEmailResponder);
+}
+
+/** The provider-selection slice of config, for the pure policies in the email domain. */
+export function emailProviderConfigView(c: CliContext['config']): EmailProviderConfigView {
+  return {
+    llmProvider: c.LLM_PROVIDER,
+    allowPaidLlmCalls: c.ALLOW_PAID_LLM_CALLS,
+    openAiApiKey: c.OPENAI_API_KEY,
+    writerModel: c.EMAIL_WRITER_MODEL,
+    reviewerModel: c.EMAIL_REVIEWER_MODEL,
+  };
 }
 
 /** Build the email writer service. Paid OpenAI calls are hard-gated exactly like the audit

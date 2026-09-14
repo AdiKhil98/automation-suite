@@ -4,6 +4,7 @@ import {
   type OutreachTxRepos,
   type OutreachUnitOfWork,
 } from '../../src/domain/outreach/outreach-service.js';
+import { type OutreachStatus } from '../../src/domain/outreach/status.js';
 import {
   type OutreachDeliveryEvent,
   type OutreachFollowup,
@@ -69,6 +70,19 @@ export class InMemoryOutreachStore implements OutreachUnitOfWork, OutreachTxRepo
     if (cur) this.records.set(id, { ...cur, ...patch, updatedAt: now });
   }
 
+  /** Compare-and-set, mirroring the SQL `WHERE id = ? AND status = ?` the Drizzle repo issues. */
+  async updateRecordIfStatus(
+    id: string,
+    expectedStatus: OutreachStatus,
+    patch: Partial<OutreachRecord>,
+    now: Date,
+  ): Promise<boolean> {
+    const cur = this.records.get(id);
+    if (!cur || cur.status !== expectedStatus) return false;
+    this.records.set(id, { ...cur, ...patch, updatedAt: now });
+    return true;
+  }
+
   async insertMessage(msg: OutreachMessage): Promise<void> {
     this.messages.push({ ...msg });
   }
@@ -92,6 +106,11 @@ export class InMemoryOutreachStore implements OutreachUnitOfWork, OutreachTxRepo
 
   async insertFollowup(f: OutreachFollowup): Promise<void> {
     this.followups.set(f.id, { ...f });
+  }
+
+  async getFollowup(id: string): Promise<OutreachFollowup | null> {
+    const f = this.followups.get(id);
+    return f ? { ...f } : null;
   }
 
   async updateFollowupStatus(
