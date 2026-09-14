@@ -7,7 +7,11 @@ import {
 } from '../../prompts/email/index.js';
 import { type LlmProvider, type LlmResult, type ReasoningEffort } from '../../integrations/llm/provider.js';
 import { worstCaseCostUsd } from '../../integrations/llm/pricing.js';
-import { type EmailDebugReader } from '../../integrations/email/email-debug-store.js';
+import {
+  EMAIL_DEBUG_TTL_MS,
+  type EmailDebugReader,
+  type EmailDebugStore,
+} from '../../integrations/email/email-debug-store.js';
 import { type LeadFact } from '../lead-facts/lead-fact.js';
 import { type LeadStatus } from '../leads/status.js';
 import { buildEmailBrief } from './email-brief.js';
@@ -160,7 +164,46 @@ export interface ResumeReviewPorts {
  */
 export type ResumeDraftWrite =
   | { kind: 'APPEND'; persist: EmailPersist; newDraftId: string }
-  | { kind: 'RECOVER_IN_PLACE'; draftId: string; update: EmailReviewOutcomeUpdate; modelCalls: EmailModelCall[] };
+  | { kind: 'RECOVER_IN_PLACE'; draftId: string; update: EmailReviewOutcomeUpdate; modelCalls: EmailModelCall[] }
+  /**
+   * A PAID reviewer call that produced no usable verdict (refusal, provider error, or output the
+   * local schema rejects). The attempt must not vanish from the books, but it must also change
+   * nothing about the draft's state: the row keeps its REVIEW_FAILED status, its writer copy and
+   * provenance, its evidence bindings, and its NULL `human_decision`, so the SAME draft stays
+   * resumable for another reviewer-only attempt once the cause is fixed. Only the model_call, the
+   * added spend, and a bounded diagnostic are written.
+   */
+  | {
+      kind: 'ACCOUNT_FAILED_ATTEMPT';
+      draftId: string;
+      addCostUsd: number;
+      modelCalls: EmailModelCall[];
+      diagnostic: ResumeFailureDiagnostic;
+    };
+
+/**
+ * What a failed reviewer attempt leaves behind for a human to diagnose. Bounded by construction and
+ * carrying model output only — never credentials, prompts, or environment. The Zod issues are the
+ * exact reason the response was rejected, which is what makes a schema mismatch fixable instead of
+ * merely repeatable.
+ */
+export interface ResumeFailureDiagnostic {
+  outcome: ResumeOutcome;
+  providerStatus: string;
+  requestId: string | null;
+  responseId: string | null;
+  /** Sanitized Zod issues (schema-invalid only): where, which rule, and what it said. */
+  issues: Array<{ path: string; code: string; message: string }>;
+  /** A bounded excerpt of the raw reviewer JSON, for reproducing the exact failure. */
+  rawExcerpt: string | null;
+  rawTruncated: boolean;
+}
+
+/** Bounds for the diagnostic, so one bad response can never bloat an event row or a debug file. */
+const MAX_DIAGNOSTIC_ISSUES = 20;
+const MAX_ISSUE_PATH_CHARS = 120;
+const MAX_ISSUE_MESSAGE_CHARS = 200;
+const MAX_RAW_EXCERPT_CHARS = 2_000;
 
 /** Atomic commit of the review outcome: supported lead-state transitions + the draft write above
  * + the single model_call + an immutable audit NOTE. Provided by the CLI (real UoW) or a test spy. */
@@ -180,6 +223,12 @@ export type ResumeCommit = (plan: ResumeCommitPlan) => Promise<void>;
 export interface ResumeReviewDeps {
   provider: LlmProvider;
   debug: EmailDebugReader;
+  /**
+   * Diagnostic sink for a failed reviewer attempt — the same store the writer records to. Optional
+   * so a caller with no diagnostics configured still gets the DURABLE accounting (model_call, cost,
+   * pipeline event); this only adds the fuller raw payload.
+   */
+  debugWriter?: EmailDebugStore;
   ports: ResumeReviewPorts;
   commit: ResumeCommit;
   logger: Logger;
@@ -194,6 +243,16 @@ export interface ResumeReviewDeps {
  * passes — sent to the reviewer exactly once. Approval appends a NEW immutable draft row and
  * advances the lead through supported transitions; the original failed row is preserved.
  */
+/** JSON for a diagnostic excerpt; never throws on an exotic payload. */
+function safeStringify(value: unknown): string {
+  try {
+    return JSON.stringify(value) ?? String(value);
+  } catch {
+    // A circular or otherwise unserialisable payload still deserves a recorded shape.
+    return `[unserializable ${typeof value}]`;
+  }
+}
+
 export class ResumeEmailReviewService {
   constructor(private readonly deps: ResumeReviewDeps) {}
 
@@ -283,11 +342,24 @@ export class ResumeEmailReviewService {
       return this.result(leadId, draftId, 'VALIDATION_FAILED', 0, 0, check.violations, null, null, null);
     }
 
-    // Budget guard for the single real reviewer call (mock is free).
+    // Budget guard for the single real reviewer call (mock is free, as everywhere else).
+    //
+    // CUMULATIVE, not per-call. The draft already carries what has been spent on it — the writer
+    // attempt, plus every failed reviewer attempt this path now deliberately accounts for. Admitting
+    // a retry on "this ONE call fits under the cap" would let an unbounded number of retries walk
+    // past a per-lead budget while each individual call looked affordable. Fail closed when the
+    // projection is unknown, and make the decision BEFORE the provider is touched.
     const isReal = this.deps.provider.name !== 'mock';
     if (isReal && c.maxCostUsdPerLead !== null) {
       const projected = worstCaseCostUsd(c.reviewerModel, c.worstCaseInputTokensPerCall, c.maxOutputTokens);
-      if (projected === null || projected > c.maxCostUsdPerLead) {
+      if (projected === null || draftRow.totalCostUsd + projected > c.maxCostUsdPerLead) {
+        this.deps.logger.warn(
+          {
+            leadId, draftId, alreadySpentUsd: draftRow.totalCostUsd, projectedUsd: projected,
+            capUsd: c.maxCostUsdPerLead,
+          },
+          'resume-email-review: reviewer refused — cumulative spend on this draft would exceed the per-lead cap',
+        );
         return this.result(leadId, draftId, 'REVIEWER_BUDGET_BLOCKED', 0, 0, [], null, null, null);
       }
     }
@@ -308,13 +380,24 @@ export class ResumeEmailReviewService {
     });
     const cost = rRes.usage.estimatedCostUsd ?? 0;
 
-    if (rRes.status === 'refusal') return this.result(leadId, draftId, 'MODEL_REFUSAL', cost, 1, [], null, null, null);
-    if (rRes.status === 'rate_limited') return this.result(leadId, draftId, 'RATE_LIMITED', cost, 1, [], null, null, null);
+    // EVERY path from here on has already SPENT money. A reviewer call that yields no usable
+    // verdict used to return straight to the caller, so the spend, the model_call, and the reason
+    // for the failure existed only in the operator's terminal. They are now committed durably
+    // BEFORE returning, without touching the draft's state or the lead's.
+    if (rRes.status === 'refusal') {
+      return this.accountFailedAttempt('MODEL_REFUSAL', leadId, draftRow, rRes, cost, runId, []);
+    }
+    if (rRes.status === 'rate_limited') {
+      return this.accountFailedAttempt('RATE_LIMITED', leadId, draftRow, rRes, cost, runId, []);
+    }
     if (rRes.status === 'transient' || rRes.status === 'incomplete' || rRes.status === 'input_too_large') {
-      return this.result(leadId, draftId, 'TRANSIENT_PROVIDER_ERROR', cost, 1, [], null, null, null);
+      return this.accountFailedAttempt('TRANSIENT_PROVIDER_ERROR', leadId, draftRow, rRes, cost, runId, []);
     }
     const rParsed = emailReviewSchema.safeParse(rRes.rawJson);
-    if (!rParsed.success) return this.result(leadId, draftId, 'SCHEMA_INVALID', cost, 1, [], null, null, null);
+    if (!rParsed.success) {
+      // The exact issues are what turn "it failed again" into a fixable schema mismatch.
+      return this.accountFailedAttempt('SCHEMA_INVALID', leadId, draftRow, rRes, cost, runId, rParsed.error.issues);
+    }
     const review = rParsed.data;
 
     // The EXISTING approvable gate — shared with the writer service (single source of truth).
@@ -369,6 +452,108 @@ export class ResumeEmailReviewService {
       leadId, draftId, approvable ? 'REVIEWED_APPROVED' : 'REVIEWED_REJECTED', cost, 1, [], review,
       newDraftId, newLeadStatus, write.kind === 'APPEND' ? write.newDraftId : draftRow.id,
     );
+  }
+
+  /**
+   * Commit a PAID reviewer attempt that produced no usable verdict, then report it.
+   *
+   * What is written: the fuller raw payload to the local diagnostic sink (first, and independently,
+   * so a database outage cannot erase the evidence of a paid call), then the reviewer `model_call`
+   * (carrying the sanitized schema violations, exactly as the writer records its own), the added
+   * spend on the draft, and an immutable pipeline event with the bounded diagnostic.
+   *
+   * What is NOT written: any change to the draft's status, reviewer verdict columns,
+   * `human_decision`, subject, body, evidence bindings, or writer provenance, and no lead
+   * transition. The draft therefore stays exactly as resumable as it was, which is what makes a
+   * retry after the fix a reviewer-only retry rather than a re-composition.
+   */
+  private async accountFailedAttempt(
+    outcome: ResumeOutcome,
+    leadId: string,
+    draftRow: PersistedDraftRow,
+    rRes: LlmResult,
+    cost: number,
+    runId: string,
+    issues: readonly { path: readonly PropertyKey[]; code: string; message: string }[],
+  ): Promise<ResumeReviewResult> {
+    const violations = issues
+      .slice(0, MAX_DIAGNOSTIC_ISSUES)
+      .map((i) => `schema_invalid:${i.path.join('.') || '(root)'}`);
+    const modelCall = { ...this.modelCall(rRes), validationViolations: violations.length > 0 ? violations : null };
+    const diagnostic = this.diagnostic(outcome, rRes, issues);
+
+    // ORDER MATTERS, and the two sinks are independent.
+    //
+    // The local diagnostic is written FIRST, so that if the database is the thing that is broken,
+    // the raw reviewer response and the exact reason it was rejected still survive somewhere. Its
+    // failure is caught and logged: a filesystem problem must never undo, obscure, or fail a run
+    // whose DB accounting then succeeds — the money was spent either way, and the durable books are
+    // the DB. The commit that follows is NOT caught: if accounting itself fails, that is an
+    // infrastructure failure the operator must see, and the local diagnostic written above remains.
+    let diagnosticPersisted = false;
+    if (this.deps.debugWriter) {
+      const now = new Date();
+      try {
+        await this.deps.debugWriter.record({
+          leadId, runId, outcome, draft: null, review: diagnostic, violations,
+          costUsd: cost, callsMade: 1,
+          createdAt: now.toISOString(), expiresAt: new Date(now.getTime() + EMAIL_DEBUG_TTL_MS).toISOString(),
+        });
+        diagnosticPersisted = true;
+      } catch (err) {
+        this.deps.logger.error(
+          { leadId, draftId: draftRow.id, outcome, err: err instanceof Error ? err.message : String(err) },
+          'resume-email-review: local diagnostic could not be written; the paid attempt is still being accounted in the database',
+        );
+      }
+    }
+
+    await this.deps.commit({
+      leadId,
+      approved: false,
+      route: 'EMAIL_REVIEW_FAILED',
+      write: { kind: 'ACCOUNT_FAILED_ATTEMPT', draftId: draftRow.id, addCostUsd: cost, modelCalls: [modelCall], diagnostic },
+      sourceDraftId: draftRow.id,
+      reviewerDecision: outcome,
+      costUsd: cost,
+      runId,
+    });
+
+    // Accounting committed: the outcome is determinate and is reported as such, whether or not the
+    // local diagnostic was written.
+    this.deps.logger.warn(
+      { leadId, draftId: draftRow.id, outcome, costUsd: cost, issues: diagnostic.issues.length, diagnosticPersisted },
+      'resume-email-review: paid reviewer call produced no usable verdict; draft left resumable',
+    );
+    return this.result(leadId, draftRow.id, outcome, cost, 1, violations, null, null, 'EMAIL_REVIEW_FAILED', draftRow.id);
+  }
+
+  /** Bounded, model-output-only diagnostic. No credentials, prompts, or environment ever enter it. */
+  private diagnostic(
+    outcome: ResumeOutcome,
+    rRes: LlmResult,
+    issues: readonly { path: readonly PropertyKey[]; code: string; message: string }[],
+  ): ResumeFailureDiagnostic {
+    let rawExcerpt: string | null = null;
+    let rawTruncated = false;
+    if (rRes.rawJson !== null && rRes.rawJson !== undefined) {
+      const serialized = safeStringify(rRes.rawJson);
+      rawTruncated = serialized.length > MAX_RAW_EXCERPT_CHARS;
+      rawExcerpt = rawTruncated ? serialized.slice(0, MAX_RAW_EXCERPT_CHARS) : serialized;
+    }
+    return {
+      outcome,
+      providerStatus: rRes.status,
+      requestId: rRes.requestId,
+      responseId: rRes.responseId,
+      issues: issues.slice(0, MAX_DIAGNOSTIC_ISSUES).map((i) => ({
+        path: (i.path.join('.') || '(root)').slice(0, MAX_ISSUE_PATH_CHARS),
+        code: i.code,
+        message: i.message.slice(0, MAX_ISSUE_MESSAGE_CHARS),
+      })),
+      rawExcerpt,
+      rawTruncated,
+    };
   }
 
   private modelCall(res: LlmResult): EmailModelCall {

@@ -6,6 +6,56 @@ All notable changes per phase. Format loosely follows Keep a Changelog.
 
 ### Fixed
 
+- **The reviewer-only retry budget was per-call, not per-draft.** Because failed reviewer attempts
+  now deliberately increment `total_cost_usd`, admitting a retry on "this one call fits under the
+  cap" would let unlimited retries walk past the per-lead budget while each call looked affordable.
+  Admission is now `draft.totalCostUsd + projectedReviewerCost <= EMAIL_MAX_COST_USD_PER_LEAD`, it
+  fails closed when the projection is unknown, and it is decided before the provider is touched
+  (zero calls when blocked). Mock providers stay free, as everywhere else in the pipeline.
+- **The failure diagnostic could break run semantics.** It was written after the DB commit and not
+  caught, so a filesystem problem turned a durably-accounted paid attempt into a thrown error and a
+  FAILED run. The two sinks are now independent and ordered: the local diagnostic is written FIRST
+  (so a database outage still leaves evidence of the paid call) and its failure is caught and
+  logged; the DB accounting then proceeds and, if it succeeds, the determinate outcome is returned
+  regardless. A DB accounting failure still propagates — that is a real infrastructure failure — and
+  the local diagnostic written beforehand survives it. Neither path can cause a second paid call.
+- `EMAIL_SCHEMA_VERSION` bumped to `email-copy-schema-5`: the PROVIDER contract changed materially
+  (derived and fully constrained instead of hand-written and permissive), so calls made under it are
+  distinguishable. Existing drafts keep the version their writer recorded — the failed production
+  draft's provenance is not rewritten by a resume — while NEW reviewer `model_call` rows carry the
+  current version.
+- The Zod-to-JSON-Schema derivation is now fail-closed: it runs in Zod's default throwing mode
+  instead of `unrepresentable: 'any'` (which silently turns an unrepresentable construct into `{}`,
+  a field with no constraints at all), plus a backstop that refuses any property arriving without a
+  type or enum. The comment about `pattern` was corrected: standard Structured Outputs does support
+  it; it is simply not used to encode Zod's trim-before-measure semantics, since the local check and
+  the durable diagnostics already cover that rare shape.
+
+- **The provider schema had drifted from the Zod schema, making a paid reviewer call unsatisfiable.**
+  `problems` / `requiredRevisions` were sent to the provider as a bare
+  `{ type: 'array', items: { type: 'string' } }` while Zod required at most 20 entries of 1-300
+  characters, and every writer string/array bound (subject, body, reason, strategic angle, business
+  relevance, urgency basis, evidence-id count and length) was missing from the wire schema entirely.
+  A model could return output that satisfied the provider and still failed local parsing — which is
+  exactly what a production `resume-email-review` hit: `SCHEMA_INVALID` after spending $0.033. Both
+  provider schemas are now DERIVED from their Zod schemas (`z.toJSONSchema`, plus the
+  structured-output requirements: every field required, `additionalProperties: false`), so this class
+  of drift is unrepresentable. The one residue JSON Schema cannot express — Zod trims before
+  measuring length — is documented in code and covered by the accounting below.
+- **A paid reviewer call could vanish from the books.** `resume-email-review` returned
+  `SCHEMA_INVALID` / `MODEL_REFUSAL` / `RATE_LIMITED` / `TRANSIENT_PROVIDER_ERROR` before committing
+  anything, so the spend, the `model_call`, and the reason for the failure existed only in the
+  operator's terminal. Such an attempt is now committed durably: the reviewer `model_call` (carrying
+  the sanitized schema violations), the draft's cumulative cost incremented in SQL, and an immutable
+  pipeline event with a bounded, model-output-only diagnostic (exact Zod issue paths/codes/messages,
+  request/response ids, truncated raw payload). Nothing about the draft or the lead moves — status,
+  reviewer verdict columns, `human_decision`, subject/body, evidence bindings and writer provenance
+  are all untouched — so the SAME draft stays resumable for a reviewer-only retry, and repeated
+  failed attempts accumulate cost and calls instead of overwriting each other. The successful
+  in-place recovery path is unchanged.
+- The resume commit is now built by one shared factory (`createResumeCommit`) used by both the CLI
+  and its integration tests, so a test can no longer prove behaviour the deployed command lacks.
+
 - **Resumed follow-up reviews judged continuity against an empty thread.** `resume-email-review`
   passed `priorMessages: []` to the reviewer for every step, while the step rubric asks it to judge
   exactly what the earlier messages make possible (add clarity without restarting, compress without

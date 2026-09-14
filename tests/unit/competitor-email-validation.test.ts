@@ -18,6 +18,7 @@ import {
   type PatternEvidenceItem,
 } from '../../src/domain/competitor/pattern-types.js';
 import { FIXTURE_NOW } from '../../src/fixtures/competitor-email-validation/synthetic-dental-scenario.js';
+import { EMAIL_SCHEMA_VERSION } from '../../src/domain/email/email-schema.js';
 
 /** Run the real pipeline once and reuse it across assertions. */
 async function successOrThrow(): Promise<HarnessSuccess> {
@@ -76,9 +77,9 @@ describe('Phase 7A4A — competitor email quality validation harness', () => {
     expect(s.enriched.rendered.body).toContain(s.plan.competitorSentence);
   });
 
-  it('produces a schema-4 enriched artifact in APPROVED_COMPETITOR_PATTERN_PACKAGE mode', async () => {
+  it('produces a current-schema enriched artifact in APPROVED_COMPETITOR_PATTERN_PACKAGE mode', async () => {
     const s = await successOrThrow();
-    expect(s.enriched.schemaVersion).toBe('email-copy-schema-4');
+    expect(s.enriched.schemaVersion).toBe(EMAIL_SCHEMA_VERSION);
     expect(s.enriched.schemaOk).toBe(true);
     expect(s.enriched.artifact.competitor_evidence_used).toBe('APPROVED_COMPETITOR_PATTERN_PACKAGE');
     expect(s.baseline.competitorEvidenceUsed).toBe('NONE');

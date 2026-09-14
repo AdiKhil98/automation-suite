@@ -5,6 +5,7 @@ import { type EmailWriterParsed } from '../../../src/domain/email/email-schema.j
 import { type EmailValidationContext } from '../../../src/domain/email/email-validation.js';
 import { type EmailInputs } from '../../../src/domain/email/email-render.js';
 import { INITIAL_EMAIL_SEQUENCE } from '../../../src/domain/email/email-types.js';
+import { EMAIL_SCHEMA_VERSION } from '../../../src/domain/email/email-schema.js';
 
 function pattern(over: Partial<EnrichmentPattern> = {}): EnrichmentPattern {
   return {
@@ -58,9 +59,9 @@ function compose(over: { pkg?: EnrichmentPackage; d?: EmailWriterParsed } = {}) 
 }
 
 describe('composeEnrichedEmail — final artifact', () => {
-  it('the FINAL artifact (not the raw model output) is schema-4 + APPROVED_COMPETITOR_PATTERN_PACKAGE', () => {
+  it('the FINAL artifact (not the raw model output) carries the current schema + APPROVED_COMPETITOR_PATTERN_PACKAGE', () => {
     const c = compose();
-    expect(c.schemaVersion).toBe('email-copy-schema-4');
+    expect(c.schemaVersion).toBe(EMAIL_SCHEMA_VERSION);
     expect(c.artifact.competitor_evidence_used).toBe('APPROVED_COMPETITOR_PATTERN_PACKAGE');
     expect(c.schemaOk).toBe(true);
     expect(c.ok).toBe(true);

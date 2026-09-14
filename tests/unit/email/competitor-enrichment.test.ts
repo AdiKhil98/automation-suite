@@ -242,8 +242,10 @@ describe('email schema — competitor_evidence_used widening', () => {
     human_style_result: 'PASS',
     demo_alignment_result: 'NOT_APPLICABLE',
   };
-  it('bumped to email-copy-schema-4', () => {
-    expect(EMAIL_SCHEMA_VERSION).toBe('email-copy-schema-4');
+  // Bumped when the PROVIDER contract changed: the wire schema is now derived from these Zod
+  // schemas, so a model_call's schema version says which provider contract it was made under.
+  it('bumped to email-copy-schema-5', () => {
+    expect(EMAIL_SCHEMA_VERSION).toBe('email-copy-schema-5');
   });
   it('accepts NONE (prospect-only)', () => {
     expect(emailWriterSchema.safeParse({ ...base, competitor_evidence_used: 'NONE' }).success).toBe(true);

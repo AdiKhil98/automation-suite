@@ -6,9 +6,11 @@ import { requireIntegrationTestDatabase } from '../support/test-database.js';
 import { buildCandidateLead } from '../../src/domain/leads/lead-factory.js';
 import { EmailWriterService } from '../../src/domain/email/email-writer-service.js';
 import { worstCaseEmailInputTokens } from '../../src/domain/email/email-token-budget.js';
+import { EMAIL_SCHEMA_VERSION } from '../../src/domain/email/email-schema.js';
+import { EMAIL_REVIEWER_PROMPT_VERSION } from '../../src/prompts/email/index.js';
+import { worstCaseCostUsd } from '../../src/integrations/llm/pricing.js';
 import {
   ResumeEmailReviewService,
-  type ResumeCommit,
   type ResumeInputs,
 } from '../../src/domain/email/resume-email-review.js';
 import { decideFollowupPreparation, runFollowupPreparation } from '../../src/domain/outreach/followup-preparation-runner.js';
@@ -17,6 +19,7 @@ import { type SequencePolicy } from '../../src/domain/outreach/followups.js';
 import { defaultMockEmailResponder } from '../../src/fixtures/mock-email-responses.js';
 import { type LlmProvider, type LlmRequest, type LlmResult } from '../../src/integrations/llm/provider.js';
 import { type DbHandle } from '../../src/persistence/db.js';
+import { createResumeCommit } from '../../src/domain/email/resume-commit.js';
 import { DrizzleEmailUnitOfWork } from '../../src/persistence/email-unit-of-work.js';
 import { DrizzleOutreachUnitOfWork } from '../../src/persistence/outreach-unit-of-work.js';
 import { DemoInputRepository } from '../../src/persistence/repositories/demo-input.repo.js';
@@ -27,7 +30,7 @@ import { LeadsRepository } from '../../src/persistence/repositories/leads.repo.j
 import { OutreachReadRepository } from '../../src/persistence/repositories/outreach.repo.js';
 import { PipelineRunsRepository } from '../../src/persistence/repositories/runs.repo.js';
 import { ReviewWriteRepository } from '../../src/persistence/repositories/review.repo.js';
-import { auditFindings, auditRuns, emailDrafts, modelCalls, opportunityAssessments } from '../../src/persistence/schema.js';
+import { auditFindings, auditRuns, emailDrafts, modelCalls, opportunityAssessments, pipelineEvents } from '../../src/persistence/schema.js';
 
 /**
  * RECOVERY OF A FAILED FOLLOW-UP DRAFT, against the REAL migration-0044 constraint.
@@ -64,11 +67,15 @@ const REVIEW = (decision: 'APPROVE' | 'REJECT'): Record<string, unknown> => ({
 });
 
 /** Mock writer + scripted reviewer, recording every request so call counts are provable. */
-function provider(reviewDecision: 'APPROVE' | 'REJECT'): { provider: LlmProvider; calls: LlmRequest[]; writerJson: () => unknown } {
+function provider(
+  reviewDecision: 'APPROVE' | 'REJECT',
+  rawReviewOverride?: unknown,
+  name = 'mock',
+): { provider: LlmProvider; calls: LlmRequest[]; writerJson: () => unknown } {
   const calls: LlmRequest[] = [];
   let writerJson: unknown = null;
   const p: LlmProvider = {
-    name: 'mock',
+    name,
     async generate(req: LlmRequest): Promise<LlmResult> {
       calls.push(req);
       let rawJson: unknown;
@@ -76,7 +83,7 @@ function provider(reviewDecision: 'APPROVE' | 'REJECT'): { provider: LlmProvider
         rawJson = (defaultMockEmailResponder(req, calls.length - 1) as { rawJson: unknown }).rawJson;
         writerJson = rawJson;
       } else {
-        rawJson = REVIEW(reviewDecision);
+        rawJson = rawReviewOverride === undefined ? REVIEW(reviewDecision) : rawReviewOverride;
       }
       return {
         status: 'ok', rawJson, refusal: null, incompleteReason: null, provider: 'mock',
@@ -186,33 +193,19 @@ describe('resume recovery of a failed follow-up draft (PostgreSQL, migration 004
     return { draftId: rows[0]!.id, writerJson: p.writerJson() };
   }
 
-  function resumeService(writerJson: unknown, decision: 'APPROVE' | 'REJECT' = 'APPROVE') {
-    const p = provider(decision);
+  function resumeService(
+    writerJson: unknown,
+    decision: 'APPROVE' | 'REJECT' = 'APPROVE',
+    rawReviewOverride?: unknown,
+    opts: { providerName?: string; maxCostUsdPerLead?: number } = {},
+  ) {
+    const p = provider(decision, rawReviewOverride, opts.providerName);
     const emailRepo = new EmailRepository(handle.db);
     const followupRepo = new FollowupPreparationRepository(handle.db);
     const uow = new DrizzleEmailUnitOfWork(handle.db);
-    // The EXACT commit the CLI installs.
-    const commit: ResumeCommit = async (plan) => {
-      await uow.transaction(async (repos) => {
-        const lead = await repos.leads.getById(plan.leadId);
-        if (lead && lead.status === 'EMAIL_REVIEW_FAILED') {
-          await repos.leadService.transition(plan.leadId, 'EMAIL_DRAFTED');
-          if (plan.approved) {
-            await repos.leadService.transition(plan.leadId, 'EMAIL_APPROVED');
-            if (plan.route !== 'EMAIL_APPROVED') await repos.leadService.transition(plan.leadId, plan.route);
-          } else {
-            await repos.leadService.transition(plan.leadId, 'EMAIL_REVIEW_FAILED');
-          }
-        }
-        if (plan.write.kind === 'APPEND') await repos.emails.persist(plan.write.persist);
-        else await repos.emails.applyReviewOutcome(plan.write.draftId, plan.write.update, plan.write.modelCalls);
-        await repos.events.record({
-          leadId: plan.leadId, runId: plan.runId, type: 'NOTE', fromStatus: null, toStatus: null,
-          message: `resume-email-review: ${plan.approved ? 'APPROVED' : 'REVIEW_REJECTED'}`,
-          data: { draftWrite: plan.write.kind, sourceDraftId: plan.sourceDraftId },
-        });
-      });
-    };
+    // The EXACT commit the CLI installs — the same factory, not a copy of it.
+    const commit = createResumeCommit(uow);
+
     const service = new ResumeEmailReviewService({
       provider: p.provider,
       debug: { findByLeadAndRun: async (leadId, runId) => ({
@@ -229,7 +222,8 @@ describe('resume recovery of a failed follow-up draft (PostgreSQL, migration 004
       logger,
       config: {
         reviewerModel: 'gpt-5.6-terra', reviewerEffort: 'medium', store: false, timeoutMs: 1000,
-        maxOutputTokens: 1500, maxRetries: 0, maxCostUsdPerLead: 0.5,
+        maxOutputTokens: 1500, maxRetries: 0,
+        maxCostUsdPerLead: opts.maxCostUsdPerLead ?? 0.5,
         worstCaseInputTokensPerCall: worstCaseEmailInputTokens(),
       },
     });
@@ -370,5 +364,185 @@ describe('resume recovery of a failed follow-up draft (PostgreSQL, migration 004
     // The decision function agrees the existing row still owns the slot.
     const [candidate] = await new FollowupPreparationRepository(handle.db).dueCandidates(NOW, 5, { recordId });
     expect(decideFollowupPreparation(candidate!).action).toBe('SKIP');
+  });
+
+  /** Provider-legal, Zod-invalid: 21 problems where the local cap is 20. */
+  const tooManyProblems = (): Record<string, unknown> => ({
+    ...REVIEW('APPROVE'),
+    problems: Array.from({ length: 21 }, (_, i) => `problem ${String(i)}`),
+  });
+
+  describe('a paid reviewer call that produced no usable verdict', () => {
+    it('accounts the attempt durably and leaves the canonical draft untouched and resumable', async () => {
+      const { leadId, recordId } = await seedDueFollowup();
+      const failed = await composeFailedFollowup(leadId, recordId);
+      const before = (await handle.db.select().from(emailDrafts).where(eq(emailDrafts.id, failed.draftId)))[0]!;
+
+      const r = resumeService(failed.writerJson, 'APPROVE', tooManyProblems());
+      const result = await r.service.resume({ leadId, draftId: failed.draftId }, await newRun('resume'));
+
+      expect(result.outcome).toBe('SCHEMA_INVALID');
+      expect(result.violations).toContain('schema_invalid:problems');
+
+      // Exactly ONE canonical draft, still the original row.
+      const slot = await handle.db.select().from(emailDrafts)
+        .where(and(eq(emailDrafts.outreachRecordId, recordId), eq(emailDrafts.sequenceStep, 1)));
+      expect(slot).toHaveLength(1);
+      const after = slot[0]!;
+      expect(after.id).toBe(failed.draftId);
+
+      // Nothing about the draft's state moved.
+      expect(after.status).toBe('REVIEW_FAILED');
+      expect(after.humanDecision).toBeNull();
+      expect(after.subject).toBe(before.subject);
+      expect(after.body).toBe(before.body);
+      expect(after.writerResponseId).toBe(before.writerResponseId);
+      expect(after.writerPromptVersion).toBe(before.writerPromptVersion);
+      expect(after.reviewerDecision).toBe(before.reviewerDecision);
+
+      // The spend and the call ARE on the books.
+      expect(after.totalCostUsd).toBeCloseTo(before.totalCostUsd + 0.02, 6);
+      const reviewerCalls = await handle.db.select().from(modelCalls)
+        .where(and(eq(modelCalls.leadId, leadId), eq(modelCalls.purpose, 'email_review')));
+      // One from the composing run's reviewer, one from this failed resume attempt.
+      expect(reviewerCalls).toHaveLength(2);
+      const resumed = reviewerCalls.find((c) => c.validationViolations !== null);
+      expect(resumed?.validationViolations).toContain('schema_invalid:problems');
+
+      // The lead is untouched, which is what keeps the draft resumable.
+      expect((await new LeadsRepository(handle.db).getById(leadId))?.status).toBe('EMAIL_REVIEW_FAILED');
+
+      // And the diagnostic is durable on the timeline, bounded.
+      const events = await handle.db.select().from(pipelineEvents).where(eq(pipelineEvents.leadId, leadId));
+      const diagnostic = events
+        .map((e) => e.data as { draftWrite?: string; diagnostic?: { issues?: unknown[]; rawExcerpt?: string } } | null)
+        .find((d) => d?.draftWrite === 'ACCOUNT_FAILED_ATTEMPT');
+      expect(diagnostic?.diagnostic?.issues?.length).toBeGreaterThan(0);
+      expect((diagnostic?.diagnostic?.rawExcerpt ?? '').length).toBeLessThanOrEqual(2000);
+    });
+
+    it('a retry after the fix succeeds in place, and human approval is still mandatory', async () => {
+      const { leadId, recordId } = await seedDueFollowup();
+      const failed = await composeFailedFollowup(leadId, recordId);
+
+      await resumeService(failed.writerJson, 'APPROVE', tooManyProblems()).service
+        .resume({ leadId, draftId: failed.draftId }, await newRun('resume-failed'));
+
+      // Same draft, reviewer-only, no writer re-run.
+      const retry = resumeService(failed.writerJson);
+      const result = await retry.service.resume({ leadId, draftId: failed.draftId }, await newRun('resume-retry'));
+
+      expect(result.outcome).toBe('REVIEWED_APPROVED');
+      expect(retry.calls.filter((c) => c.task === 'email_write')).toHaveLength(0);
+      const slot = await handle.db.select().from(emailDrafts)
+        .where(and(eq(emailDrafts.outreachRecordId, recordId), eq(emailDrafts.sequenceStep, 1)));
+      expect(slot).toHaveLength(1);
+      expect(slot[0]!.id).toBe(failed.draftId);
+      expect(slot[0]!.status).toBe('APPROVED');
+
+      // STILL not sendable: a human has not decided, so progression sees nothing.
+      expect(slot[0]!.humanDecision).toBeNull();
+      expect(await new FollowupPreparationRepository(handle.db).progressionCandidates(10, { leadId })).toEqual([]);
+
+      // Only after the human approves does progression pick it up.
+      await new ReviewWriteRepository(handle.db)
+        .setEmailHumanDecision(failed.draftId, 'APPROVED', null, 'operator', new Date(NOW));
+      await new LeadsRepository(handle.db).updateStatus(leadId, 'HUMAN_APPROVED', new Date(NOW));
+      const candidates = await new FollowupPreparationRepository(handle.db).progressionCandidates(10, { leadId });
+      expect(candidates.map((c) => c.emailDraftId)).toEqual([failed.draftId]);
+    });
+
+    it('repeated failed attempts accumulate cost and calls instead of overwriting', async () => {
+      const { leadId, recordId } = await seedDueFollowup();
+      const failed = await composeFailedFollowup(leadId, recordId);
+      const before = (await handle.db.select().from(emailDrafts).where(eq(emailDrafts.id, failed.draftId)))[0]!;
+
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const r = await resumeService(failed.writerJson, 'APPROVE', tooManyProblems()).service
+          .resume({ leadId, draftId: failed.draftId }, await newRun(`resume-${String(attempt)}`));
+        expect(r.outcome).toBe('SCHEMA_INVALID');
+      }
+
+      const after = (await handle.db.select().from(emailDrafts).where(eq(emailDrafts.id, failed.draftId)))[0]!;
+      expect(after.totalCostUsd).toBeCloseTo(before.totalCostUsd + 3 * 0.02, 6);
+
+      const reviewerCalls = await handle.db.select().from(modelCalls)
+        .where(and(eq(modelCalls.leadId, leadId), eq(modelCalls.purpose, 'email_review')));
+      expect(reviewerCalls).toHaveLength(4); // the composing run's reviewer + three failed attempts
+      expect(new Set(reviewerCalls.map((c) => c.id)).size).toBe(4);
+
+      // Still exactly one draft, still REVIEW_FAILED, still resumable.
+      const slot = await handle.db.select().from(emailDrafts)
+        .where(and(eq(emailDrafts.outreachRecordId, recordId), eq(emailDrafts.sequenceStep, 1)));
+      expect(slot).toHaveLength(1);
+      expect(slot[0]!.status).toBe('REVIEW_FAILED');
+      expect(slot[0]!.humanDecision).toBeNull();
+    });
+  });
+
+  describe('schema-version provenance and the cumulative budget', () => {
+    it('records the reviewer call under the current schema while the draft keeps the writer\'s', async () => {
+      const { leadId, recordId } = await seedDueFollowup();
+      const failed = await composeFailedFollowup(leadId, recordId);
+      const before = (await handle.db.select().from(emailDrafts).where(eq(emailDrafts.id, failed.draftId)))[0]!;
+
+      await resumeService(failed.writerJson, 'APPROVE', tooManyProblems()).service
+        .resume({ leadId, draftId: failed.draftId }, await newRun('resume-schema'));
+      await resumeService(failed.writerJson).service
+        .resume({ leadId, draftId: failed.draftId }, await newRun('resume-schema-2'));
+
+      // The draft's writer provenance is never rewritten, not by the failed attempt and not by the
+      // successful in-place recovery.
+      const after = (await handle.db.select().from(emailDrafts).where(eq(emailDrafts.id, failed.draftId)))[0]!;
+      expect(after.schemaVersion).toBe(before.schemaVersion);
+      expect(after.writerPromptVersion).toBe(before.writerPromptVersion);
+      expect(after.writerResponseId).toBe(before.writerResponseId);
+
+      // Both NEW reviewer calls are recorded under the current provider contract.
+      const reviewerCalls = await handle.db.select().from(modelCalls)
+        .where(and(eq(modelCalls.leadId, leadId), eq(modelCalls.purpose, 'email_review')));
+      const resumed = reviewerCalls.filter((c) => c.promptVersion === EMAIL_REVIEWER_PROMPT_VERSION);
+      expect(resumed.length).toBeGreaterThanOrEqual(2);
+      for (const call of resumed) expect(call.schemaVersion).toBe(EMAIL_SCHEMA_VERSION);
+    });
+
+    it('refuses a retry once the accounted spend would breach the per-lead cap', async () => {
+      const { leadId, recordId } = await seedDueFollowup();
+      const failed = await composeFailedFollowup(leadId, recordId);
+      const spent = (await handle.db.select().from(emailDrafts).where(eq(emailDrafts.id, failed.draftId)))[0]!.totalCostUsd;
+      const projected = worstCaseCostUsd('gpt-5.6-terra', worstCaseEmailInputTokens(), 1500)!;
+
+      // A cap that this ONE call fits under, but the draft's accumulated spend does not.
+      const r = resumeService(failed.writerJson, 'APPROVE', undefined, {
+        providerName: 'openai', maxCostUsdPerLead: spent + projected - 0.0001,
+      });
+      const result = await r.service.resume({ leadId, draftId: failed.draftId }, await newRun('resume-budget'));
+
+      expect(result.outcome).toBe('REVIEWER_BUDGET_BLOCKED');
+      expect(r.calls.filter((c) => c.task === 'email_review')).toHaveLength(0);
+
+      // Nothing was spent, nothing was written.
+      const after = (await handle.db.select().from(emailDrafts).where(eq(emailDrafts.id, failed.draftId)))[0]!;
+      expect(after.totalCostUsd).toBeCloseTo(spent, 6);
+      expect(after.status).toBe('REVIEW_FAILED');
+      const slot = await handle.db.select().from(emailDrafts)
+        .where(and(eq(emailDrafts.outreachRecordId, recordId), eq(emailDrafts.sequenceStep, 1)));
+      expect(slot).toHaveLength(1);
+    });
+
+    it('still admits the retry when the cumulative total fits', async () => {
+      const { leadId, recordId } = await seedDueFollowup();
+      const failed = await composeFailedFollowup(leadId, recordId);
+      const spent = (await handle.db.select().from(emailDrafts).where(eq(emailDrafts.id, failed.draftId)))[0]!.totalCostUsd;
+      const projected = worstCaseCostUsd('gpt-5.6-terra', worstCaseEmailInputTokens(), 1500)!;
+
+      const r = resumeService(failed.writerJson, 'APPROVE', undefined, {
+        providerName: 'openai', maxCostUsdPerLead: spent + projected + 0.01,
+      });
+      const result = await r.service.resume({ leadId, draftId: failed.draftId }, await newRun('resume-budget-ok'));
+
+      expect(result.outcome).toBe('REVIEWED_APPROVED');
+      expect(r.calls.filter((c) => c.task === 'email_review')).toHaveLength(1);
+    });
   });
 });
