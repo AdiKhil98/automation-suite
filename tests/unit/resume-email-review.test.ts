@@ -117,6 +117,75 @@ function harness(opts: {
   return { service, calls, committed };
 }
 
+describe('resume-email-review — threaded follow-ups', () => {
+  // The retry path for a follow-up that failed deterministic validation: it re-validates with the
+  // CURRENT validator and calls the reviewer once, WITHOUT paying for another writer call.
+  //
+  // It carried the same initial-vs-follow-up assumption as the writer did: it rebuilt the render
+  // inputs and the validation context without the draft's sequence provenance, so a threaded
+  // follow-up was re-rendered with a NEW model-authored subject (failing the integrity gate) and
+  // re-validated under the first-email subject rules.
+  const THREAD_SUBJECT = 'Something I noticed on Complete Dentistry’s mobile site';
+  const STORED_SUBJECT = `Re: ${THREAD_SUBJECT}`;
+
+  /** What a correctly-behaved follow-up writer produced: the thread subject, three times. */
+  const followupDraft = (over: Partial<EmailWriterOutput> = {}): EmailWriterOutput => ({
+    ...fixtureWriter('strong English business email'),
+    subject_options: [THREAD_SUBJECT, THREAD_SUBJECT, THREAD_SUBJECT],
+    selected_subject: THREAD_SUBJECT,
+    selected_subject_reason: 'Thread continuity is preserved.',
+    ...over,
+  });
+
+  /** The persisted row for such a draft: the stored subject already carries its `Re: ` prefix. */
+  const followupRow = (draft: EmailWriterOutput, step: 1 | 2 | 3 = 1): PersistedDraftRow => {
+    const rendered = renderEmail(draft, { ...emailInputs, threadSubject: THREAD_SUBJECT });
+    return {
+      ...rowFor(draft),
+      subject: rendered.subject,
+      body: rendered.body,
+      sequenceStep: step,
+      outreachRecordId: 'rec-1',
+      threadSubject: rendered.subject,
+    };
+  };
+
+  it.each([1, 2, 3] as const)('resumes a step-%i follow-up: integrity holds and the reviewer runs once', async (step) => {
+    const draft = followupDraft();
+    const h = harness({ row: followupRow(draft, step), record: debugRecord(draft) });
+
+    const result = await h.service.resume({ leadId: LEAD, draftId: DRAFT }, RUN);
+
+    expect(result.outcome).toBe('REVIEWED_APPROVED');
+    expect(h.calls).toHaveLength(1);
+    // The re-render reproduces the STORED subject byte-identically — no double `Re: ` prefix.
+    expect(h.committed[0]?.persist.email?.subject).toBe(STORED_SUBJECT);
+    expect(h.committed[0]?.persist.email?.sequenceStep).toBe(step);
+  });
+
+  it('still fails closed when the resumed follow-up copy mutated the thread subject', async () => {
+    const draft = followupDraft({
+      subject_options: [THREAD_SUBJECT, 'A brand new hook', THREAD_SUBJECT],
+    });
+    const h = harness({ row: followupRow(draft), record: debugRecord(draft) });
+
+    const result = await h.service.resume({ leadId: LEAD, draftId: DRAFT }, RUN);
+
+    expect(result.outcome).toBe('VALIDATION_FAILED');
+    expect(result.violations).toContain('followup_subject_not_thread_subject:2');
+    // No reviewer call on copy that fails the deterministic gate.
+    expect(h.calls).toEqual([]);
+  });
+
+  it('a first-email draft still resumes under the first-email subject rules', async () => {
+    const h = harness({});
+    const result = await h.service.resume({ leadId: LEAD, draftId: DRAFT }, RUN);
+    expect(result.outcome).toBe('REVIEWED_APPROVED');
+    expect(h.committed[0]?.persist.email?.sequenceStep).toBe(0);
+    expect(h.committed[0]?.persist.email?.subject.startsWith('Re: ')).toBe(false);
+  });
+});
+
 describe('resume-email-review', () => {
   it('exact-match success + reviewer APPROVE appends an APPROVED draft and advances the lead', async () => {
     const h = harness({ rawReview: approveReview() });

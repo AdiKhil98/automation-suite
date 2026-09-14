@@ -13,6 +13,7 @@ import { buildEmailContext, type EmailFinding, type EmailInputs } from '../../..
 import { validateEmail } from '../../../domain/email/email-validation.js';
 import { type LeadFact } from '../../../domain/lead-facts/lead-fact.js';
 import { LiveCallBudget, type LiveModelCall, toModelCall } from './live-types.js';
+import { INITIAL_EMAIL_SEQUENCE } from '../../../domain/email/email-types.js';
 
 export interface TerraGenConfig {
   model: string;
@@ -42,7 +43,7 @@ export function buildProspectOnlyBrief(facts: LeadFact[], findings: EmailFinding
   return {
     businessName: val('business_name'),
     contactName: val('contact_name'),
-    language: buildEmailContext(inputs).language,
+    language: buildEmailContext(inputs, INITIAL_EMAIL_SEQUENCE).language,
     facts: currentFacts.map((f) => ({ evidenceId: f.id, type: f.factType, value: f.value.trim() })),
     findings: findings.map((f) => ({
       evidenceId: f.id,
@@ -70,7 +71,7 @@ export async function generateTerraBaseEmail(deps: TerraGenDeps): Promise<TerraB
   const { provider, budget, config } = deps;
   const brief = buildProspectOnlyBrief(deps.facts, deps.findings);
   const emailInputs: EmailInputs = { facts: deps.facts, findings: deps.findings, demo: null };
-  const ctx = buildEmailContext(emailInputs);
+  const ctx = buildEmailContext(emailInputs, INITIAL_EMAIL_SEQUENCE);
   const msgs = buildEmailWriterMessages(brief, null);
 
   budget.reserve('TERRA_BASE');

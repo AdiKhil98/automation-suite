@@ -4,6 +4,30 @@ All notable changes per phase. Format loosely follows Keep a Changelog.
 
 ## [Unreleased] - 2026-07-23
 
+### Fixed
+
+- **Follow-up subject validation contradicted the follow-up prompt.** `sequence-jobs.ts` instructs a
+  follow-up writer to continue the existing Gmail thread by echoing the supplied thread subject into
+  all three subject options and into `selected_subject`, and `renderEmail` builds the outgoing
+  subject deterministically from that thread subject. Deterministic validation nevertheless applied
+  the FIRST-EMAIL rule (`subject_options` must be three distinct strings) at every step, so a
+  follow-up that obeyed its prompt exactly was rejected with `subject_options_not_unique` after the
+  writer call was already paid for and before the reviewer was ever called. Subject rules are now
+  step-aware: step 0 is unchanged, and steps 1-3 validate the thread-continuity CONTRACT (every
+  option and `selected_subject` must equal the supplied thread subject, compared through the same
+  idempotent `replySubject` rule the renderer uses) rather than skipping subject validation. A
+  follow-up that invents a hook, mutates the subject, or is composed with no thread subject at all
+  fails closed with an explicit violation. The sequence position is passed EXPLICITLY into
+  validation (`EmailValidationContext.sequence`, required) instead of being inferred from the copy.
+- The reviewer-only resume path (`resume-email-review`) carried the same assumption: it rebuilt the
+  render inputs and validation context without the persisted draft's sequence provenance, so a
+  threaded follow-up was re-rendered with a new model-authored subject (aborting on
+  `RENDER_MISMATCH`) and re-validated under the first-email rules. It now carries the stored
+  sequence step and thread subject, which makes it the retry path for a follow-up that failed
+  deterministic validation — no second writer call.
+- The mock email responder now honours the same thread-continuity contract, so mock-driven follow-up
+  runs exercise the real validation path instead of authoring a fresh subject.
+
 ### Added
 
 - Unattended follow-up **due-state promotion** (phase A0 of `run-followup-automation`): a record

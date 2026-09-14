@@ -21,6 +21,7 @@ import { EMAIL_SCHEMA_VERSION, EMAIL_REVIEW_JSON_SCHEMA, EMAIL_WRITER_JSON_SCHEM
 import { buildEmailBrief } from './email-brief.js';
 import { buildEmailContext, type EmailDemoMeta, type EmailFinding, type EmailInputs, type EmailRecipientContext, renderEmail } from './email-render.js';
 import { EMAIL_WRITER_RULES_VERSION, type EmailStatus } from './email-types.js';
+import { type EmailSequencePosition } from './email-types.js';
 import { validateEmail } from './email-validation.js';
 import { isEmailReviewApprovable } from './email-review-gate.js';
 
@@ -178,9 +179,12 @@ export class EmailWriterService {
 
     const safeFindings = input.findings.filter((f) => f.safeForOutreach);
     const seq: SequenceContext = input.sequence ?? INITIAL_SEQUENCE_CONTEXT;
+    // ONE sequence position drives both the rendered subject and the subject validation, so the
+    // renderer and the validator can never disagree about whether this is a threaded follow-up.
+    const position: EmailSequencePosition = { step: seq.step, threadSubject: seq.threadSubject };
     const emailInputs: EmailInputs = { facts: input.facts, findings: safeFindings, demo: input.demo,
-      recipient: input.recipient ?? null, threadSubject: seq.threadSubject };
-    const ctx = buildEmailContext(emailInputs);
+      recipient: input.recipient ?? null, threadSubject: position.threadSubject };
+    const ctx = buildEmailContext(emailInputs, position);
     const brief = this.brief(input, safeFindings);
 
     const canCall = (model: string): boolean => {

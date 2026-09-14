@@ -11,6 +11,7 @@ import { composeEnrichedEmail } from '../../domain/email/competitor-email-compos
 import { claimSpansResolved, type ClaimSpan } from '../../domain/email/competitor-enrichment.js';
 import { EMAIL_SCHEMA_VERSION } from '../../domain/email/email-schema.js';
 import { type HarnessSuccess } from './harness.js';
+import { INITIAL_EMAIL_SEQUENCE } from '../../domain/email/email-types.js';
 
 /** Detects competitor language in the subject line (mirrors the copy gate's competitor regex intent). */
 const SUBJECT_COMPETITOR_RE = /\b(?:competitors?|competition|other (?:clinics?|practices?|businesses)|market leaders?|rivals?)\b/i;
@@ -79,7 +80,7 @@ export function evaluateHardGates(result: HarnessSuccess): HardGateReport {
   // 1. Unsupported competitor claim (sentence not verbatim from approved wording).
   add('unsupported_competitor_claim', !hasViolation(ev, 'competitor_sentence_not_in_body'));
   // 2. Unsupported prospect claim (prospect observation must cite an accepted finding id).
-  const ctx = buildEmailContext(result.emailInputs);
+  const ctx = buildEmailContext(result.emailInputs, INITIAL_EMAIL_SEQUENCE);
   const prospectEntry = ledger.find((e) => e.claimType === 'PROSPECT_OBSERVATION');
   const prospectCited = Boolean(
     prospectEntry &&

@@ -17,6 +17,7 @@ import {
 } from './email-schema.js';
 import { type EmailStatus } from './email-types.js';
 import { type EmailModelCall, type EmailPersist } from './email-writer-service.js';
+import { type EmailSequencePosition } from './email-types.js';
 import { validateEmail } from './email-validation.js';
 import { isEmailReviewApprovable } from './email-review-gate.js';
 import { type SequenceStep } from '../outreach/sequence.js';
@@ -172,8 +173,21 @@ export class ResumeEmailReviewService {
     const draft = parsed.data;
 
     const inputs = await this.deps.ports.loadInputs(leadId);
-    const emailInputs: EmailInputs = { facts: inputs.facts, findings: inputs.findings, demo: inputs.demo };
-    const ctx = buildEmailContext(emailInputs);
+    // Sequence provenance carried from the persisted row. Without it a threaded follow-up would be
+    // re-rendered with a NEW model-authored subject (failing the integrity gate below) and
+    // re-validated under the first-email subject rules — the same initial-vs-follow-up assumption
+    // that rejected correctly-threaded follow-ups in the writer.
+    //
+    // `draftRow.threadSubject` is the STORED subject, which already carries its `Re: ` prefix.
+    // `replySubject` is idempotent, so it renders and compares identically to the raw thread subject.
+    const position: EmailSequencePosition = {
+      step: draftRow.sequenceStep, threadSubject: draftRow.threadSubject,
+    };
+    const emailInputs: EmailInputs = {
+      facts: inputs.facts, findings: inputs.findings, demo: inputs.demo,
+      threadSubject: position.threadSubject,
+    };
+    const ctx = buildEmailContext(emailInputs, position);
 
     // Integrity gate: the reloaded draft must render byte-identically to the persisted row.
     const rendered = renderEmail(draft, emailInputs);

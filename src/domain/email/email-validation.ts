@@ -1,4 +1,10 @@
-import { DEMO_URL_TOKEN, MAX_EMAIL_WORDS, type EmailWriterOutput } from './email-types.js';
+import {
+  DEMO_URL_TOKEN,
+  type EmailSequencePosition,
+  MAX_EMAIL_WORDS,
+  replySubject,
+  type EmailWriterOutput,
+} from './email-types.js';
 import { type EmailLanguage, hasForeignLanguage } from './email-language.js';
 
 export interface EmailValidationContext {
@@ -8,6 +14,13 @@ export interface EmailValidationContext {
   approvedDemoFindingIds: Set<string>;
   demoLinkAllowed: boolean;
   language: EmailLanguage;
+  /**
+   * Where this email sits in the sequence. REQUIRED and explicit — never inferred from the copy.
+   * A first email authors three distinct subjects; a follow-up echoes the thread subject it was
+   * given. Applying the first email's rules to a follow-up rejects every correctly-threaded
+   * follow-up, which is exactly what happened in production before this field existed.
+   */
+  sequence: EmailSequencePosition;
 }
 
 export interface EmailValidationResult {
@@ -114,6 +127,61 @@ function isRevealingSubject(subject: string): boolean {
 }
 
 /**
+ * Subject rules, which are STEP-DEPENDENT because the subject has a different author per step.
+ *
+ * STEP 0 — the model authors the subject. Three genuinely distinct options, the selected one among
+ * them, none generic, none giving the finding away. Unchanged.
+ *
+ * STEPS 1-3 — the model authors NOTHING here. A follow-up continues an existing Gmail thread, so
+ * `renderEmail` builds the outgoing subject deterministically from the thread subject and discards
+ * the model's selection entirely (`src/prompts/email/sequence-jobs.ts` instructs the writer to echo
+ * the supplied thread subject into all three options and into `selected_subject`). Demanding three
+ * unique options there rejected every correctly-threaded follow-up before the reviewer was ever
+ * called — the production failure this replaces.
+ *
+ * The follow-up branch does NOT simply skip subject validation: it validates the contract the
+ * prompt states, so a model that invents a fresh hook, drops the thread subject, or selects
+ * something it did not offer still fails closed. Comparison runs through the SAME `replySubject`
+ * rule the renderer uses, so an echo that already carries the reply prefix is accepted while any
+ * change to the subject TEXT (including case) is a violation.
+ *
+ * Genericity/revealing checks do not apply to a follow-up echo: that subject is already in the
+ * recipient's inbox and passed these very checks when the first email was composed. Re-judging it
+ * could only reject copy that was already sent.
+ */
+function validateSubjects(
+  out: EmailWriterOutput,
+  subjects: string[],
+  sequence: EmailSequencePosition,
+): string[] {
+  const violations: string[] = [];
+  const selected = out.selected_subject.trim();
+
+  if (sequence.step === 0) {
+    if (new Set(subjects.map((s) => s.toLocaleLowerCase())).size !== 3) violations.push('subject_options_not_unique');
+    if (!subjects.includes(selected)) violations.push('selected_subject_not_in_options');
+    subjects.forEach((subject, index) => {
+      if (isGenericSubject(subject)) violations.push(`generic_subject:${String(index + 1)}`);
+      if (isRevealingSubject(subject)) violations.push(`subject_reveals_finding:${String(index + 1)}`);
+    });
+    return violations;
+  }
+
+  // A follow-up without a thread subject is not a recoverable state: the composition was handed no
+  // thread to continue, so nothing can prove the email would land in the existing conversation.
+  // Fail closed rather than let the model's invented subject start a second thread.
+  const thread = sequence.threadSubject?.trim() ?? '';
+  if (thread === '') return ['followup_thread_subject_missing'];
+
+  const expected = replySubject(thread);
+  subjects.forEach((subject, index) => {
+    if (replySubject(subject) !== expected) violations.push(`followup_subject_not_thread_subject:${String(index + 1)}`);
+  });
+  if (replySubject(selected) !== expected) violations.push('followup_selected_subject_not_thread_subject');
+  return violations;
+}
+
+/**
  * Fail-closed deterministic copy gate. It checks objective syntax, provenance, CTA, competitor,
  * urgency, genericity, and approved-demo bindings before the independent reviewer is called.
  */
@@ -130,12 +198,7 @@ export function validateEmail(out: EmailWriterOutput, ctx: EmailValidationContex
   ];
   const allModelText = [...copySegments, ...strategySegments].join('\n');
 
-  if (new Set(subjects.map((s) => s.toLocaleLowerCase())).size !== 3) violations.push('subject_options_not_unique');
-  if (!subjects.includes(out.selected_subject.trim())) violations.push('selected_subject_not_in_options');
-  subjects.forEach((subject, index) => {
-    if (isGenericSubject(subject)) violations.push(`generic_subject:${String(index + 1)}`);
-    if (isRevealingSubject(subject)) violations.push(`subject_reveals_finding:${String(index + 1)}`);
-  });
+  violations.push(...validateSubjects(out, subjects, ctx.sequence));
   if (out.genericity_score > 40) violations.push(`genericity_score_too_high:${String(out.genericity_score)}`);
 
   const paragraphs = body.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);

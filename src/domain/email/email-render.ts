@@ -2,6 +2,8 @@ import { type LeadFact } from '../lead-facts/lead-fact.js';
 import {
   DEMO_URL_TOKEN,
   type EmailCtaKind,
+  type EmailSequencePosition,
+  replySubject,
   type EmailPrimaryCta,
   type EmailWriterOutput,
   type RenderedEmail,
@@ -57,11 +59,9 @@ export interface EmailInputs {
   threadSubject?: string | null;
 }
 
-/** Deterministic reply subject: prefix once, never twice. */
-export function replySubject(original: string): string {
-  const trimmed = original.trim();
-  return /^re:\s/i.test(trimmed) ? trimmed : `Re: ${trimmed}`;
-}
+// `replySubject` now lives in email-types.ts (a leaf module) so the validator can share the exact
+// same rule without importing the renderer. Re-exported here because this is where callers expect it.
+export { replySubject } from './email-types.js';
 
 /**
  * Whether copy may address the recipient by personal name. Fail-closed: ONLY an explicit
@@ -101,7 +101,10 @@ export function demoLinkAllowed(demo: EmailDemoMeta | null): boolean {
   return demo !== null && demo.status === 'APPROVED';
 }
 
-export function buildEmailContext(inputs: EmailInputs): EmailValidationContext {
+export function buildEmailContext(
+  inputs: EmailInputs,
+  sequence: EmailSequencePosition,
+): EmailValidationContext {
   const currentFacts = inputs.facts.filter((fact) => fact.isCurrent && fact.value.trim() !== '');
   const safeFindings = inputs.findings.filter((finding) => finding.safeForOutreach);
   const acceptedByRef = new Map(safeFindings.map((finding) => [finding.findingRef, finding]));
@@ -118,6 +121,10 @@ export function buildEmailContext(inputs: EmailInputs): EmailValidationContext {
     approvedDemoFindingIds,
     demoLinkAllowed: demoLinkAllowed(inputs.demo),
     language: resolveEmailLanguage(inputs.facts),
+    // Required, never inferred: the subject rules differ completely between a first email and a
+    // threaded follow-up, and guessing from the copy is what let a correctly-threaded follow-up be
+    // rejected as "not unique".
+    sequence,
   };
 }
 
@@ -164,8 +171,9 @@ export function renderEmail(out: EmailWriterOutput, inputs: EmailInputs): Render
   }
 
   return {
-    // A threaded follow-up keeps the original subject (as a reply); only a first email — or a
-    // follow-up with no known thread — uses the model's selected subject.
+    // A threaded follow-up keeps the original subject (as a reply); only a first email uses the
+    // model's selected subject. A follow-up can never reach this with an absent thread subject:
+    // `validateEmail` fails it closed (`followup_thread_subject_missing`) before render is trusted.
     subject: inputs.threadSubject ? replySubject(inputs.threadSubject) : out.selected_subject,
     body,
     ctaKind,

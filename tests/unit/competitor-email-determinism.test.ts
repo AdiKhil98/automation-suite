@@ -35,6 +35,7 @@ import {
 } from '../../src/fixtures/competitor-email-validation/synthetic-dental-scenario.js';
 import { buildEmailContext, type EmailInputs } from '../../src/domain/email/email-render.js';
 import { type AuditCategory } from '../../src/domain/audit/audit-types.js';
+import { INITIAL_EMAIL_SEQUENCE } from '../../src/domain/email/email-types.js';
 
 const CONFIG: LiveOrchestratorConfig = {
   terraModel: 'gpt-5.6-terra', solModel: 'gpt-5.6-sol', terraEffort: 'medium', solEffort: 'medium',
@@ -189,7 +190,7 @@ describe('Phase 7A4B1 — original unstable live scenario: reproduce before, pas
   it('BEFORE THE FIX: recomposing from the pinned fixture (not the live base) mismatches the hash', async () => {
     const s = await successOrThrow(liveTerraBaseDraft);
     const emailInputs: EmailInputs = { facts: leadFacts, findings: safeFindings, demo: null };
-    const ctx = buildEmailContext(emailInputs);
+    const ctx = buildEmailContext(emailInputs, INITIAL_EMAIL_SEQUENCE);
     const findings = safeFindings.map((f) => ({ evidenceId: f.id, findingRef: f.findingRef, category: f.category as AuditCategory }));
     const outcome = planEnrichment({ leadId: s.leadId, language: 'en', package: s.enrichmentPackage, safeFindings: findings, requestedPatternId: null });
     if (!outcome.ok) throw new Error(outcome.reason);

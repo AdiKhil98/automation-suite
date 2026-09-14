@@ -1,3 +1,5 @@
+import { type SequenceStep } from '../outreach/sequence.js';
+
 /**
  * Phase 9 cold-email copy contract. The model supplies evidence-bound strategy and
  * prose. Greeting, CTA sentence, signoff, and URL insertion remain deterministic.
@@ -5,6 +7,35 @@
 
 export const EMAIL_WRITER_RULES_VERSION = 'email-copy-standard-4';
 export const DEMO_URL_TOKEN = '{{DEMO_URL}}';
+
+/**
+ * WHERE an email sits in the outreach sequence, stated explicitly rather than inferred from the
+ * copy. Both the deterministic validator and the renderer key off this single value, so "is this a
+ * threaded follow-up?" has exactly one answer per composition.
+ *
+ * Step 0 (Outreach #1) authors its own subject. Steps 1-3 continue an EXISTING Gmail thread, so
+ * their subject is deterministic thread continuity produced by code (see `replySubject`) and the
+ * model's subject fields are a contract echo, not copy.
+ */
+export interface EmailSequencePosition {
+  step: SequenceStep;
+  /** The exact subject of the thread a follow-up continues. Always null for step 0. */
+  threadSubject: string | null;
+}
+
+/** A first email: the model authors the subject and there is no thread to continue. */
+export const INITIAL_EMAIL_SEQUENCE: EmailSequencePosition = { step: 0, threadSubject: null };
+
+/**
+ * Deterministic reply subject: prefix once, never twice. This is the ONLY rule in the system for
+ * what a threaded subject looks like — the renderer builds the outgoing subject with it, and the
+ * validator compares the model's echo through it, so neither can drift from the other.
+ */
+export function replySubject(original: string): string {
+  const trimmed = original.trim();
+  return /^re:\s/i.test(trimmed) ? trimmed : `Re: ${trimmed}`;
+}
+
 
 export const PRIMARY_CTAS = ['VIEW_CONCEPT', 'REPLY_FOR_DETAILS'] as const;
 export type EmailPrimaryCta = (typeof PRIMARY_CTAS)[number];

@@ -1,5 +1,6 @@
 import { type EmailBrief } from '../../prompts/email/index.js';
-import { buildEmailContext, demoLinkAllowed, type EmailInputs } from './email-render.js';
+import { demoLinkAllowed, type EmailInputs } from './email-render.js';
+import { resolveEmailLanguage } from './email-language.js';
 
 /**
  * Deterministically build the writer/reviewer brief from a lead's evidence inputs.
@@ -15,7 +16,7 @@ export function buildEmailBrief(inputs: EmailInputs): EmailBrief {
   return {
     businessName: val('business_name'),
     contactName: val('contact_name'),
-    language: buildEmailContext({ facts: inputs.facts, findings: safeFindings, demo: inputs.demo }).language,
+    language: resolveEmailLanguage(inputs.facts),
     facts: currentFacts.map((fact) => ({ evidenceId: fact.id, type: fact.factType, value: fact.value.trim() })),
     findings: safeFindings.map((finding) => ({
       evidenceId: finding.id,

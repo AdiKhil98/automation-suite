@@ -7,6 +7,7 @@ import { emailReviewSchema, emailWriterSchema, type EmailWriterParsed } from '..
 import { type LeadFact } from '../../src/domain/lead-facts/lead-fact.js';
 import { type LlmProvider, type LlmRequest, type LlmResult, type LlmStatus } from '../../src/integrations/llm/provider.js';
 import { EMAIL_COPY_FIXTURES } from '../fixtures/email-copy-standard.js';
+import { INITIAL_EMAIL_SEQUENCE } from '../../src/domain/email/email-types.js';
 
 const LEAD = 'lead-1';
 
@@ -24,7 +25,7 @@ const ctaFinding: EmailFinding = {
 };
 
 const inputs: EmailInputs = { facts: [businessFact], findings: [ctaFinding], demo: null };
-const validationCtx = buildEmailContext(inputs);
+const validationCtx = buildEmailContext(inputs, INITIAL_EMAIL_SEQUENCE);
 const brief = buildEmailBrief(inputs);
 
 const config: PreviewReviewConfig = {
