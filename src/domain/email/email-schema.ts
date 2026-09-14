@@ -67,74 +67,45 @@ export const emailReviewSchema = z.object({
 });
 export type EmailReviewParsed = z.infer<typeof emailReviewSchema>;
 
-const strictObject = (properties: Record<string, unknown>, required: string[]): Record<string, unknown> => ({
-  type: 'object',
-  additionalProperties: false,
-  required,
-  properties,
-});
+/**
+ * The schema sent to the provider is DERIVED from the Zod schema above — never hand-written
+ * alongside it.
+ *
+ * WHY. These two schemas are one contract with two enforcement points: the provider constrains what
+ * the model may emit, and Zod decides what this process will accept. When the provider copy was
+ * maintained by hand it drifted: `problems` / `requiredRevisions` shipped as a bare
+ * `{ type: 'array', items: { type: 'string' } }` while Zod required at most 20 entries of 1-300
+ * characters, and every writer string constraint (subject, body, reason, evidence-id lengths, the
+ * evidence-id count) was likewise absent. A model could then return output that satisfied the
+ * provider schema and still failed local parsing — a PAID call that could never succeed. Deriving
+ * the wire schema makes that class of bug unrepresentable: tighten Zod and the provider tightens
+ * with it.
+ *
+ * WHAT IS ADJUSTED. Structured outputs additionally require that every property is listed in
+ * `required` and that objects refuse extra keys, and they have no use for the `$schema` dialect
+ * marker. Those are enforced here rather than assumed — a Zod change that made a field optional
+ * would throw at module load instead of silently loosening the wire contract.
+ *
+ * WHAT CANNOT BE EXPRESSED. Zod's `.trim()` runs BEFORE its length checks, so a whitespace-only
+ * string satisfies `minLength: 1` on the wire and still fails Zod. JSON Schema cannot express
+ * "length after trimming", and a `pattern` keyword is not worth the risk of a provider rejecting
+ * the whole schema, so this one difference stays — and is exactly why a schema-invalid reviewer
+ * response must remain durably auditable (see `resume-email-review.ts`).
+ */
+function providerJsonSchema(schema: z.ZodType, name: string): Record<string, unknown> {
+  const derived = z.toJSONSchema(schema, { io: 'input', unrepresentable: 'any' }) as Record<string, unknown>;
+  const { $schema: _dialect, ...rest } = derived;
+  const properties = rest.properties as Record<string, unknown> | undefined;
+  if (!properties || Object.keys(properties).length === 0) {
+    throw new Error(`${name}: derived provider schema has no properties`);
+  }
+  const required = new Set((rest.required as string[] | undefined) ?? []);
+  const optional = Object.keys(properties).filter((key) => !required.has(key));
+  if (optional.length > 0) {
+    throw new Error(`${name}: structured outputs require every field; these are optional: ${optional.join(', ')}`);
+  }
+  return { ...rest, additionalProperties: false };
+}
 
-export const EMAIL_WRITER_JSON_SCHEMA = strictObject(
-  {
-    subject_options: { type: 'array', minItems: 3, maxItems: 3, items: { type: 'string' } },
-    selected_subject: { type: 'string' },
-    selected_subject_reason: { type: 'string' },
-    email_body: { type: 'string' },
-    evidence_ids: { type: 'array', items: { type: 'string' } },
-    strategic_angle: { type: 'string' },
-    business_relevance: { type: 'string' },
-    urgency_basis: { type: 'string' },
-    competitor_evidence_used: { type: 'string', enum: [...EMAIL_COMPETITOR_EVIDENCE_MODES] },
-    primary_cta: { type: 'string', enum: [...PRIMARY_CTAS] },
-    prohibited_phrase_scan: { type: 'string', enum: [...SCAN_RESULTS] },
-    punctuation_scan: { type: 'string', enum: [...SCAN_RESULTS] },
-    genericity_score: { type: 'integer', minimum: 0, maximum: 100 },
-    human_style_result: { type: 'string', enum: [...SCAN_RESULTS] },
-    demo_alignment_result: { type: 'string', enum: [...DEMO_ALIGNMENT_RESULTS] },
-  },
-  [
-    'subject_options', 'selected_subject', 'selected_subject_reason', 'email_body',
-    'evidence_ids', 'strategic_angle', 'business_relevance', 'urgency_basis',
-    'competitor_evidence_used', 'primary_cta', 'prohibited_phrase_scan',
-    'punctuation_scan', 'genericity_score', 'human_style_result', 'demo_alignment_result',
-  ],
-);
-
-export const EMAIL_REVIEW_JSON_SCHEMA = strictObject(
-  {
-    decision: { type: 'string', enum: [...REVIEW_DECISIONS] },
-    fabricationRisk: { type: 'boolean' },
-    subjectSpecific: { type: 'boolean' },
-    subjectCuriosityGap: { type: 'boolean' },
-    openingSpecific: { type: 'boolean' },
-    businessRelevanceClear: { type: 'boolean' },
-    urgencySupported: { type: 'boolean' },
-    competitorClaimsSupported: { type: 'boolean' },
-    humanStylePass: { type: 'boolean' },
-    punctuationPass: { type: 'boolean' },
-    singlePrimaryCta: { type: 'boolean' },
-    sufficientlyPersonalized: { type: 'boolean' },
-    evidenceSupported: { type: 'boolean' },
-    demoAligned: { type: 'boolean' },
-    persuasive: { type: 'boolean' },
-    singleObservation: { type: 'boolean' },
-    buyerLanguageOnly: { type: 'boolean' },
-    conversationNotAudit: { type: 'boolean' },
-    confidentObservation: { type: 'boolean' },
-    addsClarityNotRestart: { type: 'boolean' },
-    compressedNotExpanded: { type: 'boolean' },
-    pressureReduced: { type: 'boolean' },
-    binaryReplyClose: { type: 'boolean' },
-    problems: { type: 'array', items: { type: 'string' } },
-    requiredRevisions: { type: 'array', items: { type: 'string' } },
-  },
-  [
-    'decision', 'fabricationRisk', 'subjectSpecific', 'subjectCuriosityGap', 'openingSpecific',
-    'businessRelevanceClear', 'urgencySupported', 'competitorClaimsSupported',
-    'humanStylePass', 'punctuationPass', 'singlePrimaryCta',
-    'sufficientlyPersonalized', 'evidenceSupported', 'demoAligned', 'persuasive',
-    'singleObservation', 'buyerLanguageOnly', 'conversationNotAudit', 'confidentObservation',
-    'addsClarityNotRestart', 'compressedNotExpanded', 'pressureReduced', 'binaryReplyClose',
-    'problems', 'requiredRevisions',
-  ],
-);
+export const EMAIL_WRITER_JSON_SCHEMA = providerJsonSchema(emailWriterSchema, 'EMAIL_WRITER_JSON_SCHEMA');
+export const EMAIL_REVIEW_JSON_SCHEMA = providerJsonSchema(emailReviewSchema, 'EMAIL_REVIEW_JSON_SCHEMA');

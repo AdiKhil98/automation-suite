@@ -6,6 +6,7 @@ import {
   type ResumeInputs,
 } from '../../domain/email/resume-email-review.js';
 import { LocalEmailDebugStore } from '../../integrations/email/email-debug-store.js';
+import { createResumeCommit } from '../../domain/email/resume-commit.js';
 import { DrizzleEmailUnitOfWork } from '../../persistence/email-unit-of-work.js';
 import { DemoInputRepository } from '../../persistence/repositories/demo-input.repo.js';
 import { EmailInputRepository } from '../../persistence/repositories/email-input.repo.js';
@@ -49,42 +50,14 @@ export async function resumeEmailReviewCommand(ctx: CliContext, opts: ResumeEmai
   const followupRepo = new FollowupPreparationRepository(ctx.db);
   const uow = new DrizzleEmailUnitOfWork(ctx.db);
 
-  const commit: ResumeCommit = async (plan) => {
-    await uow.transaction(async (repos) => {
-      const lead = await repos.leads.getById(plan.leadId);
-      if (lead && lead.status === 'EMAIL_REVIEW_FAILED') {
-        await repos.leadService.transition(plan.leadId, 'EMAIL_DRAFTED');
-        if (plan.approved) {
-          await repos.leadService.transition(plan.leadId, 'EMAIL_APPROVED');
-          if (plan.route !== 'EMAIL_APPROVED') await repos.leadService.transition(plan.leadId, plan.route);
-        } else {
-          await repos.leadService.transition(plan.leadId, 'EMAIL_REVIEW_FAILED');
-        }
-      }
-      // An unbound draft appends a new row; a sequence-bound draft IS the canonical draft for its
-      // (outreach record, sequence step) slot, so its reviewer outcome is written onto that row.
-      if (plan.write.kind === 'APPEND') {
-        await repos.emails.persist(plan.write.persist);
-      } else {
-        await repos.emails.applyReviewOutcome(plan.write.draftId, plan.write.update, plan.write.modelCalls);
-      }
-      await repos.events.record({
-        leadId: plan.leadId, runId: plan.runId, type: 'NOTE', fromStatus: null, toStatus: null,
-        message: `resume-email-review: ${plan.approved ? 'APPROVED' : 'REVIEW_REJECTED'} (writer not re-run; source draft ${plan.sourceDraftId})`,
-        data: {
-          sourceDraftId: plan.sourceDraftId, writerReRun: false, reviewerDecision: plan.reviewerDecision,
-          approved: plan.approved, costUsd: plan.costUsd,
-          draftWrite: plan.write.kind,
-          // The draft that now carries the outcome: a new row, or the recovered canonical row.
-          resultDraftId: plan.write.kind === 'APPEND' ? plan.write.persist.email?.id ?? null : plan.write.draftId,
-        },
-      });
-    });
-  };
+  const commit: ResumeCommit = createResumeCommit(uow);
 
+  const debugStore = new LocalEmailDebugStore(c.EMAIL_DEBUG_DIR);
   const service = new ResumeEmailReviewService({
     provider,
-    debug: new LocalEmailDebugStore(c.EMAIL_DEBUG_DIR),
+    debug: debugStore,
+    // Same sink the writer records to: a failed reviewer attempt leaves the raw payload behind.
+    debugWriter: debugStore,
     ports: {
       loadDraft: (id) => emailRepo.getById(id),
       loadLeadStatus: async (id) => (await ctx.leads.getById(id))?.status ?? null,
@@ -122,6 +95,10 @@ export async function resumeEmailReviewCommand(ctx: CliContext, opts: ResumeEmai
     console.log(`  reviewer calls made:  ${r.callsMade}`);
     console.log(`  actual spend:         $${r.costUsd.toFixed(4)}`);
     if (r.violations.length > 0) console.log(`  validation violations: ${r.violations.join(', ')}`);
+    if (r.outcome === 'SCHEMA_INVALID' || r.outcome === 'MODEL_REFUSAL' || r.outcome === 'RATE_LIMITED' || r.outcome === 'TRANSIENT_PROVIDER_ERROR') {
+      console.log('  the paid reviewer call was recorded against the draft; the draft is unchanged and still resumable.');
+      console.log(`  diagnostics: ${c.EMAIL_DEBUG_DIR}`);
+    }
     if (r.review) {
       console.log(`  reviewer decision:     ${r.review.decision} (fabricationRisk=${String(r.review.fabricationRisk)})`);
     }

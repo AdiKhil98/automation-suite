@@ -5,7 +5,7 @@ import {
   type EmailReviewOutcomeUpdate,
   type EmailRunStore,
 } from '../../domain/email/email-writer-service.js';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { type DbExecutor } from '../db.js';
 import { emailDrafts, emailFactInputs, emailFindingInputs, modelCalls } from '../schema.js';
 import { isSequenceStep, type SequenceStep } from '../../domain/outreach/sequence.js';
@@ -85,6 +85,23 @@ export class EmailRepository implements EmailRunStore {
       .returning({ id: emailDrafts.id, leadId: emailDrafts.leadId });
     const row = rows[0];
     if (!row) throw new Error(`email draft ${draftId} disappeared before its review outcome could be applied`);
+    await this.insertModelCalls(row.leadId, calls);
+  }
+
+  /**
+   * A paid reviewer attempt that yielded no usable verdict. Only two things move: the model_call is
+   * appended, and the draft's cumulative spend goes UP by this attempt's cost. `total_cost_usd` is
+   * incremented in SQL (`= total_cost_usd + $add`) rather than written from a previously-read
+   * value, so two attempts can never overwrite one another's accounting.
+   */
+  async recordFailedReviewAttempt(draftId: string, addCostUsd: number, calls: EmailModelCall[]): Promise<void> {
+    const rows = await this.db
+      .update(emailDrafts)
+      .set({ totalCostUsd: sql`${emailDrafts.totalCostUsd} + ${addCostUsd}` })
+      .where(eq(emailDrafts.id, draftId))
+      .returning({ id: emailDrafts.id, leadId: emailDrafts.leadId });
+    const row = rows[0];
+    if (!row) throw new Error(`email draft ${draftId} disappeared before its failed review attempt could be accounted`);
     await this.insertModelCalls(row.leadId, calls);
   }
 

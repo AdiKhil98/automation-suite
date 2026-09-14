@@ -121,6 +121,16 @@ export interface EmailRunStore {
    * subject, body, evidence bindings, and row id are left exactly as the writer produced them.
    */
   applyReviewOutcome(draftId: string, update: EmailReviewOutcomeUpdate, modelCalls: EmailModelCall[]): Promise<void>;
+  /**
+   * Account for a PAID reviewer call that produced nothing usable (a refusal, a provider error, or
+   * output the local schema rejects). It appends the model_call and ADDS the spend to the draft's
+   * cumulative cost, and changes nothing else: not the status, not the reviewer verdict columns,
+   * not `human_decision`, not the writer's copy or provenance.
+   *
+   * The cost is incremented in SQL rather than written from a value read earlier, so repeated
+   * failed attempts accumulate instead of overwriting each other.
+   */
+  recordFailedReviewAttempt(draftId: string, addCostUsd: number, modelCalls: EmailModelCall[]): Promise<void>;
 }
 
 /** The reviewer-outcome columns of an email draft. Nothing the writer produced appears here. */

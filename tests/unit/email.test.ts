@@ -446,6 +446,7 @@ function fakeUow(sink: EmailPersist[], leadStatus = 'DEMO_READY'): EmailUnitOfWo
         emails: {
           async persist(record: EmailPersist) { sink.push(record); },
           async applyReviewOutcome() { throw new Error('the writer path never recovers an existing draft'); },
+          async recordFailedReviewAttempt() { throw new Error('the writer path never accounts a resumed attempt'); },
         },
         events: { async record() { /* no-op */ } },
       });
@@ -706,6 +707,7 @@ describe('EmailWriterService — no-demo OPPORTUNITY_READY path', () => {
           emails: {
           async persist(record: EmailPersist) { sink.push(record); },
           async applyReviewOutcome() { throw new Error('the writer path never recovers an existing draft'); },
+          async recordFailedReviewAttempt() { throw new Error('the writer path never accounts a resumed attempt'); },
         },
           events: { async record() { /* no-op */ } },
         });

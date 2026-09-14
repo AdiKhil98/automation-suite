@@ -105,6 +105,13 @@ interface Harness {
   service: ResumeEmailReviewService;
   calls: LlmRequest[];
   committed: ResumeCommitPlan[];
+  diagnostics: EmailDebugRecord[];
+}
+
+/** The accounting write a paid-but-unusable reviewer attempt must produce. */
+function accounting(plan: ResumeCommitPlan) {
+  if (plan.write.kind !== 'ACCOUNT_FAILED_ATTEMPT') throw new Error(`expected ACCOUNT_FAILED_ATTEMPT, got ${plan.write.kind}`);
+  return plan.write;
 }
 
 /** The authoritative thread a follow-up continues: the initial email, exactly as it was sent. */
@@ -125,6 +132,7 @@ function harness(opts: {
 }): Harness {
   const { provider, calls } = fakeProvider(opts.rawReview ?? approveReview(), opts.status ?? 'ok');
   const committed: ResumeCommitPlan[] = [];
+  const diagnostics: EmailDebugRecord[] = [];
   const service = new ResumeEmailReviewService({
     provider,
     debug: { findByLeadAndRun: async () => (opts.record === undefined ? debugRecord(fixtureWriter('strong English business email')) : opts.record) },
@@ -135,11 +143,172 @@ function harness(opts: {
       loadThreadContext: async () => (opts.thread === undefined ? defaultThread : opts.thread),
     },
     commit: async (plan) => { committed.push(plan); },
+    debugWriter: { record: async (rec) => { diagnostics.push(rec); } },
     logger: { info() {}, warn() {}, error() {} } as never,
     config,
   });
-  return { service, calls, committed };
+  return { service, calls, committed, diagnostics };
 }
+
+describe('resume-email-review — a paid reviewer call that yields nothing usable', () => {
+  // PRODUCTION: `resume-email-review` returned SCHEMA_INVALID after spending $0.033. Nothing was
+  // committed — no model_call, no cost on the draft, no record of WHY the response was rejected —
+  // so the only evidence the money was spent lived in the operator's terminal.
+  const THREAD_SUBJECT = INITIAL_SENT_SUBJECT;
+
+  const followupDraft = (): EmailWriterOutput => ({
+    ...fixtureWriter('strong English business email'),
+    subject_options: [THREAD_SUBJECT, THREAD_SUBJECT, THREAD_SUBJECT],
+    selected_subject: THREAD_SUBJECT,
+    selected_subject_reason: 'Thread continuity is preserved.',
+  });
+
+  const followupRow = (draft: EmailWriterOutput): PersistedDraftRow => {
+    const rendered = renderEmail(draft, { ...emailInputs, threadSubject: THREAD_SUBJECT });
+    return {
+      ...rowFor(draft), subject: rendered.subject, body: rendered.body,
+      sequenceStep: 1, outreachRecordId: 'rec-1', threadSubject: rendered.subject, totalCostUsd: 0.0529,
+    };
+  };
+
+  /** Schema-valid for the provider, invalid for Zod: 21 problems where the cap is 20. */
+  const tooManyProblems = (): Record<string, unknown> => ({
+    ...approveReview(),
+    problems: Array.from({ length: 21 }, (_, i) => `problem ${String(i)}`),
+  });
+
+  const failing = (rawReview: unknown, status: LlmStatus = 'ok') => {
+    const draft = followupDraft();
+    return harness({ row: followupRow(draft), record: debugRecord(draft), rawReview, status });
+  };
+
+  it('commits the spend and the model_call instead of losing them', async () => {
+    const h = failing(tooManyProblems());
+    const r = await h.service.resume({ leadId: LEAD, draftId: DRAFT }, RUN);
+
+    expect(r.outcome).toBe('SCHEMA_INVALID');
+    expect(r.callsMade).toBe(1);
+    expect(r.costUsd).toBeCloseTo(0.02, 6);
+
+    const write = accounting(h.committed[0]!);
+    expect(write.draftId).toBe(DRAFT);
+    expect(write.addCostUsd).toBeCloseTo(0.02, 6);
+    expect(write.modelCalls).toHaveLength(1);
+    expect(write.modelCalls[0]?.purpose).toBe('email_review');
+    expect(write.modelCalls[0]?.estimatedCostUsd).toBeCloseTo(0.02, 6);
+  });
+
+  it('never approves, never progresses, and never writes a second draft', async () => {
+    const h = failing(tooManyProblems());
+    const r = await h.service.resume({ leadId: LEAD, draftId: DRAFT }, RUN);
+
+    expect(h.committed).toHaveLength(1);
+    expect(h.committed[0]!.approved).toBe(false);
+    expect(h.committed[0]!.write.kind).toBe('ACCOUNT_FAILED_ATTEMPT');
+    expect(r.newDraftId).toBeNull();
+    expect(r.review).toBeNull();
+    // The draft that stays canonical is the one that was resumed.
+    expect(r.resultDraftId).toBe(DRAFT);
+    expect(r.newLeadStatus).toBe('EMAIL_REVIEW_FAILED');
+  });
+
+  it('preserves the exact Zod issues and the raw response for diagnosis', async () => {
+    const h = failing(tooManyProblems());
+    const r = await h.service.resume({ leadId: LEAD, draftId: DRAFT }, RUN);
+
+    const diag = accounting(h.committed[0]!).diagnostic;
+    expect(diag.outcome).toBe('SCHEMA_INVALID');
+    expect(diag.providerStatus).toBe('ok');
+    expect(diag.responseId).toBe('resp-1');
+    expect(diag.requestId).toBe('req-1');
+    expect(diag.issues.length).toBeGreaterThan(0);
+    expect(diag.issues[0]).toMatchObject({ path: 'problems', code: expect.any(String), message: expect.any(String) });
+    expect(diag.rawExcerpt).toContain('problem 0');
+    // The same violations reach model_calls, in the writer's format.
+    expect(r.violations).toContain('schema_invalid:problems');
+    expect(accounting(h.committed[0]!).modelCalls[0]?.validationViolations).toContain('schema_invalid:problems');
+    // And the raw payload reaches the diagnostic sink.
+    expect(h.diagnostics).toHaveLength(1);
+    expect(h.diagnostics[0]?.outcome).toBe('SCHEMA_INVALID');
+    expect(h.diagnostics[0]?.draft).toBeNull();
+  });
+
+  it('bounds the diagnostic so one bad response cannot bloat the audit trail', async () => {
+    const h = failing({
+      ...approveReview(),
+      problems: Array.from({ length: 60 }, () => 'x'.repeat(400)),
+      requiredRevisions: Array.from({ length: 60 }, () => 'y'.repeat(400)),
+    });
+    await h.service.resume({ leadId: LEAD, draftId: DRAFT }, RUN);
+
+    const diag = accounting(h.committed[0]!).diagnostic;
+    expect(diag.issues.length).toBeLessThanOrEqual(20);
+    for (const issue of diag.issues) {
+      expect(issue.message.length).toBeLessThanOrEqual(200);
+      expect(issue.path.length).toBeLessThanOrEqual(120);
+    }
+    expect(diag.rawExcerpt?.length).toBeLessThanOrEqual(2000);
+    expect(diag.rawTruncated).toBe(true);
+    expect(accounting(h.committed[0]!).modelCalls[0]?.validationViolations?.length).toBeLessThanOrEqual(20);
+  });
+
+  it.each([
+    ['refusal', 'MODEL_REFUSAL'],
+    ['rate_limited', 'RATE_LIMITED'],
+    ['transient', 'TRANSIENT_PROVIDER_ERROR'],
+    ['incomplete', 'TRANSIENT_PROVIDER_ERROR'],
+  ] as const)('accounts a %s reviewer call too', async (status, outcome) => {
+    const h = failing(approveReview(), status);
+    const r = await h.service.resume({ leadId: LEAD, draftId: DRAFT }, RUN);
+
+    expect(r.outcome).toBe(outcome);
+    const write = accounting(h.committed[0]!);
+    expect(write.addCostUsd).toBeCloseTo(0.02, 6);
+    expect(write.modelCalls).toHaveLength(1);
+    expect(write.diagnostic.outcome).toBe(outcome);
+    // A provider failure has no Zod issues to report, and that is not an error.
+    expect(write.diagnostic.issues).toEqual([]);
+  });
+
+  it('leaves the draft resumable: the next attempt recovers it in place', async () => {
+    const draft = followupDraft();
+    const row = followupRow(draft);
+
+    const first = harness({ row, record: debugRecord(draft), rawReview: tooManyProblems() });
+    expect((await first.service.resume({ leadId: LEAD, draftId: DRAFT }, RUN)).outcome).toBe('SCHEMA_INVALID');
+    expect(accounting(first.committed[0]!).addCostUsd).toBeCloseTo(0.02, 6);
+
+    // Nothing about the draft changed, so the SAME row is resumed again — writer never re-run.
+    const second = harness({ row, record: debugRecord(draft), rawReview: approveReview() });
+    const r = await second.service.resume({ leadId: LEAD, draftId: DRAFT }, RUN);
+
+    expect(r.outcome).toBe('REVIEWED_APPROVED');
+    expect(recovery(second.committed[0]!).draftId).toBe(DRAFT);
+    expect(second.calls.filter((c) => c.task === 'email_write')).toHaveLength(0);
+  });
+
+  it('accumulates across repeated failed attempts rather than overwriting', async () => {
+    const draft = followupDraft();
+    const row = followupRow(draft);
+    const attempts = [];
+    for (let i = 0; i < 3; i += 1) {
+      const h = harness({ row, record: debugRecord(draft), rawReview: tooManyProblems() });
+      await h.service.resume({ leadId: LEAD, draftId: DRAFT }, RUN);
+      attempts.push(accounting(h.committed[0]!));
+    }
+    // Each attempt contributes its own model_call and its own increment — never a replacement.
+    expect(attempts.map((a) => a.addCostUsd)).toEqual([0.02, 0.02, 0.02].map((n) => expect.closeTo(n, 6)));
+    const ids = attempts.flatMap((a) => a.modelCalls.map((m) => m.id));
+    expect(new Set(ids).size).toBe(3);
+  });
+
+  it('an unbound (first-email) draft is accounted the same way', async () => {
+    const h = harness({ rawReview: tooManyProblems() });
+    const r = await h.service.resume({ leadId: LEAD, draftId: DRAFT }, RUN);
+    expect(r.outcome).toBe('SCHEMA_INVALID');
+    expect(accounting(h.committed[0]!).draftId).toBe(DRAFT);
+  });
+});
 
 describe('resume-email-review — threaded follow-ups', () => {
   // The retry path for a follow-up that failed deterministic validation: it re-validates with the

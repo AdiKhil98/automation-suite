@@ -6,6 +6,31 @@ All notable changes per phase. Format loosely follows Keep a Changelog.
 
 ### Fixed
 
+- **The provider schema had drifted from the Zod schema, making a paid reviewer call unsatisfiable.**
+  `problems` / `requiredRevisions` were sent to the provider as a bare
+  `{ type: 'array', items: { type: 'string' } }` while Zod required at most 20 entries of 1-300
+  characters, and every writer string/array bound (subject, body, reason, strategic angle, business
+  relevance, urgency basis, evidence-id count and length) was missing from the wire schema entirely.
+  A model could return output that satisfied the provider and still failed local parsing — which is
+  exactly what a production `resume-email-review` hit: `SCHEMA_INVALID` after spending $0.033. Both
+  provider schemas are now DERIVED from their Zod schemas (`z.toJSONSchema`, plus the
+  structured-output requirements: every field required, `additionalProperties: false`), so this class
+  of drift is unrepresentable. The one residue JSON Schema cannot express — Zod trims before
+  measuring length — is documented in code and covered by the accounting below.
+- **A paid reviewer call could vanish from the books.** `resume-email-review` returned
+  `SCHEMA_INVALID` / `MODEL_REFUSAL` / `RATE_LIMITED` / `TRANSIENT_PROVIDER_ERROR` before committing
+  anything, so the spend, the `model_call`, and the reason for the failure existed only in the
+  operator's terminal. Such an attempt is now committed durably: the reviewer `model_call` (carrying
+  the sanitized schema violations), the draft's cumulative cost incremented in SQL, and an immutable
+  pipeline event with a bounded, model-output-only diagnostic (exact Zod issue paths/codes/messages,
+  request/response ids, truncated raw payload). Nothing about the draft or the lead moves — status,
+  reviewer verdict columns, `human_decision`, subject/body, evidence bindings and writer provenance
+  are all untouched — so the SAME draft stays resumable for a reviewer-only retry, and repeated
+  failed attempts accumulate cost and calls instead of overwriting each other. The successful
+  in-place recovery path is unchanged.
+- The resume commit is now built by one shared factory (`createResumeCommit`) used by both the CLI
+  and its integration tests, so a test can no longer prove behaviour the deployed command lacks.
+
 - **Resumed follow-up reviews judged continuity against an empty thread.** `resume-email-review`
   passed `priorMessages: []` to the reviewer for every step, while the step rubric asks it to judge
   exactly what the earlier messages make possible (add clarity without restarting, compress without

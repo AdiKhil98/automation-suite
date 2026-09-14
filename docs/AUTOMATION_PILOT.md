@@ -385,6 +385,15 @@ second one: same row id, same subject/body, same writer provenance and evidence 
 draft awaiting review, and progression picks up that same row once a human approves it. A draft with
 no outreach record is unconstrained and still appends a new row.
 
+**When the reviewer itself fails.** A resume that reaches the reviewer and gets back a refusal, a
+provider error, or output the local schema rejects has already SPENT money, so the attempt is
+recorded: the reviewer `model_call`, the added cost on the draft, and a bounded diagnostic on the
+lead's timeline (exact schema issues, request/response ids, a truncated raw excerpt; the fuller
+payload goes to `EMAIL_DEBUG_DIR`). The draft and the lead do not move, which is deliberate — the
+same draft stays resumable, and a retry after the cause is fixed is still reviewer-only. Repeated
+attempts accumulate on the draft rather than replacing each other. The run is still recorded
+COMPLETED: it reached a determinate outcome (FAILED is reserved for a run that concluded nothing).
+
 **Retrying a follow-up that failed deterministic validation.** The writer call is already paid for
 and the original writer output is preserved in the debug record, so the retry is
 `resume-email-review` (one reviewer call, no writer call) — NOT a re-run of preparation, which will
