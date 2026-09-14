@@ -12,6 +12,7 @@ import {
   sendSchedules,
 } from '../schema.js';
 import { isOutreachStatus } from '../../domain/outreach/status.js';
+import { type FollowupPromotionCandidateView } from '../../domain/outreach/followup-due-promotion.js';
 import { type FollowupCandidateView } from '../../domain/outreach/followup-preparation-runner.js';
 import { type ProgressionCandidateView } from '../../domain/outreach/followup-progression-runner.js';
 import { type PriorSequenceMessage } from '../../prompts/email/sequence-jobs.js';
@@ -26,6 +27,13 @@ import { type PriorSequenceMessage } from '../../prompts/email/sequence-jobs.js'
 export interface DueFollowupCandidate extends FollowupCandidateView {
   campaignId: string;
   campaignName: string;
+  businessName: string | null;
+  contactEmail: string;
+  dueAt: Date;
+}
+
+/** The same due row, shaped for the due-state promotion phase. */
+export interface DuePromotionCandidate extends FollowupPromotionCandidateView {
   businessName: string | null;
   contactEmail: string;
   dueAt: Date;
@@ -48,23 +56,25 @@ export class FollowupPreparationRepository {
   constructor(private readonly db: DbExecutor) {}
 
   /**
-   * Follow-ups that are DUE now, oldest first and bounded. These are candidates only: the
-   * authoritative suppression and idempotency decisions are made by the pure domain decision
-   * function against the state returned here, and suppression is re-checked again before the send.
+   * The single "what is due" query, shared by the promotion and preparation phases so the two can
+   * never disagree about the worklist: active (`DUE`) rows whose due instant has passed, oldest
+   * first and bounded.
    */
-  async dueCandidates(nowMs: number, limit: number, filter: { recordId?: string } = {}): Promise<DueFollowupCandidate[]> {
-    if (limit <= 0) return [];
+  private async dueRows(nowMs: number, limit: number, filter: { recordId?: string }) {
     const where = [
       eq(outreachFollowups.status, 'DUE'),
       lte(outreachFollowups.dueAt, new Date(nowMs)),
     ];
     if (filter.recordId) where.push(eq(outreachFollowups.outreachRecordId, filter.recordId));
 
-    const rows = await this.db
+    return this.db
       .select({
         followupId: outreachFollowups.id,
         step: outreachFollowups.step,
         dueAt: outreachFollowups.dueAt,
+        // Selected even though the WHERE clause already pins it: the pure decision functions
+        // re-assert row liveness and due-ness themselves rather than trusting this query.
+        followupStatus: outreachFollowups.status,
         outreachRecordId: outreachRecords.id,
         campaignId: outreachCampaigns.id,
         campaignName: outreachCampaigns.name,
@@ -82,6 +92,43 @@ export class FollowupPreparationRepository {
       .where(and(...where))
       .orderBy(asc(outreachFollowups.dueAt))
       .limit(limit);
+  }
+
+  /**
+   * Follow-ups that are due NOW and whose record may still need promoting to `FOLLOW_UP_N_DUE`.
+   * Identical worklist to {@link dueCandidates} — promotion never runs ahead of preparation, and
+   * both phases see exactly the same rows in the same order.
+   */
+  async promotionCandidates(
+    nowMs: number,
+    limit: number,
+    filter: { recordId?: string } = {},
+  ): Promise<DuePromotionCandidate[]> {
+    if (limit <= 0) return [];
+    const rows = await this.dueRows(nowMs, limit, filter);
+    return rows.map((r) => ({
+      followupId: r.followupId,
+      outreachRecordId: r.outreachRecordId,
+      leadId: r.leadId,
+      step: r.step,
+      followupStatus: r.followupStatus as DuePromotionCandidate['followupStatus'],
+      dueAtMs: r.dueAt.getTime(),
+      recordStatus: isOutreachStatus(r.recordStatus) ? r.recordStatus : null,
+      doNotContact: r.doNotContact,
+      businessName: r.businessName,
+      contactEmail: r.contactEmail,
+      dueAt: r.dueAt,
+    }));
+  }
+
+  /**
+   * Follow-ups that are DUE now, oldest first and bounded. These are candidates only: the
+   * authoritative suppression and idempotency decisions are made by the pure domain decision
+   * function against the state returned here, and suppression is re-checked again before the send.
+   */
+  async dueCandidates(nowMs: number, limit: number, filter: { recordId?: string } = {}): Promise<DueFollowupCandidate[]> {
+    if (limit <= 0) return [];
+    const rows = await this.dueRows(nowMs, limit, filter);
 
     const out: DueFollowupCandidate[] = [];
     for (const r of rows) {

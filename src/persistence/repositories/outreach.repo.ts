@@ -98,6 +98,25 @@ function toFollowup(r: FollowupRow): OutreachFollowup {
 
 const TERMINAL_SQL = sql`('UNSUBSCRIBED','DO_NOT_CONTACT','CLOSED_WON','CLOSED_LOST')`;
 
+/**
+ * Explicit column mapping for a record patch. Only the fields the caller actually set are written,
+ * so an unconditional and a compare-and-set update touch exactly the same columns.
+ */
+function recordPatchToSet(patch: Partial<OutreachRecord>, now: Date): Record<string, unknown> {
+  const set: Record<string, unknown> = { updatedAt: now };
+  if (patch.status !== undefined) set.status = patch.status;
+  if (patch.sequenceStep !== undefined) set.sequenceStep = patch.sequenceStep;
+  if (patch.owner !== undefined) set.owner = patch.owner;
+  if (patch.lastSentAt !== undefined) set.lastSentAt = patch.lastSentAt;
+  if (patch.nextFollowupAt !== undefined) set.nextFollowupAt = patch.nextFollowupAt;
+  if (patch.lastReplyAt !== undefined) set.lastReplyAt = patch.lastReplyAt;
+  if (patch.replyCategory !== undefined) set.replyCategory = patch.replyCategory;
+  if (patch.doNotContact !== undefined) set.doNotContact = patch.doNotContact;
+  if (patch.outcome !== undefined) set.outcome = patch.outcome;
+  if (patch.notes !== undefined) set.notes = patch.notes;
+  return set;
+}
+
 /** Transaction-scoped writes implementing the domain OutreachTxRepos port. */
 export class OutreachTxRepository implements OutreachTxRepos {
   constructor(private readonly db: DbExecutor) {}
@@ -164,18 +183,27 @@ export class OutreachTxRepository implements OutreachTxRepos {
   }
 
   async updateRecord(id: string, patch: Partial<OutreachRecord>, now: Date): Promise<void> {
-    const set: Record<string, unknown> = { updatedAt: now };
-    if (patch.status !== undefined) set.status = patch.status;
-    if (patch.sequenceStep !== undefined) set.sequenceStep = patch.sequenceStep;
-    if (patch.owner !== undefined) set.owner = patch.owner;
-    if (patch.lastSentAt !== undefined) set.lastSentAt = patch.lastSentAt;
-    if (patch.nextFollowupAt !== undefined) set.nextFollowupAt = patch.nextFollowupAt;
-    if (patch.lastReplyAt !== undefined) set.lastReplyAt = patch.lastReplyAt;
-    if (patch.replyCategory !== undefined) set.replyCategory = patch.replyCategory;
-    if (patch.doNotContact !== undefined) set.doNotContact = patch.doNotContact;
-    if (patch.outcome !== undefined) set.outcome = patch.outcome;
-    if (patch.notes !== undefined) set.notes = patch.notes;
-    await this.db.update(outreachRecords).set(set).where(eq(outreachRecords.id, id));
+    await this.db.update(outreachRecords).set(recordPatchToSet(patch, now)).where(eq(outreachRecords.id, id));
+  }
+
+  /**
+   * Compare-and-set: update ONLY while the record still holds `expectedStatus`. Postgres evaluates
+   * the WHERE clause against the committed row and, under concurrency, the second writer blocks on
+   * the row lock and then re-evaluates it — so exactly one caller can observe a given "before"
+   * status and win. `returning` tells us which one that was.
+   */
+  async updateRecordIfStatus(
+    id: string,
+    expectedStatus: OutreachStatus,
+    patch: Partial<OutreachRecord>,
+    now: Date,
+  ): Promise<boolean> {
+    const rows = await this.db
+      .update(outreachRecords)
+      .set(recordPatchToSet(patch, now))
+      .where(and(eq(outreachRecords.id, id), eq(outreachRecords.status, expectedStatus)))
+      .returning({ id: outreachRecords.id });
+    return rows.length > 0;
   }
 
   async insertMessage(msg: OutreachMessage): Promise<void> {
@@ -232,6 +260,11 @@ export class OutreachTxRepository implements OutreachTxRepos {
       createdAt: f.createdAt,
       updatedAt: f.updatedAt,
     });
+  }
+
+  async getFollowup(id: string): Promise<OutreachFollowup | null> {
+    const rows = await this.db.select().from(outreachFollowups).where(eq(outreachFollowups.id, id)).limit(1);
+    return rows[0] ? toFollowup(rows[0]) : null;
   }
 
   async updateFollowupStatus(

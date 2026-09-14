@@ -6,6 +6,22 @@ All notable changes per phase. Format loosely follows Keep a Changelog.
 
 ### Added
 
+- Unattended follow-up **due-state promotion** (phase A0 of `run-followup-automation`): a record
+  whose scheduled follow-up row has come due is moved from `INITIAL_SENT` / `FOLLOW_UP_{N-1}_SENT`
+  to `FOLLOW_UP_N_DUE` automatically, so the sequence no longer requires an operator to hand-run
+  `outreach transition` for every record. Driven only by an ACTIVE, actually-due row; exactly one
+  legal state-machine hop; suppression (reply/bounce/unsubscribe/DNC/meeting/closed/do-not-contact)
+  re-checked inside the transaction; applied with a compare-and-set so concurrent runs promote
+  exactly once; one insert-only `STATE_TRANSITION` event marked `automated`. Adds no authority —
+  both statuses are non-sending and no Gmail/schedule/send path is reachable. New `--phase promote`
+  (and `--record`) supports a controlled first follow-up before the global timer is started.
+- Unattended preparation now **fails closed on the model provider**: `ALLOW_PAID_LLM_CALLS=true`
+  permits spending but selects nothing, and `LLM_PROVIDER` defaults to `mock`, so an armed box could
+  previously persist fixture copy into the human review queue. A preflight (after the gates, before
+  any candidate is listed) refuses a non-live provider unless `FOLLOWUP_PREPARATION_ALLOW_MOCK_LLM=true`
+  is set deliberately, and refuses an incompletely configured live provider. The production drop-in
+  example now states `LLM_PROVIDER=openai` explicitly; models stay in validated `.env`.
+
 - Demo Engine V2 Milestone 3B2A review pipeline: the appointment dock hides its primary CTA on mobile so the hero CTA and a single sticky bar are the only appointment actions (no adjacent duplicate; FAQ launcher never overlaps the bar). New `demo-v2-persist` / `demo-v2-persist-status` commands render, screenshot, and persist an immutable render version, screenshots, and review package into the 3B1 tables and advance the artifact HUMAN_REVIEW_REQUIRED → RENDERING → RENDERED → AUTO_REVIEW_PENDING; persistence is opt-in, requires DEMO_V2_ENABLED=true + ALLOW_DEMO_V2_PERSIST=true + a dedicated guarded DEMO_V2_PERSIST_DATABASE_URL (never DATABASE_URL, no Supabase/pooler/remote), and can never reach AUTO_REVIEW_PASSED, HUMAN_APPROVED, or deployment eligibility. `demo-v2-screenshots --language de|fr|he|ar` generates and validates each language (RTL for HE/AR, complete English secondary, or primary-only fallback with --no-english).
 - Demo Engine V2 Milestone 3B1 visual-quality upgrade: a versioned, per-reference-family typography
   system (distinct display/body/nav/button/label roles, weights, fluid scales, RTL faces for Hebrew/

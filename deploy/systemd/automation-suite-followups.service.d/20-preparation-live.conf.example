@@ -23,6 +23,24 @@
 # on the box rather than trusting that from memory:
 #     systemctl show -p Environment automation-suite-followups.service
 #
+# LLM_PROVIDER=openai IS REQUIRED HERE, NOT OPTIONAL.
+#
+# ALLOW_PAID_LLM_CALLS only PERMITS spending; it does not SELECT a provider, and LLM_PROVIDER
+# defaults to `mock`. A box armed for production but left on that default would compose FIXTURE copy
+# and persist it into the human review queue as a real draft for a real prospect — text that reads
+# like reviewable copy but describes nothing. Unattended preparation therefore refuses to run unless
+# LLM_PROVIDER=openai (or FOLLOWUP_PREPARATION_ALLOW_MOCK_LLM=true is set deliberately), and fails
+# the unit BEFORE listing a single candidate. Selecting the provider here rather than in .env keeps
+# the paid provider scoped to this one unit, exactly like the paid-call switch above.
+#
+# THE MODELS ARE DELIBERATELY NOT PINNED HERE. EMAIL_WRITER_MODEL / EMAIL_REVIEWER_MODEL belong in
+# validated .env configuration: they are not an authority switch, they are already hard-gated (an
+# unknown or misspelled model has no verified price and throws before any paid call), and pinning
+# them here would split model configuration across two places — so an ad-hoc `outreach-compose-preview`
+# would silently use a different model than the one that writes the copy an operator reviews. This
+# drop-in carries AUTHORITY (which provider, whether spending is allowed, which phases run); .env
+# carries validated configuration.
+#
 # FOLLOWUP_PROGRESSION_ENABLED stays FALSE here on purpose. Preparation only composes copy and parks
 # it in the human review queue. Progression is what advances approved copy toward a send schedule,
 # and the first real follow-up must stop after Gmail DRAFT creation for manual thread inspection —
@@ -33,3 +51,4 @@
 Environment=FOLLOWUP_PREPARATION_ENABLED=true
 Environment=FOLLOWUP_PROGRESSION_ENABLED=false
 Environment=ALLOW_PAID_LLM_CALLS=true
+Environment=LLM_PROVIDER=openai

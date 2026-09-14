@@ -304,12 +304,61 @@ With `LLM_PROVIDER=openai` and `ALLOW_PAID_LLM_CALLS=false`, `buildEmailProvider
 silently falling back to the mock, so a misconfigured box fails visibly instead of producing fake
 copy.
 
+- **The production drop-in must also SELECT the provider (`LLM_PROVIDER=openai`).**
+  `ALLOW_PAID_LLM_CALLS=true` only PERMITS spending; it selects nothing, and `LLM_PROVIDER` defaults
+  to `mock`. A box armed for production but left on that default would compose FIXTURE copy and
+  persist it into the human review queue as a real draft for a real prospect. Unattended preparation
+  therefore runs a preflight after its gates and BEFORE listing a single candidate: a non-live
+  provider aborts the whole run (exit non-zero, unit fails) unless
+  `FOLLOWUP_PREPARATION_ALLOW_MOCK_LLM=true` was set deliberately, and a live provider with
+  incomplete configuration (no key, unverified prices, unpriced model) fails the same way.
+  Pinned by `tests/unit/followup-deployment-safety.test.ts`.
+- **The MODELS stay in validated `.env`, not in the drop-in.** `EMAIL_WRITER_MODEL` /
+  `EMAIL_REVIEWER_MODEL` are not authority switches and are already hard-gated — an unknown or
+  misspelled model has no verified price and throws before any paid call. Pinning them in systemd
+  would split model configuration across two places and let an ad-hoc `outreach-compose-preview` use
+  a different model than the one that wrote the copy an operator is reviewing. The drop-in carries
+  AUTHORITY (which provider, whether spending is allowed, which phases run); `.env` carries
+  validated configuration.
+
 ### Adopting the codified unit over the manual drop-ins
 
 `ExecStartPre` is a LIST. Installing the repository unit while
 `/etc/systemd/system/automation-suite-followups.service.d/10-inbox-safety.conf` still exists would
 ACCUMULATE both copies and run each Gmail read twice. Delete that drop-in when adopting the unit;
 keep `20-preparation-live.conf`, which carries the production-only switches.
+
+## Due-state promotion (how a follow-up becomes due without an operator)
+
+`scheduleFollowup` writes a follow-up ROW with an explicit due instant but deliberately does not move
+the record's status — a record that has only sent its initial email stays `INITIAL_SENT`. Preparation
+re-checks suppression with `checkFollowupSendAllowed`, which requires `FOLLOW_UP_N_DUE`. Nothing
+produced that status automatically, so every due follow-up was reported
+`BLOCKED / NOT_AWAITING_FOLLOWUP` until an operator hand-ran `outreach transition` — which defeats
+the unattended design.
+
+Phase A0 of `run-followup-automation` closes that gap without weakening a gate:
+
+```text
+an ACTIVE (DUE) row whose due instant has passed
++ a record in EXACTLY the status that step must follow (statusBeforeFollowupDue)
++ no suppression (reply / bounce / unsubscribe / DNC / meeting / closed / do-not-contact)
+-> promote the record to followupDueStatus(step), and nothing else
+```
+
+- Driven only by a real, active, actually-due row — never by elapsed time or message history.
+- Exactly one legal state-machine hop; a step/status disagreement is left untouched, never "fixed".
+- `OutreachService.promoteFollowupDue` re-reads the row and record and re-runs the SAME pure decision
+  INSIDE its transaction, then writes with a compare-and-set on the expected source status. A reply
+  landing in between, or a concurrent run, loses the CAS: no status change, and no event.
+- One `STATE_TRANSITION` event per real promotion, with `data.trigger='FOLLOWUP_DUE'`,
+  `automated=true`, and the actor — so the timeline never implies a human made the transition.
+- Adds NO authority: both statuses are non-sending, the follow-up row and due dates are untouched,
+  and composing/drafting/scheduling/sending stay behind their own gates.
+- Idempotent: a repeated timer run finds the record already due and writes nothing.
+
+Promotion runs automatically as the first step of `--phase prepare` (and of the default `both`), and
+can be run alone with `--phase promote` for inspection. Both accept `--record <id>`.
 
 ## Controlled first-follow-up validation
 
@@ -318,8 +367,21 @@ active `SCHEDULED` schedule. Until progression's third stage runs, the lead is a
 `DRAFT_CREATED` and is structurally invisible to the sender. Progression executes exactly ONE stage
 per run, which is what makes the stop possible.
 
+0. Promote and compose for ONE record before the global timer is ever started. With preparation
+   enabled (`FOLLOWUP_PREPARATION_ENABLED=true`, progression `false`) and the timer still stopped:
+   ```bash
+   cd /home/opc/automation-suite
+   # a) see exactly what would change; writes nothing, calls no model
+   pnpm cli run-followup-automation --phase promote --record <outreachRecordId> --dry-run
+   # b) promote that ONE record (one status change + one event; still no model call)
+   pnpm cli run-followup-automation --phase promote --record <outreachRecordId>
+   # c) compose that ONE follow-up (promotion is already a no-op; this is the first paid step)
+   pnpm cli run-followup-automation --phase prepare --record <outreachRecordId>
+   ```
+   Only once that copy has been reviewed should the timer be started for the whole queue.
 1. Enable preparation only (`FOLLOWUP_PREPARATION_ENABLED=true`, progression stays `false`).
-   The due follow-up is composed + AI-reviewed and parked at `READY_FOR_HUMAN_APPROVAL`. Not sendable.
+   The due follow-up is promoted, composed + AI-reviewed and parked at `READY_FOR_HUMAN_APPROVAL`.
+   Not sendable.
 2. Inspect and approve in `review-dashboard`. Lead -> `HUMAN_APPROVED`. Still not sendable.
    (Rejecting returns the lead to `SENT` and cancels that step; it does NOT reject the prospect.)
 3. Stage A — finalize. Run manually with scheduling forced off:

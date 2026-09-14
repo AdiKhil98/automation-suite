@@ -900,10 +900,10 @@ program
 
 program
   .command('run-followup-automation')
-  .description('UNATTENDED follow-up automation (timer entry point; NEVER sends). Phase "prepare" composes DUE follow-ups through the SAME writer -> AI reviewer -> gate used for a first email, with the step-specific job (internal step 1 = lesson Follow-up #2 "add clarity", 2 = #3 "compress + reduce pressure", 3 = #4 "binary yes/no close"), and parks the copy in the EXISTING human review queue. Phase "progress" advances only HUMAN-APPROVED follow-ups one stage through the existing reply-finalization -> Gmail draft -> schedule services, then stops. Both fail closed on reply/bounce/unsubscribe/DNC/meeting/closed and are idempotent under repeated timer runs. Sending happens ONLY in run-scheduled-sends. Gated by FOLLOWUP_PREPARATION_ENABLED / FOLLOWUP_PROGRESSION_ENABLED (both default false).')
-  .option('--phase <name>', 'prepare | progress | both (default both)')
+  .description('UNATTENDED follow-up automation (timer entry point; NEVER sends). Phase "promote" moves records whose scheduled follow-up row has come due to FOLLOW_UP_N_DUE (one legal state-machine hop, driven only by an active due row, suppression re-checked, idempotent) and runs automatically as the first step of "prepare". Phase "prepare" composes DUE follow-ups through the SAME writer -> AI reviewer -> gate used for a first email, with the step-specific job (internal step 1 = lesson Follow-up #2 "add clarity", 2 = #3 "compress + reduce pressure", 3 = #4 "binary yes/no close"), and parks the copy in the EXISTING human review queue. Phase "progress" advances only HUMAN-APPROVED follow-ups one stage through the existing reply-finalization -> Gmail draft -> schedule services, then stops. Both fail closed on reply/bounce/unsubscribe/DNC/meeting/closed and are idempotent under repeated timer runs. Sending happens ONLY in run-scheduled-sends. Gated by FOLLOWUP_PREPARATION_ENABLED / FOLLOWUP_PROGRESSION_ENABLED (both default false).')
+  .option('--phase <name>', 'promote | prepare | progress | both (default both; "prepare" always runs "promote" first)')
   .option('--limit <n>', 'override the per-run cap for the selected phase(s)')
-  .option('--record <id>', 'preparation only: restrict to one outreach record')
+  .option('--record <id>', 'promotion + preparation: restrict to one outreach record (use this for a first controlled follow-up)')
   .option('--lead <id>', 'progression only: restrict to one lead')
   .option('--dry-run', 'report what WOULD happen; writes nothing, makes no model call, creates no Gmail draft')
   .action((opts: { phase?: string; limit?: string; record?: string; lead?: string; dryRun?: boolean }) => withContext((ctx) => runFollowupAutomationCommand(ctx, opts)));
