@@ -6,6 +6,31 @@ All notable changes per phase. Format loosely follows Keep a Changelog.
 
 ### Fixed
 
+- **The reviewer-only retry budget was per-call, not per-draft.** Because failed reviewer attempts
+  now deliberately increment `total_cost_usd`, admitting a retry on "this one call fits under the
+  cap" would let unlimited retries walk past the per-lead budget while each call looked affordable.
+  Admission is now `draft.totalCostUsd + projectedReviewerCost <= EMAIL_MAX_COST_USD_PER_LEAD`, it
+  fails closed when the projection is unknown, and it is decided before the provider is touched
+  (zero calls when blocked). Mock providers stay free, as everywhere else in the pipeline.
+- **The failure diagnostic could break run semantics.** It was written after the DB commit and not
+  caught, so a filesystem problem turned a durably-accounted paid attempt into a thrown error and a
+  FAILED run. The two sinks are now independent and ordered: the local diagnostic is written FIRST
+  (so a database outage still leaves evidence of the paid call) and its failure is caught and
+  logged; the DB accounting then proceeds and, if it succeeds, the determinate outcome is returned
+  regardless. A DB accounting failure still propagates — that is a real infrastructure failure — and
+  the local diagnostic written beforehand survives it. Neither path can cause a second paid call.
+- `EMAIL_SCHEMA_VERSION` bumped to `email-copy-schema-5`: the PROVIDER contract changed materially
+  (derived and fully constrained instead of hand-written and permissive), so calls made under it are
+  distinguishable. Existing drafts keep the version their writer recorded — the failed production
+  draft's provenance is not rewritten by a resume — while NEW reviewer `model_call` rows carry the
+  current version.
+- The Zod-to-JSON-Schema derivation is now fail-closed: it runs in Zod's default throwing mode
+  instead of `unrepresentable: 'any'` (which silently turns an unrepresentable construct into `{}`,
+  a field with no constraints at all), plus a backstop that refuses any property arriving without a
+  type or enum. The comment about `pattern` was corrected: standard Structured Outputs does support
+  it; it is simply not used to encode Zod's trim-before-measure semantics, since the local check and
+  the durable diagnostics already cover that rare shape.
+
 - **The provider schema had drifted from the Zod schema, making a paid reviewer call unsatisfiable.**
   `problems` / `requiredRevisions` were sent to the provider as a bare
   `{ type: 'array', items: { type: 'string' } }` while Zod required at most 20 entries of 1-300

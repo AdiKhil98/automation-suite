@@ -394,6 +394,12 @@ same draft stays resumable, and a retry after the cause is fixed is still review
 attempts accumulate on the draft rather than replacing each other. The run is still recorded
 COMPLETED: it reached a determinate outcome (FAILED is reserved for a run that concluded nothing).
 
+**The retry budget is cumulative.** A resume admits its reviewer call only when the draft's spend so
+far plus the projected cost of this call stays inside `EMAIL_MAX_COST_USD_PER_LEAD`. Because failed
+attempts are accounted on the draft, repeated retries eventually return `REVIEWER_BUDGET_BLOCKED`
+with zero provider calls rather than quietly exceeding the per-lead cap; an unknown projected price
+blocks as well.
+
 **Retrying a follow-up that failed deterministic validation.** The writer call is already paid for
 and the original writer output is preserved in the debug record, so the retry is
 `resume-email-review` (one reviewer call, no writer call) — NOT a re-run of preparation, which will

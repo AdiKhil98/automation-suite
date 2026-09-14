@@ -342,11 +342,24 @@ export class ResumeEmailReviewService {
       return this.result(leadId, draftId, 'VALIDATION_FAILED', 0, 0, check.violations, null, null, null);
     }
 
-    // Budget guard for the single real reviewer call (mock is free).
+    // Budget guard for the single real reviewer call (mock is free, as everywhere else).
+    //
+    // CUMULATIVE, not per-call. The draft already carries what has been spent on it — the writer
+    // attempt, plus every failed reviewer attempt this path now deliberately accounts for. Admitting
+    // a retry on "this ONE call fits under the cap" would let an unbounded number of retries walk
+    // past a per-lead budget while each individual call looked affordable. Fail closed when the
+    // projection is unknown, and make the decision BEFORE the provider is touched.
     const isReal = this.deps.provider.name !== 'mock';
     if (isReal && c.maxCostUsdPerLead !== null) {
       const projected = worstCaseCostUsd(c.reviewerModel, c.worstCaseInputTokensPerCall, c.maxOutputTokens);
-      if (projected === null || projected > c.maxCostUsdPerLead) {
+      if (projected === null || draftRow.totalCostUsd + projected > c.maxCostUsdPerLead) {
+        this.deps.logger.warn(
+          {
+            leadId, draftId, alreadySpentUsd: draftRow.totalCostUsd, projectedUsd: projected,
+            capUsd: c.maxCostUsdPerLead,
+          },
+          'resume-email-review: reviewer refused — cumulative spend on this draft would exceed the per-lead cap',
+        );
         return this.result(leadId, draftId, 'REVIEWER_BUDGET_BLOCKED', 0, 0, [], null, null, null);
       }
     }
@@ -444,9 +457,10 @@ export class ResumeEmailReviewService {
   /**
    * Commit a PAID reviewer attempt that produced no usable verdict, then report it.
    *
-   * What is written: the reviewer `model_call` (carrying the sanitized schema violations, exactly
-   * as the writer records its own), the added spend on the draft, an immutable pipeline event with
-   * a bounded diagnostic, and — when a diagnostic sink is configured — the fuller raw payload.
+   * What is written: the fuller raw payload to the local diagnostic sink (first, and independently,
+   * so a database outage cannot erase the evidence of a paid call), then the reviewer `model_call`
+   * (carrying the sanitized schema violations, exactly as the writer records its own), the added
+   * spend on the draft, and an immutable pipeline event with the bounded diagnostic.
    *
    * What is NOT written: any change to the draft's status, reviewer verdict columns,
    * `human_decision`, subject, body, evidence bindings, or writer provenance, and no lead
@@ -468,6 +482,32 @@ export class ResumeEmailReviewService {
     const modelCall = { ...this.modelCall(rRes), validationViolations: violations.length > 0 ? violations : null };
     const diagnostic = this.diagnostic(outcome, rRes, issues);
 
+    // ORDER MATTERS, and the two sinks are independent.
+    //
+    // The local diagnostic is written FIRST, so that if the database is the thing that is broken,
+    // the raw reviewer response and the exact reason it was rejected still survive somewhere. Its
+    // failure is caught and logged: a filesystem problem must never undo, obscure, or fail a run
+    // whose DB accounting then succeeds — the money was spent either way, and the durable books are
+    // the DB. The commit that follows is NOT caught: if accounting itself fails, that is an
+    // infrastructure failure the operator must see, and the local diagnostic written above remains.
+    let diagnosticPersisted = false;
+    if (this.deps.debugWriter) {
+      const now = new Date();
+      try {
+        await this.deps.debugWriter.record({
+          leadId, runId, outcome, draft: null, review: diagnostic, violations,
+          costUsd: cost, callsMade: 1,
+          createdAt: now.toISOString(), expiresAt: new Date(now.getTime() + EMAIL_DEBUG_TTL_MS).toISOString(),
+        });
+        diagnosticPersisted = true;
+      } catch (err) {
+        this.deps.logger.error(
+          { leadId, draftId: draftRow.id, outcome, err: err instanceof Error ? err.message : String(err) },
+          'resume-email-review: local diagnostic could not be written; the paid attempt is still being accounted in the database',
+        );
+      }
+    }
+
     await this.deps.commit({
       leadId,
       approved: false,
@@ -479,18 +519,10 @@ export class ResumeEmailReviewService {
       runId,
     });
 
-    // Best-effort fuller payload; the durable accounting above has already been committed.
-    if (this.deps.debugWriter) {
-      const now = new Date();
-      await this.deps.debugWriter.record({
-        leadId, runId, outcome, draft: null, review: diagnostic, violations,
-        costUsd: cost, callsMade: 1,
-        createdAt: now.toISOString(), expiresAt: new Date(now.getTime() + EMAIL_DEBUG_TTL_MS).toISOString(),
-      });
-    }
-
+    // Accounting committed: the outcome is determinate and is reported as such, whether or not the
+    // local diagnostic was written.
     this.deps.logger.warn(
-      { leadId, draftId: draftRow.id, outcome, costUsd: cost, issues: diagnostic.issues.length },
+      { leadId, draftId: draftRow.id, outcome, costUsd: cost, issues: diagnostic.issues.length, diagnosticPersisted },
       'resume-email-review: paid reviewer call produced no usable verdict; draft left resumable',
     );
     return this.result(leadId, draftRow.id, outcome, cost, 1, violations, null, null, 'EMAIL_REVIEW_FAILED', draftRow.id);

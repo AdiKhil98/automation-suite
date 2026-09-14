@@ -14,6 +14,8 @@ import { type EmailDebugRecord } from '../../src/integrations/email/email-debug-
 import { type LeadFact } from '../../src/domain/lead-facts/lead-fact.js';
 import { type LlmProvider, type LlmRequest, type LlmResult, type LlmStatus } from '../../src/integrations/llm/provider.js';
 import { EMAIL_COPY_FIXTURES } from '../fixtures/email-copy-standard.js';
+import { EMAIL_SCHEMA_VERSION } from '../../src/domain/email/email-schema.js';
+import { worstCaseCostUsd } from '../../src/integrations/llm/pricing.js';
 
 const LEAD = 'lead-1';
 const RUN = 'run-1';
@@ -53,10 +55,10 @@ const config: ResumeReviewConfig = {
   maxRetries: 0, maxCostUsdPerLead: 0.2, worstCaseInputTokensPerCall: 1000,
 };
 
-function fakeProvider(rawJson: unknown, status: LlmStatus = 'ok'): { provider: LlmProvider; calls: LlmRequest[] } {
+function fakeProvider(rawJson: unknown, status: LlmStatus = 'ok', name = 'mock'): { provider: LlmProvider; calls: LlmRequest[] } {
   const calls: LlmRequest[] = [];
   const provider: LlmProvider = {
-    name: 'mock',
+    name,
     async generate(req: LlmRequest): Promise<LlmResult> {
       calls.push(req);
       return {
@@ -106,6 +108,8 @@ interface Harness {
   calls: LlmRequest[];
   committed: ResumeCommitPlan[];
   diagnostics: EmailDebugRecord[];
+  /** The order the two persistence sinks were attempted in. */
+  order: string[];
 }
 
 /** The accounting write a paid-but-unusable reviewer attempt must produce. */
@@ -129,10 +133,17 @@ function harness(opts: {
   leadStatus?: string | null;
   record?: EmailDebugRecord | null;
   thread?: ResumeThreadContext | null;
+  /** A non-mock name turns the real-provider budget guard on. */
+  providerName?: string;
+  config?: Partial<ResumeReviewConfig>;
+  /** Simulated infrastructure failures, to prove the two sinks are independent. */
+  failDebugWrite?: boolean;
+  failCommit?: boolean;
 }): Harness {
-  const { provider, calls } = fakeProvider(opts.rawReview ?? approveReview(), opts.status ?? 'ok');
+  const { provider, calls } = fakeProvider(opts.rawReview ?? approveReview(), opts.status ?? 'ok', opts.providerName);
   const committed: ResumeCommitPlan[] = [];
   const diagnostics: EmailDebugRecord[] = [];
+  const order: string[] = [];
   const service = new ResumeEmailReviewService({
     provider,
     debug: { findByLeadAndRun: async () => (opts.record === undefined ? debugRecord(fixtureWriter('strong English business email')) : opts.record) },
@@ -142,13 +153,202 @@ function harness(opts: {
       loadInputs: async () => inputs,
       loadThreadContext: async () => (opts.thread === undefined ? defaultThread : opts.thread),
     },
-    commit: async (plan) => { committed.push(plan); },
-    debugWriter: { record: async (rec) => { diagnostics.push(rec); } },
+    commit: async (plan) => {
+      order.push('commit');
+      if (opts.failCommit) throw new Error('database unavailable');
+      committed.push(plan);
+    },
+    debugWriter: {
+      record: async (rec) => {
+        order.push('debug');
+        if (opts.failDebugWrite) throw new Error('disk full');
+        diagnostics.push(rec);
+      },
+    },
     logger: { info() {}, warn() {}, error() {} } as never,
-    config,
+    config: { ...config, ...opts.config },
   });
-  return { service, calls, committed, diagnostics };
+  return { service, calls, committed, diagnostics, order };
 }
+
+describe('resume-email-review — the reviewer budget is CUMULATIVE per draft', () => {
+  // Failed reviewer attempts now add to the draft's spend on purpose. A per-CALL admission test
+  // would therefore let an unbounded number of retries walk past the per-lead cap while each
+  // individual call still looked affordable.
+  const REVIEWER_MODEL = 'gpt-5.6-terra';
+  const projected = worstCaseCostUsd(REVIEWER_MODEL, 1000, 1500)!;
+
+  const priced = (alreadySpent: number, cap: number | null) => {
+    const draft = fixtureWriter('strong English business email');
+    return harness({
+      row: { ...rowFor(draft), totalCostUsd: alreadySpent },
+      record: debugRecord(draft),
+      providerName: 'openai',
+      config: { reviewerModel: REVIEWER_MODEL, maxCostUsdPerLead: cap, worstCaseInputTokensPerCall: 1000, maxOutputTokens: 1500 },
+    });
+  };
+
+  it('allows the call when the writer spend plus the projected reviewer cost fits under the cap', async () => {
+    const h = priced(0.05, 0.05 + projected + 0.01);
+    const r = await h.service.resume({ leadId: LEAD, draftId: DRAFT }, RUN);
+    expect(r.outcome).toBe('REVIEWED_APPROVED');
+    expect(h.calls).toHaveLength(1);
+  });
+
+  it('blocks with ZERO provider calls when the cumulative total would exceed the cap', async () => {
+    const h = priced(0.05, 0.05 + projected - 0.0001);
+    const r = await h.service.resume({ leadId: LEAD, draftId: DRAFT }, RUN);
+
+    expect(r.outcome).toBe('REVIEWER_BUDGET_BLOCKED');
+    expect(r.costUsd).toBe(0);
+    expect(r.callsMade).toBe(0);
+    expect(h.calls).toEqual([]);
+    expect(h.committed).toEqual([]);
+  });
+
+  it('would have been admitted under the old per-call rule — the regression this closes', async () => {
+    // The single call costs far less than the cap; only the accumulated spend breaches it.
+    const cap = 0.05 + projected - 0.0001;
+    expect(projected).toBeLessThan(cap);
+    const h = priced(0.05, cap);
+    expect((await h.service.resume({ leadId: LEAD, draftId: DRAFT }, RUN)).outcome).toBe('REVIEWER_BUDGET_BLOCKED');
+  });
+
+  it('fails closed when the projected cost is unknown', async () => {
+    const draft = fixtureWriter('strong English business email');
+    const h = harness({
+      row: { ...rowFor(draft), totalCostUsd: 0 },
+      record: debugRecord(draft),
+      providerName: 'openai',
+      config: { reviewerModel: 'model-with-no-published-price', maxCostUsdPerLead: 10 },
+    });
+    const r = await h.service.resume({ leadId: LEAD, draftId: DRAFT }, RUN);
+    expect(r.outcome).toBe('REVIEWER_BUDGET_BLOCKED');
+    expect(h.calls).toEqual([]);
+  });
+
+  it('accounted failed attempts eventually block the next retry', async () => {
+    const cap = 0.05 + 3 * projected;
+    // Each failed attempt adds its cost to the draft; simulate the running total the DB now holds.
+    const spendAfter = (attempts: number): number => 0.05 + attempts * projected;
+    for (const attempts of [0, 1, 2]) {
+      const h = priced(spendAfter(attempts), cap);
+      expect((await h.service.resume({ leadId: LEAD, draftId: DRAFT }, RUN)).outcome, `attempt ${String(attempts)}`)
+        .toBe('REVIEWED_APPROVED');
+    }
+    // The fourth would push the draft past the cap.
+    const blocked = priced(spendAfter(3), cap);
+    const r = await blocked.service.resume({ leadId: LEAD, draftId: DRAFT }, RUN);
+    expect(r.outcome).toBe('REVIEWER_BUDGET_BLOCKED');
+    expect(blocked.calls).toEqual([]);
+  });
+
+  it('leaves the mock provider free, as everywhere else in the pipeline', async () => {
+    const draft = fixtureWriter('strong English business email');
+    const h = harness({
+      row: { ...rowFor(draft), totalCostUsd: 9_999 },
+      record: debugRecord(draft),
+      config: { maxCostUsdPerLead: 0.0001 },
+    });
+    expect((await h.service.resume({ leadId: LEAD, draftId: DRAFT }, RUN)).outcome).toBe('REVIEWED_APPROVED');
+  });
+});
+
+describe('resume-email-review — the two persistence sinks are independent', () => {
+  const invalid = (): Record<string, unknown> => ({
+    ...approveReview(),
+    problems: Array.from({ length: 21 }, (_, i) => `problem ${String(i)}`),
+  });
+
+  it('writes the local diagnostic BEFORE the database, so a DB outage still leaves evidence', async () => {
+    const h = harness({ rawReview: invalid() });
+    await h.service.resume({ leadId: LEAD, draftId: DRAFT }, RUN);
+    expect(h.order).toEqual(['debug', 'commit']);
+  });
+
+  it('a local diagnostic failure never undoes or obscures successful DB accounting', async () => {
+    const h = harness({ rawReview: invalid(), failDebugWrite: true });
+
+    const r = await h.service.resume({ leadId: LEAD, draftId: DRAFT }, RUN);
+
+    // The determinate outcome is still reported, and the books are still correct.
+    expect(r.outcome).toBe('SCHEMA_INVALID');
+    expect(h.committed).toHaveLength(1);
+    expect(accounting(h.committed[0]!).addCostUsd).toBeCloseTo(0.02, 6);
+    expect(h.diagnostics).toEqual([]);
+    // One paid call, and the diagnostic failure did not cause another.
+    expect(h.calls).toHaveLength(1);
+  });
+
+  it('a DB accounting failure propagates, and the local diagnostic survives it', async () => {
+    const h = harness({ rawReview: invalid(), failCommit: true });
+
+    await expect(h.service.resume({ leadId: LEAD, draftId: DRAFT }, RUN)).rejects.toThrow('database unavailable');
+
+    // Evidence of the paid call exists even though the database rejected the accounting.
+    expect(h.diagnostics).toHaveLength(1);
+    expect(h.diagnostics[0]?.outcome).toBe('SCHEMA_INVALID');
+    expect((h.diagnostics[0]?.review as { issues: unknown[] }).issues.length).toBeGreaterThan(0);
+    // And still exactly one paid call.
+    expect(h.calls).toHaveLength(1);
+  });
+
+  it('both succeeding is the ordinary path', async () => {
+    const h = harness({ rawReview: invalid() });
+    const r = await h.service.resume({ leadId: LEAD, draftId: DRAFT }, RUN);
+    expect(r.outcome).toBe('SCHEMA_INVALID');
+    expect(h.committed).toHaveLength(1);
+    expect(h.diagnostics).toHaveLength(1);
+    expect(h.calls).toHaveLength(1);
+  });
+});
+
+describe('resume-email-review — schema-version provenance', () => {
+  it('records the NEW reviewer call under the current schema version', async () => {
+    const h = harness({ rawReview: { ...approveReview(), problems: Array.from({ length: 21 }, () => 'p') } });
+    await h.service.resume({ leadId: LEAD, draftId: DRAFT }, RUN);
+    expect(accounting(h.committed[0]!).modelCalls[0]?.schemaVersion).toBe(EMAIL_SCHEMA_VERSION);
+  });
+
+  it('never rewrites the schema version the writer recorded on the draft', async () => {
+    // The draft was produced under the OLD provider contract; its provenance must stay truthful.
+    const draft = fixtureWriter('strong English business email');
+    const row = { ...rowFor(draft), schemaVersion: 'email-copy-schema-4', totalCostUsd: 0.05 };
+    const h = harness({ row, record: debugRecord(draft) });
+
+    await h.service.resume({ leadId: LEAD, draftId: DRAFT }, RUN);
+
+    const appended = appendedEmail(h.committed[0]!);
+    expect(appended?.schemaVersion).toBe('email-copy-schema-4');
+    expect(appended?.schemaVersion).not.toBe(EMAIL_SCHEMA_VERSION);
+  });
+
+  it('an in-place recovery writes no schema version at all', async () => {
+    const draft = fixtureWriter('strong English business email');
+    const rendered = renderEmail(draft, { ...emailInputs, threadSubject: INITIAL_SENT_SUBJECT });
+    const row: PersistedDraftRow = {
+      ...rowFor(draft), subject: rendered.subject, body: rendered.body, sequenceStep: 1,
+      outreachRecordId: 'rec-1', threadSubject: rendered.subject, schemaVersion: 'email-copy-schema-4',
+    };
+    const followup = {
+      ...draft,
+      subject_options: [INITIAL_SENT_SUBJECT, INITIAL_SENT_SUBJECT, INITIAL_SENT_SUBJECT],
+      selected_subject: INITIAL_SENT_SUBJECT,
+      selected_subject_reason: 'Thread continuity is preserved.',
+    };
+    const followupRendered = renderEmail(followup, { ...emailInputs, threadSubject: INITIAL_SENT_SUBJECT });
+    const h = harness({
+      row: { ...row, subject: followupRendered.subject, body: followupRendered.body, threadSubject: followupRendered.subject },
+      record: debugRecord(followup),
+    });
+
+    await h.service.resume({ leadId: LEAD, draftId: DRAFT }, RUN);
+
+    const update: Record<string, unknown> = { ...recovery(h.committed[0]!).update };
+    expect(Object.keys(update)).not.toContain('schemaVersion');
+    expect(recovery(h.committed[0]!).modelCalls[0]?.schemaVersion).toBe(EMAIL_SCHEMA_VERSION);
+  });
+});
 
 describe('resume-email-review — a paid reviewer call that yields nothing usable', () => {
   // PRODUCTION: `resume-email-review` returned SCHEMA_INVALID after spending $0.033. Nothing was

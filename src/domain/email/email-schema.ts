@@ -14,7 +14,13 @@ import {
 // Bumped again for the sequence-aware reviewer: four fail-closed sequence-job booleans were added
 // (addsClarityNotRestart, compressedNotExpanded, pressureReduced, binaryReplyClose). Writer output
 // is unchanged.
-export const EMAIL_SCHEMA_VERSION = 'email-copy-schema-4';
+// Bumped a third time when the PROVIDER contract changed materially: the wire schema is now derived
+// from these Zod schemas, so the model is constrained by every representable limit (array bounds,
+// string lengths, the evidence-id count) instead of the permissive hand-written shape that let a
+// response be schema-valid for the provider and invalid locally. The Zod shape itself is unchanged,
+// so old rows still parse — the version exists to tell WHICH provider contract a call was made
+// under. Rows written under the old contract keep their recorded version; nothing is rewritten.
+export const EMAIL_SCHEMA_VERSION = 'email-copy-schema-5';
 
 export const emailWriterSchema = z.object({
   subject_options: z.array(z.string().trim().min(1).max(MAX_SUBJECT_LENGTH)).length(3),
@@ -86,16 +92,26 @@ export type EmailReviewParsed = z.infer<typeof emailReviewSchema>;
  * marker. Those are enforced here rather than assumed — a Zod change that made a field optional
  * would throw at module load instead of silently loosening the wire contract.
  *
+ * FAIL-CLOSED CONVERSION. The conversion runs in Zod's default `unrepresentable: 'throw'` mode. The
+ * permissive alternative (`'any'`) turns anything Zod cannot express into `{}` — a field with NO
+ * constraints at all — which would reintroduce exactly the drift this derivation exists to prevent,
+ * silently. Both current schemas are ordinary object/string/number/array/enum shapes and convert
+ * cleanly, so nothing here needs the escape hatch: if a future construct cannot be represented, this
+ * module throws at import and the schema must be reworked or explicitly handled.
+ *
  * WHAT CANNOT BE EXPRESSED. Zod's `.trim()` runs BEFORE its length checks, so a whitespace-only
- * string satisfies `minLength: 1` on the wire and still fails Zod. JSON Schema cannot express
- * "length after trimming", and a `pattern` keyword is not worth the risk of a provider rejecting
- * the whole schema, so this one difference stays — and is exactly why a schema-invalid reviewer
- * response must remain durably auditable (see `resume-email-review.ts`).
+ * string satisfies `minLength: 1` on the wire and still fails Zod. JSON Schema can express that
+ * shape with a `pattern` (and standard Structured Outputs does support `pattern`, along with the
+ * numeric and array bounds used above — the narrower keyword support applies to fine-tuned models,
+ * which the reviewer is not). It is deliberately NOT used: encoding trim semantics as a regex adds a
+ * wire rule that is easy to get subtly wrong, for one rare failure shape that the local Zod check
+ * already catches and that now leaves a durable, diagnosable record (see `resume-email-review.ts`).
  */
-function providerJsonSchema(schema: z.ZodType, name: string): Record<string, unknown> {
-  const derived = z.toJSONSchema(schema, { io: 'input', unrepresentable: 'any' }) as Record<string, unknown>;
+export function providerJsonSchema(schema: z.ZodType, name: string): Record<string, unknown> {
+  // Default `unrepresentable` behaviour is 'throw' — deliberately not overridden.
+  const derived = z.toJSONSchema(schema, { io: 'input' }) as Record<string, unknown>;
   const { $schema: _dialect, ...rest } = derived;
-  const properties = rest.properties as Record<string, unknown> | undefined;
+  const properties = rest.properties as Record<string, Record<string, unknown>> | undefined;
   if (!properties || Object.keys(properties).length === 0) {
     throw new Error(`${name}: derived provider schema has no properties`);
   }
@@ -103,6 +119,14 @@ function providerJsonSchema(schema: z.ZodType, name: string): Record<string, unk
   const optional = Object.keys(properties).filter((key) => !required.has(key));
   if (optional.length > 0) {
     throw new Error(`${name}: structured outputs require every field; these are optional: ${optional.join(', ')}`);
+  }
+  // Backstop for the same hazard from the other direction: a field that arrives carrying no type
+  // and no enum constrains nothing, however it got that way. Refuse to put it on the wire.
+  const unconstrained = Object.entries(properties)
+    .filter(([, spec]) => spec.type === undefined && spec.enum === undefined && spec.anyOf === undefined)
+    .map(([key]) => key);
+  if (unconstrained.length > 0) {
+    throw new Error(`${name}: these fields would reach the provider unconstrained: ${unconstrained.join(', ')}`);
   }
   return { ...rest, additionalProperties: false };
 }

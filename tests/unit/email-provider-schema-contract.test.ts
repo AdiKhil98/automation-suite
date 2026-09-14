@@ -2,9 +2,11 @@ import { z } from 'zod';
 import { describe, expect, it } from 'vitest';
 import {
   EMAIL_REVIEW_JSON_SCHEMA,
+  EMAIL_SCHEMA_VERSION,
   EMAIL_WRITER_JSON_SCHEMA,
   emailReviewSchema,
   emailWriterSchema,
+  providerJsonSchema,
 } from '../../src/domain/email/email-schema.js';
 import {
   DEMO_ALIGNMENT_RESULTS,
@@ -179,6 +181,58 @@ describe('no drift: every representable Zod constraint reaches the provider', ()
     // durably auditable rather than merely being retried.
     expect(emailReviewSchema.safeParse({ ...validReview(), problems: ['   '] }).success).toBe(false);
     expect(prop(review, 'problems').items?.minLength).toBe(1);
+  });
+});
+
+describe('the derivation is fail-closed: nothing reaches the provider unconstrained', () => {
+  it('refuses a construct JSON Schema cannot represent, instead of emitting a permissive field', () => {
+    // With Zod's permissive mode this becomes `{}` — a field with no constraints whatsoever, which
+    // is precisely the drift the derivation exists to prevent. Strict mode throws instead.
+    const custom = z.object({ a: z.custom<string>(() => true) });
+    expect(() => providerJsonSchema(custom, 'test')).toThrow(/cannot be represented/i);
+  });
+
+  it.each([['any', z.any()], ['unknown', z.unknown()]] as const)(
+    'refuses a %s field, which converts to an unconstrained schema without throwing',
+    (_label, member) => {
+      // Zod converts these silently; the backstop is what stops them reaching the wire.
+      expect(() => providerJsonSchema(z.object({ a: member }), 'test')).toThrow(/unconstrained/i);
+    },
+  );
+
+  it('refuses an optional field, which structured outputs cannot express', () => {
+    const optional = z.object({ a: z.string(), b: z.string().optional() });
+    expect(() => providerJsonSchema(optional, 'test')).toThrow(/require every field/i);
+  });
+
+  it('refuses an empty object', () => {
+    expect(() => providerJsonSchema(z.object({}), 'test')).toThrow(/no properties/i);
+  });
+
+  it('accepts an ordinary representable schema and hardens it', () => {
+    const derived = providerJsonSchema(z.object({ a: z.string().min(1).max(5) }), 'test');
+    expect(derived).toMatchObject({
+      type: 'object',
+      additionalProperties: false,
+      required: ['a'],
+      properties: { a: { type: 'string', minLength: 1, maxLength: 5 } },
+    });
+    // The dialect marker is stripped: structured outputs has no use for it.
+    expect(derived).not.toHaveProperty('$schema');
+  });
+
+  it('the shipped schemas carry no dialect marker either', () => {
+    expect(writer).not.toHaveProperty('$schema');
+    expect(review).not.toHaveProperty('$schema');
+  });
+});
+
+describe('schema version', () => {
+  it('names the CURRENT provider contract, not the permissive one it replaced', () => {
+    // The wire contract changed materially (derived + fully constrained), so a model_call recorded
+    // under it must be distinguishable from one made against the old hand-written schema.
+    expect(EMAIL_SCHEMA_VERSION).toBe('email-copy-schema-5');
+    expect(EMAIL_SCHEMA_VERSION).not.toBe('email-copy-schema-4');
   });
 });
 

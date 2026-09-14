@@ -6,6 +6,9 @@ import { requireIntegrationTestDatabase } from '../support/test-database.js';
 import { buildCandidateLead } from '../../src/domain/leads/lead-factory.js';
 import { EmailWriterService } from '../../src/domain/email/email-writer-service.js';
 import { worstCaseEmailInputTokens } from '../../src/domain/email/email-token-budget.js';
+import { EMAIL_SCHEMA_VERSION } from '../../src/domain/email/email-schema.js';
+import { EMAIL_REVIEWER_PROMPT_VERSION } from '../../src/prompts/email/index.js';
+import { worstCaseCostUsd } from '../../src/integrations/llm/pricing.js';
 import {
   ResumeEmailReviewService,
   type ResumeInputs,
@@ -67,11 +70,12 @@ const REVIEW = (decision: 'APPROVE' | 'REJECT'): Record<string, unknown> => ({
 function provider(
   reviewDecision: 'APPROVE' | 'REJECT',
   rawReviewOverride?: unknown,
+  name = 'mock',
 ): { provider: LlmProvider; calls: LlmRequest[]; writerJson: () => unknown } {
   const calls: LlmRequest[] = [];
   let writerJson: unknown = null;
   const p: LlmProvider = {
-    name: 'mock',
+    name,
     async generate(req: LlmRequest): Promise<LlmResult> {
       calls.push(req);
       let rawJson: unknown;
@@ -189,8 +193,13 @@ describe('resume recovery of a failed follow-up draft (PostgreSQL, migration 004
     return { draftId: rows[0]!.id, writerJson: p.writerJson() };
   }
 
-  function resumeService(writerJson: unknown, decision: 'APPROVE' | 'REJECT' = 'APPROVE', rawReviewOverride?: unknown) {
-    const p = provider(decision, rawReviewOverride);
+  function resumeService(
+    writerJson: unknown,
+    decision: 'APPROVE' | 'REJECT' = 'APPROVE',
+    rawReviewOverride?: unknown,
+    opts: { providerName?: string; maxCostUsdPerLead?: number } = {},
+  ) {
+    const p = provider(decision, rawReviewOverride, opts.providerName);
     const emailRepo = new EmailRepository(handle.db);
     const followupRepo = new FollowupPreparationRepository(handle.db);
     const uow = new DrizzleEmailUnitOfWork(handle.db);
@@ -213,7 +222,8 @@ describe('resume recovery of a failed follow-up draft (PostgreSQL, migration 004
       logger,
       config: {
         reviewerModel: 'gpt-5.6-terra', reviewerEffort: 'medium', store: false, timeoutMs: 1000,
-        maxOutputTokens: 1500, maxRetries: 0, maxCostUsdPerLead: 0.5,
+        maxOutputTokens: 1500, maxRetries: 0,
+        maxCostUsdPerLead: opts.maxCostUsdPerLead ?? 0.5,
         worstCaseInputTokensPerCall: worstCaseEmailInputTokens(),
       },
     });
@@ -467,6 +477,72 @@ describe('resume recovery of a failed follow-up draft (PostgreSQL, migration 004
       expect(slot).toHaveLength(1);
       expect(slot[0]!.status).toBe('REVIEW_FAILED');
       expect(slot[0]!.humanDecision).toBeNull();
+    });
+  });
+
+  describe('schema-version provenance and the cumulative budget', () => {
+    it('records the reviewer call under the current schema while the draft keeps the writer\'s', async () => {
+      const { leadId, recordId } = await seedDueFollowup();
+      const failed = await composeFailedFollowup(leadId, recordId);
+      const before = (await handle.db.select().from(emailDrafts).where(eq(emailDrafts.id, failed.draftId)))[0]!;
+
+      await resumeService(failed.writerJson, 'APPROVE', tooManyProblems()).service
+        .resume({ leadId, draftId: failed.draftId }, await newRun('resume-schema'));
+      await resumeService(failed.writerJson).service
+        .resume({ leadId, draftId: failed.draftId }, await newRun('resume-schema-2'));
+
+      // The draft's writer provenance is never rewritten, not by the failed attempt and not by the
+      // successful in-place recovery.
+      const after = (await handle.db.select().from(emailDrafts).where(eq(emailDrafts.id, failed.draftId)))[0]!;
+      expect(after.schemaVersion).toBe(before.schemaVersion);
+      expect(after.writerPromptVersion).toBe(before.writerPromptVersion);
+      expect(after.writerResponseId).toBe(before.writerResponseId);
+
+      // Both NEW reviewer calls are recorded under the current provider contract.
+      const reviewerCalls = await handle.db.select().from(modelCalls)
+        .where(and(eq(modelCalls.leadId, leadId), eq(modelCalls.purpose, 'email_review')));
+      const resumed = reviewerCalls.filter((c) => c.promptVersion === EMAIL_REVIEWER_PROMPT_VERSION);
+      expect(resumed.length).toBeGreaterThanOrEqual(2);
+      for (const call of resumed) expect(call.schemaVersion).toBe(EMAIL_SCHEMA_VERSION);
+    });
+
+    it('refuses a retry once the accounted spend would breach the per-lead cap', async () => {
+      const { leadId, recordId } = await seedDueFollowup();
+      const failed = await composeFailedFollowup(leadId, recordId);
+      const spent = (await handle.db.select().from(emailDrafts).where(eq(emailDrafts.id, failed.draftId)))[0]!.totalCostUsd;
+      const projected = worstCaseCostUsd('gpt-5.6-terra', worstCaseEmailInputTokens(), 1500)!;
+
+      // A cap that this ONE call fits under, but the draft's accumulated spend does not.
+      const r = resumeService(failed.writerJson, 'APPROVE', undefined, {
+        providerName: 'openai', maxCostUsdPerLead: spent + projected - 0.0001,
+      });
+      const result = await r.service.resume({ leadId, draftId: failed.draftId }, await newRun('resume-budget'));
+
+      expect(result.outcome).toBe('REVIEWER_BUDGET_BLOCKED');
+      expect(r.calls.filter((c) => c.task === 'email_review')).toHaveLength(0);
+
+      // Nothing was spent, nothing was written.
+      const after = (await handle.db.select().from(emailDrafts).where(eq(emailDrafts.id, failed.draftId)))[0]!;
+      expect(after.totalCostUsd).toBeCloseTo(spent, 6);
+      expect(after.status).toBe('REVIEW_FAILED');
+      const slot = await handle.db.select().from(emailDrafts)
+        .where(and(eq(emailDrafts.outreachRecordId, recordId), eq(emailDrafts.sequenceStep, 1)));
+      expect(slot).toHaveLength(1);
+    });
+
+    it('still admits the retry when the cumulative total fits', async () => {
+      const { leadId, recordId } = await seedDueFollowup();
+      const failed = await composeFailedFollowup(leadId, recordId);
+      const spent = (await handle.db.select().from(emailDrafts).where(eq(emailDrafts.id, failed.draftId)))[0]!.totalCostUsd;
+      const projected = worstCaseCostUsd('gpt-5.6-terra', worstCaseEmailInputTokens(), 1500)!;
+
+      const r = resumeService(failed.writerJson, 'APPROVE', undefined, {
+        providerName: 'openai', maxCostUsdPerLead: spent + projected + 0.01,
+      });
+      const result = await r.service.resume({ leadId, draftId: failed.draftId }, await newRun('resume-budget-ok'));
+
+      expect(result.outcome).toBe('REVIEWED_APPROVED');
+      expect(r.calls.filter((c) => c.task === 'email_review')).toHaveLength(1);
     });
   });
 });
