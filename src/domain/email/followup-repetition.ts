@@ -43,20 +43,22 @@ import { RENDER_BOILERPLATE_PHRASES, RENDER_GREETING_WORDS } from './email-rende
 export const REPETITION_LIMITS = {
   /**
    * Longest run of consecutive CONTENT words (stopwords removed) the candidate may share with
-   * something already sent. Measured against real copy: naming the same issue costs two shared
-   * words ("cookie banner", "mobile view"), while the production failure replayed a whole clause —
-   * "patients ... see Accept and Read More" -> four consecutive content words. Four in order is no
-   * longer a shared noun; it is a lifted fragment.
+   * something already sent. Against the authoritative text, naming the same issue costs one or two
+   * shared words and the production rewrite reaches three — it rephrased rather than lifted, and is
+   * caught by the reuse ratio below instead. Four consecutive content words is no longer a shared
+   * noun or a quoted control label; it is a lifted fragment, and the step-2 and step-3
+   * re-explanations measured here reach six and four.
    */
   maxSharedContentRun: 4,
   /**
    * Share of the candidate's content BIGRAMS that already appear in a sent message. Catches a
-   * message reassembled from prior phrasing even when no single run is long. Measured on the same
-   * copy: the production rewrite scored 0.32, while a genuine clarification that names the same
-   * issue scored 0.05 and one that adds a new detail scored 0.00. The threshold sits in that gap,
-   * nearer the safe end.
+   * message reassembled from prior phrasing even when no single run is long, and it is what catches
+   * the production failure: measured against the AUTHORITATIVE stored Outreach #1, that rewrite
+   * scores 0.23 while every legitimate follow-up measured scores 0.06 or less (genuine clarification
+   * 0.05, new-layer 0.00, a step-2 compression and a step-3 close both 0.00). The threshold sits in
+   * the middle of that gap rather than at its edge, so neither side is decided by a hair.
    */
-  maxSharedBigramRatio: 0.20,
+  maxSharedBigramRatio: 0.15,
   /**
    * How many content words the candidate must contribute that were NOT in any sent message. This is
    * the "did the prospect learn anything?" floor, and it is what catches a short "just following up

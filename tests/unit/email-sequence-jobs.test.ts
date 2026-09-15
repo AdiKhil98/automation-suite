@@ -296,9 +296,9 @@ describe('Follow-up #2 clarity contract (production regression)', () => {
   });
 
   it('records the version bump so a stored draft traces to the instructions that produced it', () => {
-    expect(SEQUENCE_JOBS_VERSION).toBe('sequence-jobs-3');
-    expect(EMAIL_WRITER_PROMPT_VERSION).toBe('email-writer-7');
-    expect(EMAIL_REVIEWER_PROMPT_VERSION).toBe('email-reviewer-7');
+    expect(SEQUENCE_JOBS_VERSION).toBe('sequence-jobs-4');
+    expect(EMAIL_WRITER_PROMPT_VERSION).toBe('email-writer-8');
+    expect(EMAIL_REVIEWER_PROMPT_VERSION).toBe('email-reviewer-8');
     // The JSON contract did not change, so the schema version deliberately did not move.
     expect(EMAIL_SCHEMA_VERSION).toBe('email-copy-schema-5');
   });

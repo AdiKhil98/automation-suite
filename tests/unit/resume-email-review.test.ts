@@ -527,7 +527,13 @@ describe('resume-email-review — threaded follow-ups', () => {
 
   /** The persisted row for such a draft: the stored subject already carries its `Re: ` prefix. */
   const followupRow = (draft: EmailWriterOutput, step: 1 | 2 | 3 = 1, over: Partial<PersistedDraftRow> = {}): PersistedDraftRow => {
-    const rendered = renderEmail(draft, { ...emailInputs, threadSubject: THREAD_SUBJECT });
+    // Rendered exactly as production would for THIS step — the final step appends a different,
+    // deterministic closing line, so a row rendered at step 0 would not match on resume.
+    const rendered = renderEmail(
+      draft,
+      { ...emailInputs, threadSubject: THREAD_SUBJECT },
+      { step, threadSubject: THREAD_SUBJECT, priorMessageBodies: [INITIAL_SENT_BODY] },
+    );
     return {
       ...rowFor(draft),
       subject: rendered.subject,

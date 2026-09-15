@@ -18,7 +18,7 @@ import { type SequenceStep } from '../../domain/outreach/sequence.js';
 // angle, same outcome", which invited a reworded copy of Outreach #1 — and produced one in
 // production. Step 1 now has to state what the first email already established and add a
 // materially new layer, and the reviewer judges exactly that.
-export const SEQUENCE_JOBS_VERSION = 'sequence-jobs-3';
+export const SEQUENCE_JOBS_VERSION = 'sequence-jobs-4';
 
 /**
  * The commercial principle that governs every step: we are paid for outcomes, not for tools. Copy
@@ -133,6 +133,9 @@ remove that fear. Make the reply feel binary and effortless — a single word is
   meeting, and no further work required from the recipient.
 - Make it easy and cost-free to say no. Saying no must be an acceptable, stated option.
 - Short. Warm. Final. No pressure, no guilt, no deadline, no last-chance framing.
+- The SYSTEM writes the closing ask for this email — a deterministic yes/no line it appends after
+  your body. Do not write your own ask, and do not end the body with a question: that would leave the
+  recipient with two. Write only the short, warm lead-in that line closes.
 
 ${OUTCOMES_PRINCIPLE}`;
 
@@ -164,6 +167,8 @@ export function subjectInstructionFor(step: SequenceStep, threadSubject: string 
 const REVIEWER_STEP_0 = `SEQUENCE REVIEW — Outreach #1 (internal step 0). Judge whether the email
 earns attention and permission: one evidence-backed observation tied to a useful business outcome,
 no full solution dump, no heavy sales process, concise and specific.
+Every quality dimension applies at this position, including businessRelevanceClear, persuasive,
+sufficientlyPersonalized, singleObservation and confidentObservation.
 The step-specific booleans addsClarityNotRestart, compressedNotExpanded, pressureReduced, and
 binaryReplyClose do NOT apply to a first email — report all four as true.`;
 
@@ -191,7 +196,13 @@ is different rather than at understanding that is new, then addsClarityNotRestar
 - compressedNotExpanded: false when this email is longer or heavier than a first email would be.
 - pressureReduced: false when it applies pressure, urgency, guilt, a deadline, or scarcity, or when
   it asks for more than one simple next action.
-- binaryReplyClose does not apply here — report it as true.`;
+- binaryReplyClose does not apply here — report it as true.
+
+WHAT THIS POSITION IS NOT JUDGED ON. This email does not have to make the business case again: it
+was made in the first email and repeating it is the failure described above. Do NOT lower
+businessRelevanceClear or persuasive because this email does not restate the observation or the
+outcome — those dimensions belong to the first email, and the approval gate does not apply them
+here. Judge clarity, evidence, human style, and low pressure.`;
 
 const REVIEWER_STEP_2 = `SEQUENCE REVIEW — Follow-up #3 (internal step 2). Two emails already went
 out in this thread. Judge the JOB of THIS email: COMPRESS AND REDUCE PRESSURE.
@@ -203,7 +214,13 @@ out in this thread. Judge the JOB of THIS email: COMPRESS AND REDUCE PRESSURE.
   replying feel costly. True when it lowers pressure and signals the nudging is not endless.
 - addsClarityNotRestart: false when it restarts Outreach #1 or re-explains the observation from
   scratch.
-- binaryReplyClose does not apply here — report it as true.`;
+- binaryReplyClose does not apply here — report it as true.
+
+WHAT THIS POSITION IS NOT JUDGED ON. A compression adds no new observation, no new outcome argument
+and no new persuasion, and it is deliberately brief. Do NOT lower businessRelevanceClear, persuasive
+or sufficientlyPersonalized for any of that — none of them apply at this position. Judge whether the
+issue is compressed honestly, the pressure is lower, and the copy stays evidence-bound and human.`;
+
 
 const REVIEWER_STEP_3 = `SEQUENCE REVIEW — Follow-up #4 (internal step 3), the FINAL email. Judge
 the JOB of THIS email: ONE clean YES / NO decision.
@@ -214,7 +231,19 @@ the JOB of THIS email: ONE clean YES / NO decision.
 - pressureReduced: false for any deadline, last-chance framing, scarcity, guilt, or pressure.
 - compressedNotExpanded: false when it reopens the problem, adds another explanation, teaches
   again, introduces more value, or is longer than the previous email.
-- addsClarityNotRestart: false when it re-argues or re-pitches rather than simply closing.`;
+- addsClarityNotRestart: false when it re-argues or re-pitches rather than simply closing.
+
+WHAT THIS POSITION IS NOT JUDGED ON. This email is INSTRUCTED to carry no observation, no
+business-relevance sentence, no outcome argument and no persuasion. Their absence is the job being
+done correctly, not a defect. Do NOT lower businessRelevanceClear, persuasive, sufficientlyPersonalized,
+singleObservation or confidentObservation because they are missing — none of them apply here, the
+approval gate does not require them at this step, and a correct final close must not be rejected for
+lacking what it was told not to write. What still applies: honesty, evidence, human style,
+punctuation, exactly one ask, buyer language, and the four sequence booleans above.
+
+THE ASK IS NOT IN THE BODY. The system appends the closing line shown to you below; the model is
+forbidden from writing its own. Judge binaryReplyClose against THAT appended line together with the
+body — never against the body alone, and never mark the body down for not containing an ask.`;
 
 const REVIEWER_JOBS: Record<SequenceStep, string> = {
   0: REVIEWER_STEP_0, 1: REVIEWER_STEP_1, 2: REVIEWER_STEP_2, 3: REVIEWER_STEP_3,

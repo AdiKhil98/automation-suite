@@ -37,9 +37,10 @@ describe('deterministic anti-repetition gate — the production pair', () => {
   it('REJECTS the exact follow-up #2 that shipped', () => {
     const analysis = analyze(followups.productionRestatement.body);
     expect(analysis.repeats).toBe(true);
-    expect(analysis.reason).toBe('VERBATIM_CLAUSE_REPLAY');
-    // It replayed a whole clause: "patients ... see Accept and Read More".
-    expect(analysis.longestSharedRun).toBeGreaterThanOrEqual(REPETITION_LIMITS.maxSharedContentRun);
+    // Measured against the AUTHORITATIVE stored Outreach #1 it rephrased rather than lifted: no
+    // single clause came back intact, but nearly a quarter of its phrasing did.
+    expect(analysis.reason).toBe('PERVASIVE_PHRASE_REUSE');
+    expect(analysis.sharedBigramRatio).toBeGreaterThanOrEqual(REPETITION_LIMITS.maxSharedBigramRatio);
   });
 
   it('ACCEPTS the kind of clarification that was actually wanted', () => {
@@ -64,14 +65,20 @@ describe('deterministic anti-repetition gate — the production pair', () => {
   });
 
   it('separates the failing and passing cases by a wide margin, not a hair', () => {
-    // The thresholds were set from these measurements, and this records them so a future tweak has
-    // to confront the evidence.
+    // Measured against the authoritative pair. The threshold sits in the MIDDLE of this gap:
+    //   production replay        reuse 0.23
+    //   genuine clarification    reuse 0.05
+    //   new layer, same nouns    reuse 0.00
+    // A future tweak has to confront these numbers.
     const bad = analyze(followups.productionRestatement.body);
-    const good = analyze(followups.genuineClarification.body);
-    const newLayer = analyze(followups.newLayerSameNouns.body);
-    expect(bad.longestSharedRun).toBeGreaterThan(good.longestSharedRun + 1);
-    expect(bad.sharedBigramRatio).toBeGreaterThan(good.sharedBigramRatio + 0.2);
-    expect(newLayer.sharedBigramRatio).toBeLessThan(REPETITION_LIMITS.maxSharedBigramRatio);
+    const legitimate = [
+      analyze(followups.genuineClarification.body),
+      analyze(followups.newLayerSameNouns.body),
+    ];
+    const worstLegitimate = Math.max(...legitimate.map((a) => a.sharedBigramRatio));
+    expect(bad.sharedBigramRatio).toBeGreaterThan(REPETITION_LIMITS.maxSharedBigramRatio + 0.05);
+    expect(worstLegitimate).toBeLessThan(REPETITION_LIMITS.maxSharedBigramRatio - 0.05);
+    for (const analysis of legitimate) expect(analysis.repeats).toBe(false);
   });
 
   it('ignores greetings, CTA boilerplate, signature and the thread subject', () => {
@@ -121,7 +128,7 @@ describe('the gate inside validateEmail', () => {
     expect(result.ok).toBe(false);
     expect(result.violations).toContain('followup_repeats_prior_message');
     // ...with a diagnostic companion naming the rule and the measurement.
-    expect(result.violations.some((v) => v.startsWith('followup_repetition:VERBATIM_CLAUSE_REPLAY:'))).toBe(true);
+    expect(result.violations.some((v) => v.startsWith('followup_repetition:PERVASIVE_PHRASE_REUSE:'))).toBe(true);
   });
 
   it('passes a genuine clarification', () => {
@@ -221,7 +228,7 @@ describe('the policy is step-aware: each follow-up is judged by its own lesson j
   });
 
   it('STEP 1 keeps the full behaviour', () => {
-    expect(analyze(followups.productionRestatement.body).reason).toBe('VERBATIM_CLAUSE_REPLAY');
+    expect(analyze(followups.productionRestatement.body).reason).toBe('PERVASIVE_PHRASE_REUSE');
     expect(analyze(followups.shortNudge.body).reason).toBe('NO_NEW_CONTENT');
     expect(analyze(followups.genuineClarification.body).repeats).toBe(false);
   });

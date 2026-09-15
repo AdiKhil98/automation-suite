@@ -21,8 +21,8 @@ export const EMAIL_RUBRIC_VERSION = 'cold-email-copy-standard-4';
 // because applied to a follow-up they demand exactly the restatement the sequence job forbids.
 // The JSON contract is unchanged, so EMAIL_SCHEMA_VERSION deliberately stays where it is, and drafts
 // written under the old instructions keep the versions they recorded.
-export const EMAIL_WRITER_PROMPT_VERSION = 'email-writer-7';
-export const EMAIL_REVIEWER_PROMPT_VERSION = 'email-reviewer-7';
+export const EMAIL_WRITER_PROMPT_VERSION = 'email-writer-8';
+export const EMAIL_REVIEWER_PROMPT_VERSION = 'email-reviewer-8';
 
 export { SEQUENCE_JOBS_VERSION };
 
@@ -346,7 +346,17 @@ export function buildEmailReviewerMessages(
   brief: EmailBrief,
   draft: EmailWriterParsed,
   seq: SequenceContext = INITIAL_SEQUENCE_CONTEXT,
+  finalCtaSentence: string | null = null,
 ): { system: string; user: string } {
+  // The reviewer judges the EFFECTIVE message. The model never writes the ask — the system appends a
+  // deterministic one — so without this the reviewer would be judging a body whose call to action it
+  // cannot see, and `binaryReplyClose` at the final step would be a guess about text the model was
+  // forbidden to write.
+  const cta = finalCtaSentence === null ? '' : `
+
+THE SYSTEM WILL APPEND EXACTLY THIS CLOSING LINE TO THE BODY (the recipient sees it; the model did
+not write it and must not duplicate it):
+${finalCtaSentence}`;
   return {
     system: reviewerSystem(seq),
     user: `Review this draft against the exact evidence, the approved-demo bindings, and its position in the sequence.
@@ -354,6 +364,6 @@ export function buildEmailReviewerMessages(
 ${serializeBrief(brief)}${serializeSequence(seq)}
 
 PROPOSED EMAIL:
-${JSON.stringify(draft, null, 2)}`,
+${JSON.stringify(draft, null, 2)}${cta}`,
   };
 }

@@ -444,6 +444,34 @@ and a rejection with no recorded decision time fails closed. No writer call happ
 preparation runs, and migration 0044's index allows the new draft because REJECTED rows are excluded
 from it.
 
+## What each sequence position is actually judged on
+
+Every email in the sequence has a different job, so the deterministic rules and the approval gate are
+per step, not global. Safety, honesty and style never move.
+
+| | step 0 Outreach #1 | step 1 Follow-up #2 | step 2 Follow-up #3 | step 3 Follow-up #4 |
+|---|---|---|---|---|
+| job | earn attention | add clarity | compress, reduce pressure | binary yes/no close |
+| paragraphs | 2-4 | 1-3 | 1-2 | 1-2 |
+| replay refused | n/a | yes | yes | yes |
+| new content required | n/a | yes | no | no |
+| body states observation / relevance / outcome | required | not required | not required | forbidden |
+| reviewer: businessRelevanceClear, persuasive | required | not applied | not applied | not applied |
+| reviewer: sufficientlyPersonalized | required | required | not applied | not applied |
+| reviewer: singleObservation, confidentObservation | required | required | required | not applied |
+| rendered CTA | "reply and I will share the details" | same | same | deterministic binary close |
+| VIEW_CONCEPT allowed | yes | yes | yes | **no** |
+
+Universal at every step, fail-closed: `decision=APPROVE`, no fabrication risk, evidence supports
+every claim, urgency supported, competitor claims supported, human style, punctuation, exactly one
+primary CTA, buyer language, conversation-not-audit, demo alignment, non-generic opening, plus the
+sequence-job booleans for that step.
+
+The final ask is written by the SYSTEM, not the model — the copy standard forbids a CTA in the body,
+so a step-3 model writing its own close would create two asks. The reviewer is shown the exact
+sentence that will be appended, so `binaryReplyClose` is judged against the message the recipient
+actually receives.
+
 ## Controlled first-follow-up validation
 
 **The point of no return is the SCHEDULE stage.** Dispatch requires `leads.status='SCHEDULED'` AND an

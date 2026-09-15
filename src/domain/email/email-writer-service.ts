@@ -19,9 +19,17 @@ import { type LeadStatus } from '../leads/status.js';
 import { type NewPipelineEvent } from '../pipeline/pipeline-event.js';
 import { EMAIL_SCHEMA_VERSION, EMAIL_REVIEW_JSON_SCHEMA, EMAIL_WRITER_JSON_SCHEMA, emailReviewSchema, emailWriterSchema } from './email-schema.js';
 import { buildEmailBrief } from './email-brief.js';
-import { buildEmailContext, type EmailDemoMeta, type EmailFinding, type EmailInputs, type EmailRecipientContext, renderEmail } from './email-render.js';
+import {
+  buildEmailContext,
+  ctaSentenceFor,
+  type EmailDemoMeta,
+  type EmailFinding,
+  type EmailInputs,
+  type EmailRecipientContext,
+  renderEmail,
+} from './email-render.js';
 import { EMAIL_WRITER_RULES_VERSION, type EmailStatus } from './email-types.js';
-import { type EmailSequencePosition } from './email-types.js';
+import { INITIAL_EMAIL_SEQUENCE, type EmailSequencePosition } from './email-types.js';
 import { validateEmail } from './email-validation.js';
 import { isEmailReviewApprovable } from './email-review-gate.js';
 
@@ -331,14 +339,18 @@ export class EmailWriterService {
     if (!check.ok) {
       wRec.validationViolations = check.violations;
       const p = this.buildPersist(input, draft, null, 'REVIEW_FAILED', 'EMAIL_REVIEW_FAILED', emailInputs, wRes, null, cost, modelCalls,
-        undefined, seq.step, input.outreachRecordId ?? null);
+        renderEmail(draft, emailInputs, position), seq.step, input.outreachRecordId ?? null);
       await recordDebug('VALIDATION_FAILED', draft, null, check.violations);
       return finish('VALIDATION_FAILED', p);
     }
 
     // ---- Independent adversarial reviewer ----
     if (!canCall(c.reviewerModel)) return finish('BUDGET_BLOCKED', failPersist('EMAIL_REVIEW_FAILED'));
-    const rMsgs = buildEmailReviewerMessages(brief, draft, seq);
+    const rMsgs = buildEmailReviewerMessages(
+      brief, draft, seq,
+      // The exact sentence the renderer will append, so the reviewer judges the effective message.
+      ctaSentenceFor(ctx.language, draft.primary_cta, seq.step),
+    );
     const rRes = await this.deps.provider.generate({
       task: 'email_review', system: rMsgs.system, user: rMsgs.user, images: [], outputSchema: EMAIL_REVIEW_JSON_SCHEMA,
       schemaName: 'email_review', model: c.reviewerModel, reasoningEffort: c.reviewerEffort, store: c.store, timeoutMs: c.timeoutMs,
@@ -372,7 +384,7 @@ export class EmailWriterService {
     }
 
     // ---- Approved: render + route ----
-    const rendered = renderEmail(draft, emailInputs);
+    const rendered = renderEmail(draft, emailInputs, position);
     const route: LeadStatus = rendered.hasDemoUrlPlaceholder ? 'WAITING_FOR_DEMO_URL' : 'READY_FOR_HUMAN_APPROVAL';
     const outcome: EmailOutcome = rendered.hasDemoUrlPlaceholder ? 'APPROVED_WAITING_URL' : 'APPROVED_READY';
     const p = this.buildPersist(input, draft, review, 'APPROVED', route, emailInputs, wRes, rRes, cost, modelCalls, rendered,
@@ -392,7 +404,7 @@ export class EmailWriterService {
     rRes: LlmResult | null,
     cost: number,
     modelCalls: EmailModelCall[],
-    rendered = renderEmail(draft, emailInputs),
+    rendered = renderEmail(draft, emailInputs, INITIAL_EMAIL_SEQUENCE),
     sequenceStep: SequenceStep = 0,
     outreachRecordId: string | null = null,
   ): EmailPersist {

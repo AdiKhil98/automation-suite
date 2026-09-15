@@ -7,6 +7,7 @@ import {
 } from './email-types.js';
 import { type EmailLanguage, hasForeignLanguage } from './email-language.js';
 import { analyzeFollowupRepetition } from './followup-repetition.js';
+import { FINAL_FOLLOWUP_STEP, type SequenceStep } from '../outreach/sequence.js';
 
 export interface EmailValidationContext {
   availableEvidenceIds: Set<string>;
@@ -183,6 +184,46 @@ function validateSubjects(
 }
 
 /**
+ * CTA COMPATIBILITY WITH THE SEQUENCE POSITION.
+ *
+ * The FINAL email closes the sequence with one clean yes/no decision, and the renderer appends a
+ * deterministic binary sentence for exactly that. A demo link at that position asks for something
+ * else entirely — it reopens the conversation the email exists to close — so `VIEW_CONCEPT` is
+ * refused there outright rather than silently rendered as something it is not.
+ *
+ * Steps 1 and 2 get no extra CTA rule: their lesson jobs say nothing about which ask is appropriate
+ * beyond the single-CTA requirement every step already carries, and inventing one here would be a
+ * rule with no source. The "no second ask in the body" constraint is enforced globally by
+ * `cta_in_model_body`, which is why the deterministic close cannot collide with a model-written one.
+ */
+function validateSequenceCta(out: EmailWriterOutput, sequence: EmailSequencePosition): string[] {
+  if (sequence.step === FINAL_FOLLOWUP_STEP && out.primary_cta !== 'REPLY_FOR_DETAILS') {
+    return [`final_step_requires_binary_reply_cta:${out.primary_cta}`];
+  }
+  return [];
+}
+
+/**
+ * How many paragraphs each position may have. A cold email needs room to make its case; a follow-up
+ * does not, and two of them are explicitly supposed to shrink. Requiring 2-4 paragraphs everywhere
+ * was a first-email assumption that deterministically rejected copy doing its own job: Follow-up #3
+ * compresses to "ideally one or two short sentences" and Follow-up #4 is a shorter final close.
+ *
+ * The MAXIMUM word count and every safety rule stay global and unchanged — this loosens structure
+ * for the steps whose job is to be shorter, never the limits that keep copy honest.
+ */
+const PARAGRAPH_SHAPE: Record<SequenceStep, { min: number; max: number }> = {
+  // Outreach #1: observation, why it matters, and the ask — the classic shape.
+  0: { min: 2, max: 4 },
+  // Follow-up #2 adds one clarity layer; it may be a single tight paragraph.
+  1: { min: 1, max: 3 },
+  // Follow-up #3 compresses. Two paragraphs is already generous.
+  2: { min: 1, max: 2 },
+  // Follow-up #4 closes. One or two short paragraphs, nothing more.
+  3: { min: 1, max: 2 },
+};
+
+/**
  * A follow-up may REFERENCE what came before; it may not REPLAY it. Deterministic, model-free
  * comparison against the bodies already sent in this thread, refused before the reviewer is ever
  * called. Which checks apply depends on the step's lesson job — step 1 must add clarity, while a
@@ -235,10 +276,14 @@ export function validateEmail(out: EmailWriterOutput, ctx: EmailValidationContex
 
   violations.push(...validateSubjects(out, subjects, ctx.sequence));
   violations.push(...validateFollowupDoesNotReplay(body, ctx.sequence));
+  violations.push(...validateSequenceCta(out, ctx.sequence));
   if (out.genericity_score > 40) violations.push(`genericity_score_too_high:${String(out.genericity_score)}`);
 
   const paragraphs = body.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
-  if (paragraphs.length < 2 || paragraphs.length > 4) violations.push(`unnatural_paragraph_count:${String(paragraphs.length)}`);
+  const shape = PARAGRAPH_SHAPE[ctx.sequence.step];
+  if (paragraphs.length < shape.min || paragraphs.length > shape.max) {
+    violations.push(`unnatural_paragraph_count:${String(paragraphs.length)}`);
+  }
   if (wordCount(body) > MAX_EMAIL_WORDS) violations.push(`body_too_long:${String(wordCount(body))}`);
   if (GENERIC_OPENING_RE.test(paragraphs[0] ?? '')) violations.push('generic_opening');
 

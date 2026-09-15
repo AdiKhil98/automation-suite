@@ -6,25 +6,22 @@
  * true, addsClarityNotRestart true) — and was rejected in human review because it restated the first
  * email instead of adding clarity.
  *
- * PROVENANCE OF EACH HALF — they are NOT equally authoritative:
+ * PROVENANCE. Both halves are EXACT production text:
  *
- *   Follow-up #2  EXACT. The generated body was supplied verbatim and is reproduced here unchanged.
- *                 This is the text that must never pass again.
+ *   Outreach #1   the stored `outreach_messages.body` for outreach record
+ *                 2ee435d5-6691-40fc-a238-00fcfda58585, supplied verbatim.
+ *   Follow-up #2  the generated body that shipped, supplied verbatim. This is the text that must
+ *                 never pass again.
  *
- *   Outreach #1   RECONSTRUCTED. Only the CORE WORDING of the initial email was supplied ("in
- *                 substance"); its exact stored text was not. The body below is built from that core
- *                 wording and is good enough to exercise the comparison, but it is not a claim about
- *                 what was actually sent. Replace it with the authoritative
- *                 `outreach_messages.body` for outreach record 2ee435d5 when that is available —
- *                 see INITIAL_BODY_PROVENANCE and the REPLACE-ME marker below. Nothing else in this
- *                 file needs to change when it is.
+ * The repetition thresholds in `followup-repetition.ts` were measured against exactly this pair.
+ * Editing either body invalidates those measurements.
  *
  * The prior message is stored as a RENDERED email (greeting, CTA sentence, signoff) because that is
  * what `outreach_messages` holds, and therefore what the gate really compares against.
  */
 
-/** Stated explicitly so no reader mistakes the reconstruction for the stored original. */
-export const INITIAL_BODY_PROVENANCE = 'RECONSTRUCTED_FROM_SUPPLIED_CORE_WORDING' as const;
+/** Both bodies are the stored production text, not a reconstruction. */
+export const INITIAL_BODY_PROVENANCE = 'EXACT_STORED_OUTREACH_MESSAGE' as const;
 
 export interface FollowupFixture {
   /** What the fixture demonstrates, for failure output. */
@@ -32,20 +29,24 @@ export interface FollowupFixture {
   body: string;
 }
 
-const RENDERED = (core: string): string =>
-  ['Hello,', '', core, '', 'If this is relevant, reply and I will share the details.', '', 'Best regards,', '{{SENDER_NAME}}'].join('\n');
 
 export const FOLLOWUP_REPETITION_FIXTURES = {
   initial: {
     subject: 'Something I noticed on Complete Dentistry’s mobile site',
     provenance: INITIAL_BODY_PROVENANCE,
-    // REPLACE-ME: swap this reconstruction for the authoritative stored body when it is provided.
-    // Do not edit the wording otherwise — the thresholds were measured against exactly this text.
-    body: RENDERED([
-      'The cookie banner covers part of the introductory copy on mobile. Patients can only see Accept and Read More.',
+    /** Verbatim `outreach_messages.body`. Do not edit: the thresholds are measured against it. */
+    body: [
+      'Hello,',
       '',
-      'That creates friction while they are first trying to understand the practice.',
-    ].join('\n')),
+      'On Complete Dentistry’s mobile homepage, the cookie banner covers part of the introductory copy and shows only the Accept and Read More controls, with no visible way to close or defer it.',
+      '',
+      'That matters because patients encounter the banner while they are first trying to understand the practice.',
+      '',
+      'If this is relevant, reply and I will share the details.',
+      '',
+      'Best regards,',
+      '{{SENDER_NAME}}',
+    ].join('\n'),
   },
   followups: {
     /** EXACTLY what production generated. It must never pass again. */
@@ -61,7 +62,7 @@ export const FOLLOWUP_REPETITION_FIXTURES = {
     genuineClarification: {
       label: 'clarifies what was meant and offers the captured screenshot',
       body: [
-        "Just to clarify what I meant in my last note: the issue isn't the cookie banner itself — it's that, on the mobile view I captured, it competes with the first information a new patient is trying to read about the practice.",
+        "Just to clarify what I meant in my last note: the issue isn't the cookie banner itself. On the mobile view I captured, it competes with the first information a new patient is trying to read about the practice.",
         '',
         'If useful, I can send the exact screenshot.',
       ].join('\n'),
@@ -98,7 +99,7 @@ export const FOLLOWUP_REPETITION_FIXTURES = {
     validBinaryClose: {
       label: 'step 3: binary close, no new information by design',
       body: [
-        'I will leave this with you — a yes or a no is a complete answer, and no is completely fine.',
+        'I will leave this with you. A yes or a no is a complete answer, and no is completely fine.',
         '',
         'Either way, I will not keep nudging.',
       ].join('\n'),

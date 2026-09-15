@@ -6,6 +6,35 @@ All notable changes per phase. Format loosely follows Keep a Changelog.
 
 ### Fixed
 
+- **Deterministic validation carried first-email assumptions into every follow-up.** Three of them,
+  each of which deterministically rejected copy doing exactly what its lesson job asks:
+  * PARAGRAPHS. 2-4 paragraphs were required everywhere. Follow-up #3 compresses to "ideally one or
+    two short sentences" and Follow-up #4 is a shorter close. The shape is now per step
+    (0: 2-4, 1: 1-3, 2: 1-2, 3: 1-2); the word cap and every safety rule stay global.
+  * REVIEWER GATE. `businessRelevanceClear`, `persuasive`, `sufficientlyPersonalized`,
+    `singleObservation` and `confidentObservation` were required at every step, so a CORRECT
+    Follow-up #4 — instructed to carry no observation, no relevance sentence and no persuasion —
+    could be rejected for lacking what it was told not to write. Dimensions are now classified once,
+    as data, in an explicit matrix: universal safety/honesty/style always applies; copy-job quality
+    applies only where that job does. The reviewer rubric tells each step the same thing.
+  * FINAL CTA. The renderer appended "reply and I will share the details" at every step, which asks
+    for a conversation at the position whose job is to close one. Follow-up #4 now renders a
+    deterministic binary close ("...reply yes. If not, no is a complete answer."). The model
+    contract is unchanged — step 3 still emits REPLY_FOR_DETAILS and still must not write its own
+    ask — and `VIEW_CONCEPT` at the final step is now refused outright
+    (`final_step_requires_binary_reply_cta`).
+- **The reviewer judged a body whose ask it could not see.** The CTA is appended after generation, so
+  `binaryReplyClose` was a guess about text the model was forbidden to write. The exact sentence the
+  renderer will append is now included in the reviewer prompt, and the step-3 rubric says to judge
+  the close against it rather than against the body alone.
+- Repetition thresholds RECALIBRATED against the authoritative stored Outreach #1 (the fixture was
+  previously a reconstruction). The production Follow-up #2 measures `run=3, reuse=0.23` — it
+  rephrased rather than lifted — while every legitimate follow-up measured scores 0.06 or less, so
+  `maxSharedBigramRatio` moved 0.20 -> 0.15, into the middle of that gap instead of its edge.
+  `maxSharedContentRun` (4) and `minNovelContentTokens` (4) are unchanged and still justified: the
+  step-2 and step-3 re-explanations reach runs of 6 and 4, and the bare nudge contributes 2 novel
+  words against a floor of 4.
+
 - **Follow-up #2 could restate Outreach #1 and be approved.** The step-1 writer job ended with
   "Preserve continuity with the original email: same observation, same angle, same outcome" — an
   instruction a model satisfies by rewriting the first email, and in production one did: the same
@@ -51,7 +80,7 @@ All notable changes per phase. Format loosely follows Keep a Changelog.
   release from them, and the outcome REQUIREMENT is separated from the outcome GUARDRAIL (never sell
   the tool, never invent a number), which stays global along with all safety, evidence, fabrication
   and style rules.
-- Prompt versions bumped (`sequence-jobs-3`, `email-writer-7`, `email-reviewer-7`). The JSON contract
+- Prompt versions bumped (`sequence-jobs-4`, `email-writer-8`, `email-reviewer-8`). The JSON contract
   did not change, so `EMAIL_SCHEMA_VERSION` deliberately stays at `email-copy-schema-5`, and drafts
   written under the old instructions keep the versions they recorded.
 
