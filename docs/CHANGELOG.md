@@ -27,11 +27,31 @@ All notable changes per phase. Format loosely follows Keep a Changelog.
 - **A rejected follow-up could not be regenerated.** Rejecting step-1 copy correctly returns the lead
   to SENT and cancels the pending row, but the preparation runner then treated that rejection as
   applying to any FUTURE row for the same step: re-scheduling step 1 — the only way to ask for
-  replacement copy — was cancelled again on the next timer fire. A rejection older than the pending
-  row is now recognised as a previous attempt, so the rescheduled step composes fresh copy. The
-  rejected draft is never touched and migration 0044 is unchanged: its partial index already excludes
-  REJECTED rows, so the replacement occupies the slot legally.
-- Prompt versions bumped (`sequence-jobs-2`, `email-writer-6`, `email-reviewer-6`). The JSON contract
+  replacement copy — was cancelled again on the next timer fire. A pending row scheduled strictly
+  AFTER the human rejection is now recognised as a deliberate replacement request, so the rescheduled
+  step composes fresh copy. Eligibility is decided by `email_drafts.human_reviewed_at` — the rejection
+  is the causal event, and comparing draft CREATION time would misread the ordinary
+  compose -> schedule -> reject order as a stale rejection. A REJECTED draft with no recorded review
+  time fails closed. The rejected draft is never touched and migration 0044 is unchanged: its partial
+  index already excludes REJECTED rows, so the replacement occupies the slot legally.
+- The deterministic gate is now STEP-AWARE. It never claimed to, but it did require new content from
+  every follow-up — which contradicts two of the three lesson jobs: Follow-up #3 compresses and
+  Follow-up #4 closes, and neither may add value. Replay detection applies at every follow-up step;
+  the novelty floor belongs to step 1 alone.
+- A follow-up composed with NO prior sent message now fails closed (`followup_prior_messages_missing`)
+  instead of silently skipping the comparison it could not perform.
+- Rendered NAMED greetings ("Hello Dr Richard,") are stripped before comparison. They were not, because
+  a named greeting cannot be matched as a fixed phrase; the greeting LINE is now removed by shape,
+  derived from the renderer's own greeting words and referencing no prospect name.
+- **The global copy standard contradicted the follow-up jobs.** "Start email_body with a verified
+  observation", "explain why the issue matters", "state the business relevance" and "connect the
+  observation to ONE outcome" were sent to every step. They are right for Outreach #1 and demand
+  exactly the restatement the follow-up jobs forbid — a second, independent cause of the production
+  failure. Those copy-JOB requirements now belong to step 0 alone; each follow-up receives an explicit
+  release from them, and the outcome REQUIREMENT is separated from the outcome GUARDRAIL (never sell
+  the tool, never invent a number), which stays global along with all safety, evidence, fabrication
+  and style rules.
+- Prompt versions bumped (`sequence-jobs-3`, `email-writer-7`, `email-reviewer-7`). The JSON contract
   did not change, so `EMAIL_SCHEMA_VERSION` deliberately stays at `email-copy-schema-5`, and drafts
   written under the old instructions keep the versions they recorded.
 

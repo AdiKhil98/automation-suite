@@ -105,7 +105,7 @@ describe('paid-LLM guarantee — the model is reached only for a genuinely due f
   it('makes ZERO model calls when copy already exists (repeat timer fire)', async () => {
     for (const decision of [null, 'APPROVED', 'REJECTED']) {
       // createdAt AFTER the pending row: this draft belongs to the row in front of the runner.
-      const h = harness({ candidates: [candidate({ existingDraft: { id: 'e1', humanDecision: decision, createdAtMs: 2_000 } })] });
+      const h = harness({ candidates: [candidate({ existingDraft: { id: 'e1', humanDecision: decision, humanReviewedAtMs: 2_000 } })] });
       await runFollowupPreparation(h.deps);
       expect(h.composeCalls).toEqual([]);
     }
@@ -121,7 +121,7 @@ describe('paid-LLM guarantee — the model is reached only for a genuinely due f
     const h = harness({
       candidates: [
         candidate({ leadId: 'suppressed', recordStatus: 'REPLIED_NEUTRAL' }),
-        candidate({ leadId: 'already', existingDraft: { id: 'e1', humanDecision: null, createdAtMs: 2_000 } }),
+        candidate({ leadId: 'already', existingDraft: { id: 'e1', humanDecision: null, humanReviewedAtMs: 2_000 } }),
         candidate({ leadId: 'wrong-state', leadStatus: 'DRAFT_CREATED' }),
         candidate({ leadId: 'eligible' }),
       ],

@@ -36,10 +36,17 @@ const ctx = (sequence: EmailSequencePosition): EmailValidationContext => ({
   language: 'en',
 });
 
+/**
+ * A follow-up always continues a thread that already contains at least the initial email, so these
+ * subject-rule tests supply one. Without it the validator correctly reports
+ * `followup_prior_messages_missing` — a different rule, tested in followup-repetition.test.ts.
+ */
+const PRIOR_SENT_BODY = 'Hello,\n\nThe contact action is hard to find on a phone.\n\nBest regards,\n{{SENDER_NAME}}';
+
 const followup = (
   step: SequenceStep,
   threadSubject: string | null,
-  priorMessageBodies: readonly string[] = [],
+  priorMessageBodies: readonly string[] = [PRIOR_SENT_BODY],
 ): EmailValidationContext => ctx({ step, threadSubject, priorMessageBodies });
 
 /** The writer output shape a correctly-behaved follow-up produces: the thread subject, three times. */

@@ -3,6 +3,7 @@ import {
   analyzeFollowupRepetition,
   contentTokens,
   REPETITION_LIMITS,
+  repetitionPolicyFor,
 } from '../../src/domain/email/followup-repetition.js';
 import { type EmailValidationContext, validateEmail } from '../../src/domain/email/email-validation.js';
 import { INITIAL_EMAIL_SEQUENCE, type EmailWriterOutput } from '../../src/domain/email/email-types.js';
@@ -29,8 +30,8 @@ import { FOLLOWUP_REPETITION_FIXTURES } from '../fixtures/followup-clarity.js';
 
 const { initial, followups } = FOLLOWUP_REPETITION_FIXTURES;
 
-const analyze = (body: string, priorBodies: readonly string[] = [initial.body]) =>
-  analyzeFollowupRepetition({ candidateBody: body, priorBodies, threadSubject: initial.subject });
+const analyze = (body: string, priorBodies: readonly string[] = [initial.body], step = 1) =>
+  analyzeFollowupRepetition({ step, candidateBody: body, priorBodies, threadSubject: initial.subject });
 
 describe('deterministic anti-repetition gate — the production pair', () => {
   it('REJECTS the exact follow-up #2 that shipped', () => {
@@ -128,13 +129,25 @@ describe('the gate inside validateEmail', () => {
     expect(result.violations).not.toContain('followup_repeats_prior_message');
   });
 
-  it.each([2, 3] as const)('applies to step %i as well, against everything already sent', (step) => {
+  it.each([2, 3] as const)('still refuses a straight replay at step %i', (step) => {
     const prior = [initial.body, followups.genuineClarification.body];
-    // Replaying the SECOND email is as bad as replaying the first.
+    // Replaying the SECOND email is as bad as replaying the first, at every follow-up position.
     const replay = validateEmail(writer(followups.genuineClarification.body), ctx(step, prior));
     expect(replay.violations).toContain('followup_repeats_prior_message');
-    const fresh = validateEmail(writer(followups.newLayerSameNouns.body), ctx(step, prior));
-    expect(fresh.violations).not.toContain('followup_repeats_prior_message');
+  });
+
+  it('fails closed when a follow-up arrives with no prior message to compare against', () => {
+    // A follow-up continues a thread that already contains at least the initial email. An empty list
+    // means the check could not be performed, and an unperformed check must not read as a pass.
+    const result = validateEmail(writer(followups.genuineClarification.body), ctx(1, []));
+    expect(result.ok).toBe(false);
+    expect(result.violations).toContain('followup_prior_messages_missing');
+    expect(result.violations).not.toContain('followup_repeats_prior_message');
+  });
+
+  it('a first email is never asked for prior messages', () => {
+    expect(validateEmail(writer(followups.genuineClarification.body), ctx(0, [])).violations)
+      .not.toContain('followup_prior_messages_missing');
   });
 
   it('never applies to a first email', () => {
@@ -155,6 +168,84 @@ describe('the gate inside validateEmail', () => {
     const before = validateEmail(writer(followups.shortNudge.body), ctx(1, [initial.body]));
     const again = validateEmail(writer(followups.shortNudge.body), ctx(1, [initial.body]));
     expect(again.violations).toEqual(before.violations);
+  });
+});
+
+
+describe('the policy is step-aware: each follow-up is judged by its own lesson job', () => {
+  it('asks only step 1 for new content', () => {
+    expect(repetitionPolicyFor(1).requireNovelty).toBe(true);
+    expect(repetitionPolicyFor(2).requireNovelty).toBe(false);
+    expect(repetitionPolicyFor(3).requireNovelty).toBe(false);
+    // Replay is wrong at every follow-up position.
+    for (const step of [1, 2, 3]) {
+      expect(repetitionPolicyFor(step).detectClauseReplay).toBe(true);
+      expect(repetitionPolicyFor(step).detectPervasiveReuse).toBe(true);
+    }
+  });
+
+  it('STEP 2: a legitimate compression passes, even though it adds nothing', () => {
+    // Step 2's job is COMPRESS AND REDUCE PRESSURE. Requiring new content here would
+    // deterministically reject copy doing exactly what the lesson asks.
+    const analysis = analyze(followups.validCompression.body, [initial.body], 2);
+    expect(analysis.repeats).toBe(false);
+    expect(analysis.policy.requireNovelty).toBe(false);
+  });
+
+  it('the novelty floor is what separates the steps, and only step 1 pays it', () => {
+    // The same bare nudge: a failure at step 1, where the job is to ADD CLARITY, and acceptable at
+    // steps 2 and 3, whose jobs are to compress and to close. This is the whole policy difference.
+    expect(analyze(followups.shortNudge.body, [initial.body], 1)).toMatchObject({
+      repeats: true, reason: 'NO_NEW_CONTENT',
+    });
+    for (const step of [2, 3]) {
+      expect(analyze(followups.shortNudge.body, [initial.body], step).repeats, `step ${String(step)}`).toBe(false);
+    }
+  });
+
+  it('STEP 2: re-explaining the whole argument still fails', () => {
+    const analysis = analyze(followups.step2Reexplanation.body, [initial.body], 2);
+    expect(analysis.repeats).toBe(true);
+    expect(analysis.reason).toBe('VERBATIM_CLAUSE_REPLAY');
+  });
+
+  it('STEP 3: a clean binary close passes, carrying no new business information', () => {
+    const analysis = analyze(followups.validBinaryClose.body, [initial.body], 3);
+    expect(analysis.repeats).toBe(false);
+    expect(analysis.policy.requireNovelty).toBe(false);
+  });
+
+  it('STEP 3: reopening and re-explaining the pitch still fails', () => {
+    const analysis = analyze(followups.step3Reexplanation.body, [initial.body], 3);
+    expect(analysis.repeats).toBe(true);
+  });
+
+  it('STEP 1 keeps the full behaviour', () => {
+    expect(analyze(followups.productionRestatement.body).reason).toBe('VERBATIM_CLAUSE_REPLAY');
+    expect(analyze(followups.shortNudge.body).reason).toBe('NO_NEW_CONTENT');
+    expect(analyze(followups.genuineClarification.body).repeats).toBe(false);
+  });
+});
+
+describe('rendered boilerplate never counts as repeated copy', () => {
+  it('strips a NAMED greeting, not just the neutral one', () => {
+    // "Hello Dr Richard," cannot be matched as a fixed phrase — the name is lead data — so the
+    // greeting LINE is removed by shape. No prospect name is referenced anywhere in the gate.
+    const named = ['Hello Dr Richard,', '', 'The banner only clears after a tap.'].join('\n');
+    expect(contentTokens(named, null)).not.toContain('richard');
+    expect(contentTokens(named, null)).not.toContain('hello');
+    expect(contentTokens(named, null)).toContain('banner');
+  });
+
+  it('a shared greeting cannot push a message over a threshold', () => {
+    const withNeutral = ['Hello,', '', followups.validBinaryClose.body].join('\n');
+    const withNamed = ['Hello Dr Richard,', '', followups.validBinaryClose.body].join('\n');
+    const bare = analyze(followups.validBinaryClose.body, [initial.body], 3);
+    for (const variant of [withNeutral, withNamed]) {
+      const analysis = analyze(variant, [initial.body], 3);
+      expect(analysis.longestSharedRun).toBe(bare.longestSharedRun);
+      expect(analysis.repeats).toBe(false);
+    }
   });
 });
 

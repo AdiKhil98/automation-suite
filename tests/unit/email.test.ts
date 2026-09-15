@@ -621,8 +621,16 @@ describe('EmailWriterService — threaded follow-up composition (production regr
   // having already paid for the writer call and never reaching the reviewer.
   const THREAD_SUBJECT = 'Something I noticed on Complete Dentistry’s mobile site';
 
+  // A follow-up continues a thread that already holds the initial email; validation now refuses a
+  // follow-up composed without one (`followup_prior_messages_missing`).
+  const PRIOR_SENT = {
+    sequenceStep: 0,
+    subject: THREAD_SUBJECT,
+    body: 'Hello,\n\nThe contact action is hard to find on a phone.\n\nBest regards,\n{{SENDER_NAME}}',
+  };
+
   const followupInput = (step: 1 | 2 | 3 = 1) => serviceInput({
-    sequence: { step, threadSubject: THREAD_SUBJECT, priorMessages: [] },
+    sequence: { step, threadSubject: THREAD_SUBJECT, priorMessages: [PRIOR_SENT] },
     outreachRecordId: 'rec-1',
   });
 

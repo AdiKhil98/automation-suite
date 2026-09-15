@@ -108,8 +108,19 @@ export const RENDER_BOILERPLATE_PHRASES: readonly string[] = [
   ...Object.values(SIGNOFF_TEXT),
   ...Object.values(CTA_SENTENCE).flatMap((byCta) => Object.values(byCta)),
   SENDER_NAME_TOKEN,
-  // The named greeting is a prefix; the name itself is a lead fact, not repeated copy.
-  ...Object.values(NAMED_GREETING).map((build) => build('').trim()),
+];
+
+/**
+ * The words a rendered greeting can start with, in every language the renderer greets in. A NAMED
+ * greeting ("Hello Dr Richard,") cannot be matched as a fixed phrase — the name is lead data — so
+ * consumers strip the greeting LINE by shape instead, using these words. Derived from the greeting
+ * builders themselves so a new language cannot be added in one place and missed in the other.
+ */
+export const RENDER_GREETING_WORDS: readonly string[] = [
+  ...new Set([
+    ...Object.values(NEUTRAL_GREETING),
+    ...Object.values(NAMED_GREETING).map((build) => build('x')),
+  ].map((greeting) => greeting.trim().split(/[\s,]+/)[0]!.toLocaleLowerCase())),
 ];
 
 export function demoLinkAllowed(demo: EmailDemoMeta | null): boolean {

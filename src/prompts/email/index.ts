@@ -14,13 +14,15 @@ import {
 // Bumped for the sequence-aware rewrite: every step now carries its own job block (writer) and its
 // own rubric (reviewer), and the shared copy standard states the outcomes-over-tools principle.
 export const EMAIL_RUBRIC_VERSION = 'cold-email-copy-standard-4';
-// Bumped together with `SEQUENCE_JOBS_VERSION` for the Follow-up #2 clarity rewrite: the step-1
-// writer job and the step-1 reviewer rubric both changed materially (reference vs restate; "what new
-// understanding does the prospect gain?"). The JSON contract is unchanged, so EMAIL_SCHEMA_VERSION
-// deliberately stays where it is — and drafts written under the old instructions keep the versions
-// they recorded.
-export const EMAIL_WRITER_PROMPT_VERSION = 'email-writer-6';
-export const EMAIL_REVIEWER_PROMPT_VERSION = 'email-reviewer-6';
+// Bumped together with `SEQUENCE_JOBS_VERSION` for the follow-up clarity work: the step-1 writer job
+// and the step-1 reviewer rubric changed materially (reference vs restate; "what new understanding
+// does the prospect gain?"), and the copy-JOB requirements — open on the observation, explain why it
+// matters, connect it to an outcome — stopped being global. They now belong to the first email only,
+// because applied to a follow-up they demand exactly the restatement the sequence job forbids.
+// The JSON contract is unchanged, so EMAIL_SCHEMA_VERSION deliberately stays where it is, and drafts
+// written under the old instructions keep the versions they recorded.
+export const EMAIL_WRITER_PROMPT_VERSION = 'email-writer-7';
+export const EMAIL_REVIEWER_PROMPT_VERSION = 'email-reviewer-7';
 
 export { SEQUENCE_JOBS_VERSION };
 
@@ -103,10 +105,31 @@ const SUBJECT_AUTHORING_STANDARD = `SUBJECT LINE (you author it for this email):
 
 ${SUBJECT_STANDARD}`;
 
-const COPY_STANDARD = `COLD EMAIL COPY STANDARD:
+/**
+ * WHAT THE BODY MUST CONTAIN — for the FIRST email only (step 0).
+ *
+ * These are copy-JOB requirements, not safety rules: open on the observation, explain why it matters,
+ * connect it to an outcome. They are exactly right for Outreach #1 and wrong for everything after it.
+ * Applied globally they forced a follow-up to reproduce the first email's observation and business
+ * consequence — which is how a Follow-up #2 that restated Outreach #1 came to be written and
+ * approved — and they contradict the later jobs outright: Follow-up #3 must COMPRESS rather than
+ * re-explain, and Follow-up #4 must be a binary close carrying no new business argument at all.
+ *
+ * The SEQUENCE JOB is authoritative. Only the first email receives this block; each follow-up
+ * receives its own job and is explicitly released from these requirements.
+ */
+const FIRST_EMAIL_BODY_STANDARD = `WHAT THIS EMAIL'S BODY MUST DO:
 - Start email_body with a verified observation. No introduction, fake compliment, fake customer
   pose, or "I hope this email finds you well".
 - Explain why the issue matters in the customer or patient journey using clear business language.
+- State the business relevance in ONE short sentence: why that single observation matters in the
+  customer or patient journey.
+- Connect that observation to ONE useful business outcome (revenue gained, conversions improved,
+  time saved, admin reduced, leads recovered, missed follow-ups reduced, risk or friction removed).
+- State the observation plainly and confidently. The curiosity gap belongs to the SUBJECT only; never
+  obscure or withhold the observation in the body to manufacture curiosity.`;
+
+const COPY_STANDARD = `COLD EMAIL COPY STANDARD (applies to every email in the sequence):
 - Create urgency only from the verified problem's importance. No deadline, scarcity, lost-revenue,
   visitor-abandonment, or competitor-performance claims.
 - If VIEW_CONCEPT is allowed, explain exactly what the approved concept demonstrates and only for
@@ -124,24 +147,23 @@ const COPY_STANDARD = `COLD EMAIL COPY STANDARD:
 - demo_alignment_result is PASS for a verified aligned concept CTA, otherwise NOT_APPLICABLE.
 
 OUTCOMES GET PAID, TOOLS DO NOT:
-- business_relevance must name a useful business outcome (revenue gained, conversions improved, time
-  saved, admin reduced, leads recovered, missed follow-ups reduced, risk or friction removed), not a
-  technology, a tool, "AI", or a feature. Never sell the mechanism; state the result it serves.
+- The structured field business_relevance must name a useful business outcome (revenue gained,
+  conversions improved, time saved, admin reduced, leads recovered, missed follow-ups reduced, risk
+  or friction removed), not a technology, a tool, "AI", or a feature. Never sell the mechanism;
+  state the result it serves. This is a requirement on the FIELD; whether the BODY restates that
+  outcome is decided by this email's sequence job.
 
 SINGLE-OBSERVATION, BUYER-LANGUAGE STANDARD:
-- The body makes exactly ONE evidence-backed observation. Do not stack a second finding, list several
-  issues, or turn the email into a mini audit of the site.
+- The body never carries more than ONE evidence-backed observation. Do not stack a second finding,
+  list several issues, or turn the email into a mini audit of the site. (How much of the observation
+  this particular email restates — if any — is decided by its sequence job below.)
 - Translate technical evidence into plain language the business owner uses. Describe what a visitor,
   customer, or patient experiences, not the implementation detail behind it. Never mention code, markup,
   attributes, link targets, encoded characters, or diagnostic steps.
-- State the business relevance in ONE short sentence: why that single observation matters in the
-  customer or patient journey.
 - Do NOT include remediation steps, an implementation diagnosis, a fix walkthrough, a tool or AI pitch,
   or any outcome or result claim the evidence does not support.
 - At most ONE necessary, concise qualifier is allowed when a claim genuinely needs it. Do not over-hedge
-  or pile up cautious words that make the observation sound uncertain or self-defeating.
-- State the observation plainly and confidently. The curiosity gap belongs to the SUBJECT only; never
-  obscure or withhold the observation in the body to manufacture curiosity.`;
+  or pile up cautious words that make the observation sound uncertain or self-defeating.`;
 
 const FORBIDDEN = `FORBIDDEN PHRASES INCLUDE:
 German: In der heutigen digitalen Welt; In der heutigen schnelllebigen Zeit; Es ist wichtig zu beachten;
@@ -166,6 +188,14 @@ Game-changing; Tailored solution.`;
  * and inventing one would start a second conversation, so nothing is asked of the model and
  * `validateEmail` fails the composition closed (`followup_thread_subject_missing`).
  */
+/**
+ * The copy-JOB requirements for this step. Step 0 gets the first-email standard; every follow-up is
+ * governed by its own sequence job instead, and receives nothing here that could contradict it.
+ */
+function bodyJobBlock(seq: SequenceContext): string {
+  return seq.step === 0 ? `\n${FIRST_EMAIL_BODY_STANDARD}\n` : '';
+}
+
 function writerSubjectBlock(seq: SequenceContext): string {
   if (seq.step === 0) return SUBJECT_AUTHORING_STANDARD;
   return subjectInstructionFor(seq.step, seq.threadSubject) ?? '';
@@ -205,7 +235,7 @@ ${writerSequenceJob(seq.step)}
 ${SAFETY}
 
 ${COPY_STANDARD}
-
+${bodyJobBlock(seq)}
 ${writerSubjectBlock(seq)}
 
 ${FORBIDDEN}
@@ -226,7 +256,7 @@ ${reviewerSequenceJob(seq.step)}
 ${SAFETY}
 
 ${COPY_STANDARD}
-
+${bodyJobBlock(seq)}
 ${reviewerSubjectBlock(seq)}
 
 ${FORBIDDEN}

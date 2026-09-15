@@ -1,15 +1,30 @@
 /**
- * The REAL production Follow-up #2 failure, kept as fixture data.
+ * The production Follow-up #2 failure, kept as fixture data.
  *
  * Outreach #1 went out and was correct. Follow-up #2 was written, passed deterministic validation,
  * was approved by the reviewer (fabricationRisk false, personalizationSupported true, claimHonest
  * true, addsClarityNotRestart true) — and was rejected in human review because it restated the first
- * email instead of adding clarity. Everything here is the shape of that pair plus the counter-cases
- * that a fix must NOT break.
+ * email instead of adding clarity.
  *
- * The bodies are stored as RENDERED emails (greeting, CTA sentence, signoff) for the prior message,
- * because that is what `outreach_messages` holds and therefore what the gate really compares against.
+ * PROVENANCE OF EACH HALF — they are NOT equally authoritative:
+ *
+ *   Follow-up #2  EXACT. The generated body was supplied verbatim and is reproduced here unchanged.
+ *                 This is the text that must never pass again.
+ *
+ *   Outreach #1   RECONSTRUCTED. Only the CORE WORDING of the initial email was supplied ("in
+ *                 substance"); its exact stored text was not. The body below is built from that core
+ *                 wording and is good enough to exercise the comparison, but it is not a claim about
+ *                 what was actually sent. Replace it with the authoritative
+ *                 `outreach_messages.body` for outreach record 2ee435d5 when that is available —
+ *                 see INITIAL_BODY_PROVENANCE and the REPLACE-ME marker below. Nothing else in this
+ *                 file needs to change when it is.
+ *
+ * The prior message is stored as a RENDERED email (greeting, CTA sentence, signoff) because that is
+ * what `outreach_messages` holds, and therefore what the gate really compares against.
  */
+
+/** Stated explicitly so no reader mistakes the reconstruction for the stored original. */
+export const INITIAL_BODY_PROVENANCE = 'RECONSTRUCTED_FROM_SUPPLIED_CORE_WORDING' as const;
 
 export interface FollowupFixture {
   /** What the fixture demonstrates, for failure output. */
@@ -23,6 +38,9 @@ const RENDERED = (core: string): string =>
 export const FOLLOWUP_REPETITION_FIXTURES = {
   initial: {
     subject: 'Something I noticed on Complete Dentistry’s mobile site',
+    provenance: INITIAL_BODY_PROVENANCE,
+    // REPLACE-ME: swap this reconstruction for the authoritative stored body when it is provided.
+    // Do not edit the wording otherwise — the thresholds were measured against exactly this text.
     body: RENDERED([
       'The cookie banner covers part of the introductory copy on mobile. Patients can only see Accept and Read More.',
       '',
@@ -61,6 +79,38 @@ export const FOLLOWUP_REPETITION_FIXTURES = {
     shortNudge: {
       label: 'short nudge with nothing new',
       body: 'Following up on my note about the cookie banner on mobile.',
+    },
+    /** Step 2's actual job: compress the issue and lower the pressure. Adds nothing — correctly. */
+    validCompression: {
+      label: 'step 2: short compression, no new value added',
+      body: 'Still worth a look at that mobile view, I think. Happy to leave it there if the timing is wrong.',
+    },
+    /** Step 2 done wrong: the whole argument re-explained at length. */
+    step2Reexplanation: {
+      label: 'step 2: re-explains the original observation at length',
+      body: [
+        'To recap what I found: the cookie banner covers part of the introductory copy on mobile, and patients can only see Accept and Read More at that point.',
+        '',
+        'That creates friction while they are first trying to understand the practice, which is why it seemed worth raising.',
+      ].join('\n'),
+    },
+    /** Step 3's actual job: a clean binary close carrying no new business information. */
+    validBinaryClose: {
+      label: 'step 3: binary close, no new information by design',
+      body: [
+        'I will leave this with you — a yes or a no is a complete answer, and no is completely fine.',
+        '',
+        'Either way, I will not keep nudging.',
+      ].join('\n'),
+    },
+    /** Step 3 done wrong: reopening the pitch instead of closing it. */
+    step3Reexplanation: {
+      label: 'step 3: reopens and re-explains instead of closing',
+      body: [
+        'Before I close this off: the cookie banner still covers part of the introductory copy on mobile, and patients can only see Accept and Read More.',
+        '',
+        'That keeps creating friction while they are first trying to understand the practice, which is worth a few minutes of someone\'s time.',
+      ].join('\n'),
     },
     /**
      * A true synonym rewrite: "cookie banner" -> "consent notice", "patients" -> "visitors". It says

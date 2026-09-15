@@ -52,24 +52,24 @@ describe('preparation decision — what a due follow-up is allowed to do', () =>
     // Suppression must win over the idempotency shortcut: a prospect who replied is reported as
     // blocked, not quietly skipped as "already prepared".
     const d = decideFollowupPreparation(candidate({
-      recordStatus: 'REPLIED_NEUTRAL', existingDraft: { id: 'e1', humanDecision: null, createdAtMs: 2_000 },
+      recordStatus: 'REPLIED_NEUTRAL', existingDraft: { id: 'e1', humanDecision: null, humanReviewedAtMs: 2_000 },
     }));
     expect(d.action).toBe('BLOCKED');
   });
 
   it('is idempotent: an already-composed follow-up awaiting review is skipped', () => {
-    const d = decideFollowupPreparation(candidate({ existingDraft: { id: 'e1', humanDecision: null, createdAtMs: 2_000 } }));
+    const d = decideFollowupPreparation(candidate({ existingDraft: { id: 'e1', humanDecision: null, humanReviewedAtMs: 2_000 } }));
     expect(d).toEqual({ action: 'SKIP', reason: 'AWAITING_HUMAN_REVIEW', detail: 'draft e1 is waiting for a human decision' });
   });
 
   it('skips copy a human already approved (progression owns it)', () => {
-    const d = decideFollowupPreparation(candidate({ existingDraft: { id: 'e1', humanDecision: 'APPROVED', createdAtMs: 2_000 } }));
+    const d = decideFollowupPreparation(candidate({ existingDraft: { id: 'e1', humanDecision: 'APPROVED', humanReviewedAtMs: 2_000 } }));
     expect(d.action).toBe('SKIP');
     expect(d.action === 'SKIP' && d.reason).toBe('ALREADY_PREPARED');
   });
 
   it('cancels the pending row when a human rejected the copy', () => {
-    const d = decideFollowupPreparation(candidate({ existingDraft: { id: 'e1', humanDecision: 'REJECTED', createdAtMs: 2_000 } }));
+    const d = decideFollowupPreparation(candidate({ existingDraft: { id: 'e1', humanDecision: 'REJECTED', humanReviewedAtMs: 2_000 } }));
     expect(d.action).toBe('CANCEL_REJECTED');
   });
 
@@ -136,7 +136,7 @@ describe('preparation runner — gates and idempotency', () => {
 
   it('a repeated timer run composes nothing for the same follow-up', async () => {
     // Second run: the first run's draft is now present and awaiting review.
-    const h = prepHarness({ candidates: [candidate({ existingDraft: { id: 'e1', humanDecision: null, createdAtMs: 2_000 } })] });
+    const h = prepHarness({ candidates: [candidate({ existingDraft: { id: 'e1', humanDecision: null, humanReviewedAtMs: 2_000 } })] });
     const r = await runFollowupPreparation(h.deps);
     expect(h.calls.composed).toEqual([]);
     expect(r.prepared).toEqual([]);
@@ -144,7 +144,7 @@ describe('preparation runner — gates and idempotency', () => {
   });
 
   it('cancels the pending row for rejected copy so the queue does not spin forever', async () => {
-    const h = prepHarness({ candidates: [candidate({ existingDraft: { id: 'e1', humanDecision: 'REJECTED', createdAtMs: 2_000 } })] });
+    const h = prepHarness({ candidates: [candidate({ existingDraft: { id: 'e1', humanDecision: 'REJECTED', humanReviewedAtMs: 2_000 } })] });
     const r = await runFollowupPreparation(h.deps);
     expect(h.calls.cancelled).toEqual(['f1']);
     expect(r.cancelled).toHaveLength(1);
@@ -315,5 +315,68 @@ describe('progression runner — gates, ordering, idempotency', () => {
     expect(h.calls).toEqual([]);
     expect(r.blocked).toHaveLength(1);
     expect(r.skipped).toHaveLength(1);
+  });
+});
+
+describe('replacement eligibility after a human rejection', () => {
+  // A rejected follow-up rejects THE COPY, not the prospect: the lead returns to SENT, the outreach
+  // record keeps its history, and the rejected draft is preserved. Asking for replacement copy means
+  // re-scheduling that step — and the runner must tell "this rejection is about the row in front of
+  // me" from "this rejection happened BEFORE the operator scheduled a replacement".
+  //
+  // The causal event is the HUMAN REJECTION, never the draft's creation. Composing a draft,
+  // scheduling a row, and only then rejecting the draft is an ordinary order of events; reading
+  // creation time would misread it as a superseded rejection and compose fresh copy for a rejection
+  // that had not happened yet.
+  const rejected = (humanReviewedAtMs: number | null, followupCreatedAtMs: number) =>
+    candidate({
+      existingDraft: { id: 'draft-old', humanDecision: 'REJECTED', humanReviewedAtMs },
+      followupCreatedAtMs,
+    });
+
+  it('A. a row scheduled AFTER the rejection is a replacement request: compose', () => {
+    expect(decideFollowupPreparation(rejected(1_000, 2_000))).toEqual({ action: 'COMPOSE', step: 1 });
+  });
+
+  it('B. a row that already existed when the human rejected: the rejection still applies', () => {
+    const decision = decideFollowupPreparation(rejected(2_000, 1_000));
+    expect(decision.action).toBe('CANCEL_REJECTED');
+  });
+
+  it('B2. the draft being older than the row is NOT enough — only the rejection time counts', () => {
+    // Draft written at t=500, row scheduled at t=1000, human rejected at t=2000. Creation-time logic
+    // would have called this a replacement request and composed. It is not one.
+    const decision = decideFollowupPreparation(candidate({
+      existingDraft: { id: 'draft-old', humanDecision: 'REJECTED', humanReviewedAtMs: 2_000 },
+      followupCreatedAtMs: 1_000,
+    }));
+    expect(decision.action).toBe('CANCEL_REJECTED');
+  });
+
+  it('C. a REJECTED draft with no recorded decision time fails closed', () => {
+    const decision = decideFollowupPreparation(rejected(null, 9_999));
+    expect(decision.action).toBe('CANCEL_REJECTED');
+  });
+
+  it('treats an exactly-equal timestamp as NOT a replacement (strictly after, or nothing)', () => {
+    expect(decideFollowupPreparation(rejected(1_000, 1_000)).action).toBe('CANCEL_REJECTED');
+  });
+
+  it('leaves non-rejected drafts alone: approval and pending review are unchanged', () => {
+    expect(decideFollowupPreparation(candidate({
+      existingDraft: { id: 'd', humanDecision: 'APPROVED', humanReviewedAtMs: 1_000 },
+      followupCreatedAtMs: 2_000,
+    })).action).toBe('SKIP');
+    expect(decideFollowupPreparation(candidate({
+      existingDraft: { id: 'd', humanDecision: null, humanReviewedAtMs: null },
+      followupCreatedAtMs: 2_000,
+    })).action).toBe('SKIP');
+  });
+
+  it('suppression still wins over any of this', () => {
+    const decision = decideFollowupPreparation({
+      ...rejected(1_000, 2_000), recordStatus: 'REPLIED_POSITIVE',
+    });
+    expect(decision.action).toBe('BLOCKED');
   });
 });

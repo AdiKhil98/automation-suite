@@ -183,17 +183,25 @@ function validateSubjects(
 }
 
 /**
- * A follow-up must CONTRIBUTE something. Deterministic, model-free comparison against the bodies
- * already sent in this thread: a step >= 1 that replays a clause from an earlier email, recycles most
- * of its phrasing, or adds essentially no new content is refused before the reviewer is ever called.
+ * A follow-up may REFERENCE what came before; it may not REPLAY it. Deterministic, model-free
+ * comparison against the bodies already sent in this thread, refused before the reviewer is ever
+ * called. Which checks apply depends on the step's lesson job — step 1 must add clarity, while a
+ * step-2 compression and a step-3 close are not required to add anything at all. See
+ * `followup-repetition.ts` for the policy, the thresholds and the normalisation.
  *
  * Referencing the same issue is explicitly fine — the shared subject of the conversation is the
- * whole point of a thread. What is refused is REPLAYING it. See `followup-repetition.ts` for the
- * thresholds, the normalisation, and the boundary this gate deliberately does not cross.
+ * whole point of a thread.
  */
-function validateFollowupAddsSomething(body: string, sequence: EmailSequencePosition): string[] {
-  if (sequence.step === 0 || sequence.priorMessageBodies.length === 0) return [];
+function validateFollowupDoesNotReplay(body: string, sequence: EmailSequencePosition): string[] {
+  if (sequence.step === 0) return [];
+  if (sequence.priorMessageBodies.length === 0) {
+    // A follow-up continues a thread that, by definition, already contains at least the initial
+    // email. An empty list means the comparison CANNOT be performed — the thread could not be read,
+    // or the caller did not supply it — and an unperformed check must never read as a pass.
+    return ['followup_prior_messages_missing'];
+  }
   const analysis = analyzeFollowupRepetition({
+    step: sequence.step,
     candidateBody: body,
     priorBodies: sequence.priorMessageBodies,
     threadSubject: sequence.threadSubject,
@@ -226,7 +234,7 @@ export function validateEmail(out: EmailWriterOutput, ctx: EmailValidationContex
   const allModelText = [...copySegments, ...strategySegments].join('\n');
 
   violations.push(...validateSubjects(out, subjects, ctx.sequence));
-  violations.push(...validateFollowupAddsSomething(body, ctx.sequence));
+  violations.push(...validateFollowupDoesNotReplay(body, ctx.sequence));
   if (out.genericity_score > 40) violations.push(`genericity_score_too_high:${String(out.genericity_score)}`);
 
   const paragraphs = body.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);

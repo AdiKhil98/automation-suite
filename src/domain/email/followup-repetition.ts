@@ -1,13 +1,25 @@
-import { RENDER_BOILERPLATE_PHRASES } from './email-render.js';
+import { RENDER_BOILERPLATE_PHRASES, RENDER_GREETING_WORDS } from './email-render.js';
 
 /**
- * DETERMINISTIC ANTI-REPETITION GATE for follow-ups.
+ * DETERMINISTIC ANTI-REPLAY GATE for follow-ups.
  *
  * A Follow-up #2 that says the same thing as Outreach #1 in different words is worthless to the
  * recipient, and in production one was written, approved by the reviewer, and caught only in human
  * review. This gate is the deterministic half of the answer: pure lexical comparison between the
  * candidate body and the bodies already SENT in the thread. No model, no embeddings, no network, no
  * cost — it runs inside `validateEmail`, before the reviewer is ever called.
+ *
+ * IT IS NOT "EVERY FOLLOW-UP MUST ADD SOMETHING". Each step has its own job, and two of them are
+ * explicitly not about new material:
+ *
+ *   step 1 (Follow-up #2)  ADD CLARITY            -> replay refused AND new content required
+ *   step 2 (Follow-up #3)  COMPRESS, REDUCE PRESSURE -> replay refused; a short compression that
+ *                                                    says nothing new is the job, not a failure
+ *   step 3 (Follow-up #4)  BINARY YES/NO CLOSE    -> replay refused; a close carries no new
+ *                                                    business information by design
+ *
+ * So the novelty floor belongs to step 1 alone. Applying it to a compression or a close would
+ * deterministically reject copy that is doing exactly what its lesson job asks for.
  *
  * WHAT IT IS FOR, AND WHAT IT IS NOT FOR. Lexical comparison cannot detect a true synonym paraphrase
  * ("cookie banner" -> "consent notice"), and pretending otherwise would mean tuning thresholds until
@@ -49,6 +61,7 @@ export const REPETITION_LIMITS = {
    * How many content words the candidate must contribute that were NOT in any sent message. This is
    * the "did the prospect learn anything?" floor, and it is what catches a short "just following up
    * on the cookie banner" that reuses nothing verbatim because it says almost nothing at all.
+   * STEP 1 ONLY — see {@link repetitionPolicyFor}.
    */
   minNovelContentTokens: 4,
   /**
@@ -58,6 +71,29 @@ export const REPETITION_LIMITS = {
    */
   minContentTokensForPhraseAnalysis: 10,
 } as const;
+
+/**
+ * Which checks apply at a given step. Derived from the lesson job, not from preference: only the
+ * step whose job is to ADD something is asked whether it added anything.
+ */
+export interface RepetitionPolicy {
+  /** A clause lifted from an earlier email is wrong at every follow-up position. */
+  detectClauseReplay: boolean;
+  /** Rebuilding the previous email out of its own phrases is wrong at every follow-up position. */
+  detectPervasiveReuse: boolean;
+  /** Only step 1 owes the recipient new understanding. */
+  requireNovelty: boolean;
+}
+
+export function repetitionPolicyFor(step: number): RepetitionPolicy {
+  return {
+    detectClauseReplay: true,
+    detectPervasiveReuse: true,
+    // Step 1's job is ADD CLARITY. Step 2 compresses and step 3 closes — neither is allowed to add
+    // new value, so neither can be required to.
+    requireNovelty: step === 1,
+  };
+}
 
 /** Why a candidate was judged a repeat. Each maps to exactly one threshold above. */
 export type RepetitionReason =
@@ -79,11 +115,15 @@ export interface RepetitionAnalysis {
   novelContentTokens: number;
   /** Content words in the candidate after boilerplate, subject and stopword removal. */
   candidateContentTokens: number;
-  /** Set when the candidate was too short for phrase analysis (novelty still applied). */
+  /** Set when the candidate was too short for phrase analysis (a compression or a close usually is). */
   tooShortForPhraseAnalysis: boolean;
+  /** The checks that actually applied, so a verdict can be explained without re-deriving it. */
+  policy: RepetitionPolicy;
 }
 
 export interface RepetitionInput {
+  /** Which follow-up this is. Decides which checks apply — see {@link repetitionPolicyFor}. */
+  step: number;
   /** The model's `email_body` for the candidate follow-up. */
   candidateBody: string;
   /** Bodies already SENT in this thread — rendered emails, greetings and signoffs included. */
@@ -100,6 +140,15 @@ export interface RepetitionInput {
  * be judged by the same rule as an English one. Deliberately ordinary-language: this list exists to
  * remove grammar, not to remove meaning.
  */
+/**
+ * A greeting line, in any language the renderer greets in, named or not. Built from the greeting
+ * words the renderer actually uses so the two can never drift apart.
+ */
+const GREETING_LINE_RE = new RegExp(
+  `^\\s*(?:${RENDER_GREETING_WORDS.join('|')})\\b[^\\n]*$`,
+  'gim',
+);
+
 const STOPWORDS = new Set([
   // English
   'a', 'about', 'above', 'after', 'again', 'all', 'also', 'am', 'an', 'and', 'any', 'are', 'as', 'at',
@@ -149,7 +198,11 @@ function normalize(text: string): string {
  * signoff, sender token), then the thread subject, then punctuation, stopwords and inflection.
  */
 export function contentTokens(text: string, threadSubject?: string | null): string[] {
-  let stripped = text;
+  // A rendered email opens with a greeting line that may carry a NAME ("Hello Dr Richard,"). Phrase
+  // stripping cannot match that — the name is lead data, not a fixed phrase — so the whole greeting
+  // LINE is removed by shape: a line that starts with a known greeting word. Generic by
+  // construction; no prospect name is ever referenced here.
+  let stripped = text.replace(GREETING_LINE_RE, ' ');
   for (const phrase of RENDER_BOILERPLATE_PHRASES) {
     stripped = stripped.split(phrase).join(' ');
   }
@@ -206,6 +259,7 @@ export function analyzeFollowupRepetition(input: RepetitionInput): RepetitionAna
   const run = longestSharedRun(candidate, prior);
   const tooShort = candidate.length < REPETITION_LIMITS.minContentTokensForPhraseAnalysis;
 
+  const policy = repetitionPolicyFor(input.step);
   const analysis: RepetitionAnalysis = {
     repeats: false,
     reason: null,
@@ -214,22 +268,27 @@ export function analyzeFollowupRepetition(input: RepetitionInput): RepetitionAna
     novelContentTokens,
     candidateContentTokens: candidate.length,
     tooShortForPhraseAnalysis: tooShort,
+    policy,
   };
 
   // Nothing already sent means nothing to repeat.
   if (prior.length === 0 || priorTokens.size === 0) return analysis;
 
-  // The novelty floor applies at every length: it is the "did they learn anything" question, and a
-  // very short nudge is precisely the message that adds nothing while reusing little.
-  if (novelContentTokens < REPETITION_LIMITS.minNovelContentTokens) {
+  // STEP 1 ONLY: the "did the prospect learn anything?" floor. It applies at every length, because
+  // the message that adds nothing while reusing almost no wording is exactly the short nudge.
+  if (policy.requireNovelty && novelContentTokens < REPETITION_LIMITS.minNovelContentTokens) {
     return { ...analysis, repeats: true, reason: 'NO_NEW_CONTENT' };
   }
+
+  // Phrase analysis needs enough words to be meaningful: on a two-line message a single shared
+  // bigram is a third of the text. A legitimate compression (step 2) or close (step 3) lives here,
+  // and must not be failed for being short.
   if (tooShort) return analysis;
 
-  if (run >= REPETITION_LIMITS.maxSharedContentRun) {
+  if (policy.detectClauseReplay && run >= REPETITION_LIMITS.maxSharedContentRun) {
     return { ...analysis, repeats: true, reason: 'VERBATIM_CLAUSE_REPLAY' };
   }
-  if (sharedBigramRatio >= REPETITION_LIMITS.maxSharedBigramRatio) {
+  if (policy.detectPervasiveReuse && sharedBigramRatio >= REPETITION_LIMITS.maxSharedBigramRatio) {
     return { ...analysis, repeats: true, reason: 'PERVASIVE_PHRASE_REUSE' };
   }
   return analysis;

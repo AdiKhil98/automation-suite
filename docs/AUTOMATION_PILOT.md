@@ -416,8 +416,19 @@ review in production. Three layers now answer it:
 | layer | what it does | what it cannot do |
 |---|---|---|
 | writer prompt (step 1) | must state what the first email established, then add ONE new layer; reference the issue, never restate it | nothing forces a model to comply |
-| deterministic gate | compares the candidate body with everything already sent; `followup_repeats_prior_message` on a replayed clause, pervasive phrase reuse, or too little new content. Free, runs before the reviewer | cannot see a true synonym rewrite |
+| deterministic gate | compares the candidate body with everything already sent; `followup_repeats_prior_message`. Free, runs before the reviewer | cannot see a true synonym rewrite |
 | reviewer (`addsClarityNotRestart`) | answers "what new understanding does the prospect gain?"; false for paraphrase, repeated evidence, or a consequence restated in synonyms | judgement, not arithmetic |
+
+The gate is STEP-AWARE, because the steps have different jobs:
+
+| step | job | replay refused | new content required |
+|---|---|---|---|
+| 1 — Follow-up #2 | add clarity | yes | **yes** |
+| 2 — Follow-up #3 | compress, reduce pressure | yes | no — a short compression that adds nothing is the job |
+| 3 — Follow-up #4 | binary yes/no close | yes | no — a close carries no new business information by design |
+
+A follow-up with no prior sent message fails closed (`followup_prior_messages_missing`): the
+comparison could not be performed, and an unperformed check must never read as a pass.
 
 The gate is deliberately conservative — naming the same issue ("cookie banner", "mobile", the
 business name, the thread subject) is continuity, not repetition, and is never penalised. Thresholds
@@ -426,8 +437,10 @@ live in `REPETITION_LIMITS` with the measurements that set them.
 **Regenerating rejected copy.** Rejecting a follow-up rejects THAT COPY: the lead returns to SENT,
 the outreach record and its history are untouched, and the rejected draft is preserved. The pending
 row is then cancelled by the preparation runner. To get replacement copy, re-schedule that step
-(`outreach schedule-followup`); the next preparation run composes fresh copy for it, because a
-rejection older than the pending row belongs to the previous attempt. No writer call happens until
+(`outreach schedule-followup`); the next preparation run composes fresh copy for it, because a row
+scheduled strictly AFTER the human rejection is a deliberate replacement request. Eligibility is read
+from `email_drafts.human_reviewed_at` — the rejection, not the draft's creation, is the causal event —
+and a rejection with no recorded decision time fails closed. No writer call happens until
 preparation runs, and migration 0044's index allows the new draft because REJECTED rows are excluded
 from it.
 

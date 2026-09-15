@@ -551,9 +551,9 @@ describe('resume recovery of a failed follow-up draft (PostgreSQL, migration 004
 
   describe('regenerating a step-1 follow-up after a human rejected the copy', () => {
     /** The human review decision, through the same repository the dashboard uses. */
-    async function rejectCopy(leadId: string, draftId: string): Promise<void> {
+    async function rejectCopy(leadId: string, draftId: string, at: number = NOW): Promise<void> {
       await new ReviewWriteRepository(handle.db)
-        .setEmailHumanDecision(draftId, 'REJECTED', 'restates the first email', 'operator', new Date(NOW));
+        .setEmailHumanDecision(draftId, 'REJECTED', 'restates the first email', 'operator', new Date(at));
       // Rejecting FOLLOW-UP copy returns the lead to SENT — it never rejects the prospect.
       await new LeadsRepository(handle.db).updateStatus(leadId, 'SENT', new Date(NOW));
     }
@@ -603,11 +603,13 @@ describe('resume recovery of a failed follow-up draft (PostgreSQL, migration 004
       //    requested. What makes it a REPLACEMENT is that the new row is created AFTER the rejected
       //    draft; before this fix the next run cancelled THIS row too, because the rejected draft was
       //    still the newest one for the slot, and regeneration was impossible.
-      const later = rejected.createdAt.getTime() + 60_000;
+      // The causal event is the HUMAN REJECTION, read from the row the review repository wrote.
+      expect(rejected.humanReviewedAt).not.toBeNull();
+      const later = rejected.humanReviewedAt!.getTime() + 60_000;
       const scheduled = await new OutreachService(new DrizzleOutreachUnitOfWork(handle.db), { now: () => later })
         .scheduleFollowup(recordId, 1, { ...policy, step1DelayDays: 0 });
       expect(scheduled.outcome).toBe('SCHEDULED');
-      expect(scheduled.followup!.createdAt.getTime()).toBeGreaterThan(rejected.createdAt.getTime());
+      expect(scheduled.followup!.createdAt.getTime()).toBeGreaterThan(rejected.humanReviewedAt!.getTime());
 
       // 3. Now preparation composes fresh copy instead of cancelling.
       const second = await prepare(recordId, later + 86_400_000);
@@ -621,6 +623,58 @@ describe('resume recovery of a failed follow-up draft (PostgreSQL, migration 004
       const stillThere = (await handle.db.select().from(emailDrafts).where(eq(emailDrafts.id, failed.draftId)))[0]!;
       expect(stillThere.humanDecision).toBe('REJECTED');
       expect(stillThere.body).toBe(rejected.body);
+    });
+
+    it('a row scheduled BEFORE the human rejected is NOT a replacement request', async () => {
+      // THE DIVERGENCE between the two possible rules, on real rows:
+      //   draft written  (t1)  ->  pending row scheduled  (t2)  ->  human rejects the draft  (t3)
+      // Comparing DRAFT CREATION time says "the row is newer than the draft, so the rejection is
+      // stale" and composes fresh copy for a rejection that had not even happened at t2. Comparing
+      // the REJECTION time says the row pre-dates the decision, so the rejection still applies.
+      const { leadId, recordId } = await seedDueFollowup();
+      const failed = await composeFailedFollowup(leadId, recordId);
+      await resumeService(failed.writerJson).service.resume({ leadId, draftId: failed.draftId }, await newRun('resume'));
+
+      // Only one pending row per (record, step) is allowed, so clear the original before scheduling.
+      const [pendingRow] = await handle.db.select().from(outreachFollowups)
+        .where(and(eq(outreachFollowups.outreachRecordId, recordId), eq(outreachFollowups.status, 'DUE')));
+      const outreach = new OutreachService(new DrizzleOutreachUnitOfWork(handle.db), { now: () => Date.now() });
+      await outreach.cancelFollowup(pendingRow!.id, recordId, 'OPERATOR_RESCHEDULE');
+      const scheduled = await outreach.scheduleFollowup(recordId, 1, { ...policy, step1DelayDays: 0 });
+      expect(scheduled.outcome).toBe('SCHEDULED');
+
+      // ...and only now does the human reject the copy — after the row was scheduled.
+      await rejectCopy(leadId, failed.draftId, scheduled.followup!.createdAt.getTime() + 60_000);
+      const row = (await handle.db.select().from(emailDrafts).where(eq(emailDrafts.id, failed.draftId)))[0]!;
+      expect(row.humanReviewedAt!.getTime()).toBeGreaterThan(scheduled.followup!.createdAt.getTime());
+      // The draft really is older than the row — the exact shape the old rule got wrong.
+      expect(row.createdAt.getTime()).toBeLessThan(scheduled.followup!.createdAt.getTime());
+
+      const run = await prepare(recordId, Date.now() + 86_400_000);
+      expect(run.composed).toEqual([]);
+      expect(run.cancelled).toHaveLength(1);
+    });
+
+    it('a REJECTED draft with no recorded review time fails closed', async () => {
+      const { leadId, recordId } = await seedDueFollowup();
+      const failed = await composeFailedFollowup(leadId, recordId);
+
+      // A rejection whose decision time was never recorded: causality cannot be established at all,
+      // so no amount of rescheduling may license fresh spend.
+      await handle.db.update(emailDrafts)
+        .set({ humanDecision: 'REJECTED', humanReviewedAt: null })
+        .where(eq(emailDrafts.id, failed.draftId));
+      await new LeadsRepository(handle.db).updateStatus(leadId, 'SENT', new Date(NOW));
+
+      const [pendingRow] = await handle.db.select().from(outreachFollowups)
+        .where(and(eq(outreachFollowups.outreachRecordId, recordId), eq(outreachFollowups.status, 'DUE')));
+      const outreach = new OutreachService(new DrizzleOutreachUnitOfWork(handle.db), { now: () => Date.now() });
+      await outreach.cancelFollowup(pendingRow!.id, recordId, 'OPERATOR_RESCHEDULE');
+      await outreach.scheduleFollowup(recordId, 1, { ...policy, step1DelayDays: 0 });
+
+      const run = await prepare(recordId, Date.now() + 86_400_000);
+      expect(run.composed).toEqual([]);
+      expect(run.cancelled).toHaveLength(1);
     });
 
     it('lets a NEW draft occupy the slot the rejected one vacated, without touching migration 0044', async () => {

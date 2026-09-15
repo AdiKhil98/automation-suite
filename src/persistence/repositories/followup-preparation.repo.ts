@@ -137,7 +137,12 @@ export class FollowupPreparationRepository {
       // is what makes a repeated timer run a no-op; migration 0044's partial unique index is the
       // hard backstop against two concurrent runs racing to compose the same follow-up.
       const existing = (await this.db
-        .select({ id: emailDrafts.id, humanDecision: emailDrafts.humanDecision, createdAt: emailDrafts.createdAt })
+        .select({
+          id: emailDrafts.id,
+          humanDecision: emailDrafts.humanDecision,
+          // The causal event for replacement eligibility: when the human actually decided.
+          humanReviewedAt: emailDrafts.humanReviewedAt,
+        })
         .from(emailDrafts)
         .where(and(
           eq(emailDrafts.outreachRecordId, r.outreachRecordId),
@@ -150,7 +155,11 @@ export class FollowupPreparationRepository {
         recordStatus: isOutreachStatus(r.recordStatus) ? r.recordStatus : null,
         followupCreatedAtMs: r.followupCreatedAt.getTime(),
         existingDraft: existing
-          ? { id: existing.id, humanDecision: existing.humanDecision, createdAtMs: existing.createdAt.getTime() }
+          ? {
+              id: existing.id,
+              humanDecision: existing.humanDecision,
+              humanReviewedAtMs: existing.humanReviewedAt?.getTime() ?? null,
+            }
           : null,
       });
     }

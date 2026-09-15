@@ -18,20 +18,30 @@ import { type SequenceStep } from '../../domain/outreach/sequence.js';
 // angle, same outcome", which invited a reworded copy of Outreach #1 — and produced one in
 // production. Step 1 now has to state what the first email already established and add a
 // materially new layer, and the reviewer judges exactly that.
-export const SEQUENCE_JOBS_VERSION = 'sequence-jobs-2';
+export const SEQUENCE_JOBS_VERSION = 'sequence-jobs-3';
 
 /**
  * The commercial principle that governs every step: we are paid for outcomes, not for tools. Copy
  * sells a useful business result, never "AI", a technology stack, a feature list, or a product tour.
  */
+/**
+ * The GUARDRAIL half of the outcomes principle: what may never be sold, and what may never be
+ * invented. True at every step, including the ones that state no outcome at all.
+ */
 const OUTCOMES_PRINCIPLE = `OUTCOMES GET PAID. TOOLS DON'T.
-- Write about a useful business outcome, never about "AI", automation, a technology stack, a
-  platform, a feature, or a tool for its own sake. Never name the technology as the value.
-- Relevant outcome categories: revenue gained, conversions improved, time saved, admin reduced,
-  leads recovered, missed follow-ups reduced, risk or friction removed.
-- Connect the evidence-backed observation to ONE of those outcomes in plain business language.
-- Do NOT quantify the outcome. No percentages, amounts, counts, timeframes, or comparisons unless
+- Never write about "AI", automation, a technology stack, a platform, a feature, or a tool for its
+  own sake, and never name the technology as the value.
+- Do NOT quantify an outcome. No percentages, amounts, counts, timeframes, or comparisons unless
   the supplied evidence states them. An unquantified, honest outcome beats an invented number.`;
+
+/**
+ * The REQUIREMENT half: connect the observation to an outcome. This is the FIRST email's job. A
+ * follow-up that restates the outcome is repeating itself — step 1 adds a clarity layer, step 2
+ * compresses, step 3 closes — so only step 0 receives it.
+ */
+const OUTCOMES_REQUIREMENT = `- Relevant outcome categories: revenue gained, conversions improved,
+  time saved, admin reduced, leads recovered, missed follow-ups reduced, risk or friction removed.
+- Connect the evidence-backed observation to ONE of those outcomes in plain business language.`;
 
 const STEP_0 = `SEQUENCE POSITION: Outreach #1 (the first email; internal sequence step 0).
 
@@ -41,7 +51,8 @@ THE JOB OF THIS EMAIL: earn attention and permission, and open a conversation.
 - Do NOT make the email feel like a heavy sales process, an audit report, or an onboarding form.
 - Stay concise and specific, and end on a low-friction next step the system renders for you.
 
-${OUTCOMES_PRINCIPLE}`;
+${OUTCOMES_PRINCIPLE}
+${OUTCOMES_REQUIREMENT}`;
 
 const STEP_1 = `SEQUENCE POSITION: Follow-up #2 (internal sequence step 1). Outreach #1 was already
 sent to this recipient in this same email thread and received no reply. Its exact text is supplied
@@ -71,6 +82,10 @@ WHAT COUNTS AS A NEW LAYER (pick exactly ONE, drawn only from the supplied evide
 - an IMPLICATION the first email did not state;
 - a CONCRETE ARTEFACT you can offer to show, when the evidence supports its existence.
 
+YOU ARE NOT REQUIRED TO RESTATE ANYTHING. The first email already carried the observation, the
+evidence and the business consequence, and they are still true. Do not reproduce them: name the issue
+in passing if the reader needs the reference, and spend this email on the new layer.
+
 HARD RULES:
 - Assume the first email was read. Do NOT restart the pitch and do NOT re-introduce yourself.
 - Do NOT introduce an unrelated angle, a second finding, or any material the evidence does not
@@ -87,6 +102,8 @@ const STEP_2 = `SEQUENCE POSITION: Follow-up #3 (internal sequence step 2). Outr
 Follow-up #2 were already sent in this same thread and received no reply.
 
 THE JOB OF THIS EMAIL: COMPRESS THE ISSUE AND REDUCE PRESSURE.
+- You are NOT required to open on the observation, to explain why it matters, or to state the
+  business outcome again. Those were made in the first two emails. This email compresses.
 - The recipient already has enough context. Do NOT teach, persuade, or explain again.
 - Become SHORTER than the previous email, not longer. Compress the issue into its simplest useful
   form — ideally one or two short sentences of substance.
@@ -102,6 +119,8 @@ of the sequence. Outreach #1, Follow-up #2, and Follow-up #3 were already sent i
 and received no reply. NOTHING is sent after this email.
 
 THE JOB OF THIS EMAIL: create ONE clean YES / NO decision.
+- This email carries NO observation, NO business-relevance sentence and NO outcome argument. None of
+  them are required here and all of them would reopen a conversation this email exists to close.
 - Do NOT convince again. Do NOT teach again. Do NOT reopen or re-explain the problem.
 - Do NOT add another long explanation, another angle, or more value.
 - Do NOT ask them to schedule a call, book a meeting, pick a time, or hop on a quick chat.
