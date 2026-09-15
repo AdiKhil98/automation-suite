@@ -452,11 +452,11 @@ per step, not global. Safety, honesty and style never move.
 | | step 0 Outreach #1 | step 1 Follow-up #2 | step 2 Follow-up #3 | step 3 Follow-up #4 |
 |---|---|---|---|---|
 | job | earn attention | add clarity | compress, reduce pressure | binary yes/no close |
-| paragraphs | 2-4 | 1-3 | 1-2 | 1-2 |
+| paragraphs (prompt AND validator, from `PARAGRAPH_SHAPE`) | 2-4 | 1-3 | 1-2 | 1-2 |
 | replay refused | n/a | yes | yes | yes |
 | new content required | n/a | yes | no | no |
 | body states observation / relevance / outcome | required | not required | not required | forbidden |
-| genericity_score ceiling | 40 | 40 | 80 | 80 |
+| genericity_score ceiling | 40 | 40 | not applied | not applied |
 | reviewer: openingSpecific | required | required | not applied | not applied |
 | reviewer: businessRelevanceClear, persuasive | required | not applied | not applied | not applied |
 | reviewer: sufficientlyPersonalized | required | required | not applied | not applied |
@@ -468,6 +468,11 @@ Universal at every step, fail-closed: `decision=APPROVE`, no fabrication risk, e
 every claim, urgency supported, competitor claims supported, human style, punctuation, exactly one
 primary CTA, buyer language, conversation-not-audit, demo alignment, non-generic opening, plus the
 sequence-job booleans for that step.
+
+`genericity_score` is still reported honestly at every step; at steps 2-3 it is simply not read as a
+rejection criterion, because a short message that leans on its thread is supposed to look reusable
+out of context. What protects those positions instead is the anti-replay gate, the sequence-job
+booleans, forbidden phrases, the CTA rules and every safety rule — all unchanged.
 
 Every persisted draft is rendered from its REAL sequence position — `buildPersist` requires it and
 `renderEmail` refuses a threaded email rendered as a first email — so what the reviewer judged, what

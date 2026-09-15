@@ -9,7 +9,19 @@ import {
   isEmailReviewApprovable,
   reviewApplicabilityMatrix,
 } from '../../src/domain/email/email-review-gate.js';
-import { INITIAL_EMAIL_SEQUENCE, type EmailWriterOutput } from '../../src/domain/email/email-types.js';
+import {
+  INITIAL_EMAIL_SEQUENCE,
+  PARAGRAPH_SHAPE,
+  paragraphRangeText,
+  type EmailWriterOutput,
+} from '../../src/domain/email/email-types.js';
+import {
+  buildEmailReviewerMessages,
+  buildEmailWriterMessages,
+  type EmailBrief,
+  type SequenceContext,
+} from '../../src/prompts/email/index.js';
+import { type EmailWriterParsed } from '../../src/domain/email/email-schema.js';
 import { type EmailReviewParsed } from '../../src/domain/email/email-schema.js';
 import { type SequenceStep } from '../../src/domain/outreach/sequence.js';
 import { EMAIL_COPY_FIXTURES } from '../fixtures/email-copy-standard.js';
@@ -69,6 +81,24 @@ const review = (over: Partial<EmailReviewParsed> = {}): EmailReviewParsed => ({
   singleObservation: true, buyerLanguageOnly: true, conversationNotAudit: true, confidentObservation: true,
   addsClarityNotRestart: true, compressedNotExpanded: true, pressureReduced: true, binaryReplyClose: true,
   problems: [], requiredRevisions: [], ...over,
+});
+
+/** Minimal brief + draft, so the prompts can be generated without touching a model. */
+const brief: EmailBrief = {
+  businessName: 'Complete Dentistry',
+  contactName: null,
+  language: 'en',
+  facts: [{ evidenceId: 'fact-business', type: 'business_name', value: 'Complete Dentistry' }],
+  findings: [{ evidenceId: 'finding-cta', findingRef: 'F1', category: 'CTA_CLARITY', observation: 'o', recommendation: 'r' }],
+  demoLinkAllowed: false,
+  approvedDemoFindingRefs: [],
+  competitorPackage: null,
+};
+const writerDraft = firstEmail() as EmailWriterParsed;
+const seqFor = (step: SequenceStep): SequenceContext => ({
+  step,
+  threadSubject: step === 0 ? null : initial.subject,
+  priorMessages: step === 0 ? [] : [{ sequenceStep: 0, subject: initial.subject, body: initial.body }],
 });
 
 describe('1-2. Follow-up #2: the production failure is refused, a real clarification is not', () => {
@@ -216,15 +246,32 @@ describe('genericity is judged against the position, not against a standalone em
     expect(generic(1, 40)).toEqual([]);
   });
 
-  it('a correct step-2 compression is NOT rejected for an honest high score', () => {
-    expect(generic(2, 75)).toEqual([]);
-    // ...but outright bulk-mail copy still fails, in any thread.
-    expect(generic(2, 95)).toEqual(['genericity_score_too_high:95']);
+  it.each([2, 3] as const)('step %i does not use the standalone score as a rejection criterion at all', (step) => {
+    // A close like "I will leave this with you. Either way, I will not keep nudging." honestly
+    // scores at the top of the scale standalone and is still exactly the right message, because the
+    // THREAD carries the specificity. Any ceiling here would reject copy for having the property its
+    // position is supposed to have — and there is no lesson rule that imposes one.
+    for (const score of [41, 75, 100]) {
+      expect(generic(step, score), `score ${String(score)}`).toEqual([]);
+    }
   });
 
-  it('a correct step-3 close is NOT rejected for an honest high score', () => {
-    expect(generic(3, 75)).toEqual([]);
-    expect(generic(3, 95)).toEqual(['genericity_score_too_high:95']);
+  it('what actually protects steps 2 and 3 is unchanged', () => {
+    // Dropping one metric does not open a hole: the gates that describe BAD copy at those positions
+    // still fire on the same fixtures.
+    const replay2 = validateEmail(draftFor(2, followups.step2Reexplanation.body, { genericity_score: 100 }), ctxFor(2, [initial.body]));
+    expect(replay2.violations).toContain('followup_repeats_prior_message');
+
+    const replay3 = validateEmail(draftFor(3, followups.step3Reexplanation.body, { genericity_score: 100 }), ctxFor(3, [initial.body]));
+    expect(replay3.violations).toContain('followup_repeats_prior_message');
+
+    // ...as do the forbidden-phrase and CTA rules, at any score.
+    const spam = validateEmail(
+      draftFor(3, 'I hope this email finds you well. Just wanted to reach out one more time.', { genericity_score: 100 }),
+      ctxFor(3, [initial.body]),
+    );
+    expect(spam.ok).toBe(false);
+    expect(spam.violations.some((v) => v.startsWith('forbidden_phrase') || v.startsWith('generic_opening'))).toBe(true);
   });
 });
 
@@ -241,6 +288,53 @@ describe('openingSpecific applies where the job calls for a specific opening', (
       expect(reviewApplicabilityMatrix(step).openingSpecific, `step ${String(step)}`).toBe(false);
       expect(isEmailReviewApprovable(review({ openingSpecific: false }), { sequenceStep: step, subjectIsThreadContinuity: true })).toBe(true);
     }
+  });
+});
+
+describe('the paragraph rule the model is GIVEN matches the one it is JUDGED by', () => {
+  // The copy standard used to say "2-4 short natural paragraphs" at every step while validation had
+  // become sequence-aware: a model could follow its instructions at step 2 or 3 and be rejected by
+  // our own validator. Both now read the same constant.
+  const paragraphs = (n: number): string =>
+    Array.from({ length: n }, (_, i) => `Short paragraph number ${String(i + 1)} about the mobile view.`).join('\n\n');
+
+  const paragraphViolations = (step: SequenceStep, n: number): string[] =>
+    validateEmail(draftFor(step, paragraphs(n)), ctxFor(step, step === 0 ? [] : [initial.body]))
+      .violations.filter((v) => v.startsWith('unnatural_paragraph_count'));
+
+  it.each([0, 1, 2, 3] as const)('step %i: the prompt states the range the validator enforces', (step) => {
+    const { min, max } = PARAGRAPH_SHAPE[step];
+    const writer = buildEmailWriterMessages(brief, null, seqFor(step)).system;
+    const reviewer = buildEmailReviewerMessages(brief, writerDraft, seqFor(step)).system;
+
+    // The sentence is generated from the same constant, so this cannot drift.
+    expect(writer).toContain(`email_body contains ${paragraphRangeText(step)}.`);
+    expect(reviewer).toContain(`email_body contains ${paragraphRangeText(step)}.`);
+    expect(paragraphRangeText(step)).toContain(String(min));
+    expect(paragraphRangeText(step)).toContain(String(max));
+
+    // ...and the global standard no longer contradicts it.
+    expect(writer).not.toContain('email_body contains 2-4 short natural paragraphs');
+  });
+
+  it.each([0, 1, 2, 3] as const)('step %i: every count the prompt permits is accepted by the validator', (step) => {
+    const { min, max } = PARAGRAPH_SHAPE[step];
+    for (let n = min; n <= max; n += 1) {
+      expect(paragraphViolations(step, n), `step ${String(step)} with ${String(n)} paragraphs`).toEqual([]);
+    }
+  });
+
+  it.each([0, 1, 2, 3] as const)('step %i: counts outside the stated range are still refused', (step) => {
+    const { min, max } = PARAGRAPH_SHAPE[step];
+    if (min > 1) expect(paragraphViolations(step, min - 1)).toEqual([`unnatural_paragraph_count:${String(min - 1)}`]);
+    expect(paragraphViolations(step, max + 1)).toEqual([`unnatural_paragraph_count:${String(max + 1)}`]);
+  });
+
+  it('the ranges shrink along the sequence, as the lesson jobs require', () => {
+    expect(PARAGRAPH_SHAPE[0]).toEqual({ min: 2, max: 4 });
+    expect(PARAGRAPH_SHAPE[1]).toEqual({ min: 1, max: 3 });
+    expect(PARAGRAPH_SHAPE[2]).toEqual({ min: 1, max: 2 });
+    expect(PARAGRAPH_SHAPE[3]).toEqual({ min: 1, max: 2 });
   });
 });
 

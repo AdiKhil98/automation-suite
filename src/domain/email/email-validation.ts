@@ -2,6 +2,9 @@ import {
   DEMO_URL_TOKEN,
   type EmailSequencePosition,
   MAX_EMAIL_WORDS,
+  // The paragraph shape is shared with the prompt the model is given: one source of truth, so the
+  // instructions and the validator can never disagree about what a step's body should look like.
+  PARAGRAPH_SHAPE,
   replySubject,
   type EmailWriterOutput,
 } from './email-types.js';
@@ -204,47 +207,31 @@ function validateSequenceCta(out: EmailWriterOutput, sequence: EmailSequencePosi
 }
 
 /**
- * How generic the copy may honestly be, by position.
+ * WHERE A STANDALONE GENERICITY SCORE IS A REJECTION CRITERION AT ALL.
  *
- * `genericity_score` measures how reusable the copy would be for almost any business — STANDALONE.
- * A first email has nothing but itself, so it must be specific. A Follow-up #3 compression and a
- * Follow-up #4 close are deliberately short and are read INSIDE a thread that already carries the
- * specificity; judged alone they legitimately look reusable, and the same 40 ceiling would make a
- * truthful model self-reject for doing its job. The answer is not to tell the model to report a
- * lower number — it must stay honest — but to stop reading a standalone measure as if the message
- * were standalone.
+ * `genericity_score` is defined for the model as 0 = uniquely specific, 100 = reusable for almost any
+ * business — judged on the email ALONE. That is the right question for an email that arrives alone.
  *
- * A high ceiling remains at every step: copy that would read as bulk mail to anyone, in any thread,
- * is still refused. Everything else that keeps a follow-up honest — the anti-replay gate, the
- * sequence job, forbidden phrases, evidence binding — is unchanged.
+ * It is the wrong question for a compression or a close. "I will leave this with you. Either way, I
+ * will not keep nudging." can honestly score 90-100 standalone and still be exactly the right
+ * message, because the THREAD carries the specificity — which is also precisely what the reviewer is
+ * now told not to reject those steps for. Any numeric ceiling there would be a rule with no source
+ * in the lesson: it would reject correct copy for a property the position is supposed to have. So
+ * the metric is simply NOT APPLIED as a gate at steps 2 and 3.
+ *
+ * The model still reports the score honestly at every step — nothing instructs it to report a lower
+ * one, and the value stays on the record. What protects steps 2-3 instead is everything that
+ * actually describes bad copy there: the anti-replay gate, the sequence-job booleans, forbidden
+ * phrases, the CTA rules, evidence binding, and every safety and style rule, all unchanged.
  */
-const GENERICITY_CEILING: Record<SequenceStep, number> = {
+const GENERICITY_CEILING: Record<SequenceStep, number | null> = {
   0: 40,
-  // A clarity layer is about one specific issue; it should read as specifically as a first email.
+  // A clarity layer is about ONE specific issue; it should read as specifically as a first email.
   1: 40,
-  // Compression and close: the thread supplies the specificity, so only outright bulk-mail copy fails.
-  2: 80,
-  3: 80,
-};
-
-/**
- * How many paragraphs each position may have. A cold email needs room to make its case; a follow-up
- * does not, and two of them are explicitly supposed to shrink. Requiring 2-4 paragraphs everywhere
- * was a first-email assumption that deterministically rejected copy doing its own job: Follow-up #3
- * compresses to "ideally one or two short sentences" and Follow-up #4 is a shorter final close.
- *
- * The MAXIMUM word count and every safety rule stay global and unchanged — this loosens structure
- * for the steps whose job is to be shorter, never the limits that keep copy honest.
- */
-const PARAGRAPH_SHAPE: Record<SequenceStep, { min: number; max: number }> = {
-  // Outreach #1: observation, why it matters, and the ask — the classic shape.
-  0: { min: 2, max: 4 },
-  // Follow-up #2 adds one clarity layer; it may be a single tight paragraph.
-  1: { min: 1, max: 3 },
-  // Follow-up #3 compresses. Two paragraphs is already generous.
-  2: { min: 1, max: 2 },
-  // Follow-up #4 closes. One or two short paragraphs, nothing more.
-  3: { min: 1, max: 2 },
+  // Compression and close: not applied. The thread is the context, and there is no lesson rule that
+  // says a short close must read as unique when read out of its thread.
+  2: null,
+  3: null,
 };
 
 /**
@@ -302,7 +289,7 @@ export function validateEmail(out: EmailWriterOutput, ctx: EmailValidationContex
   violations.push(...validateFollowupDoesNotReplay(body, ctx.sequence));
   violations.push(...validateSequenceCta(out, ctx.sequence));
   const genericityCeiling = GENERICITY_CEILING[ctx.sequence.step];
-  if (out.genericity_score > genericityCeiling) {
+  if (genericityCeiling !== null && out.genericity_score > genericityCeiling) {
     violations.push(`genericity_score_too_high:${String(out.genericity_score)}`);
   }
 

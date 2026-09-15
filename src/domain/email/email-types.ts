@@ -30,6 +30,33 @@ export interface EmailSequencePosition {
   priorMessageBodies: readonly string[];
 }
 
+/**
+ * HOW MANY PARAGRAPHS each position may have — the SINGLE source of truth, read by the deterministic
+ * validator and by the prompt the model is given.
+ *
+ * They were separate: validation had become sequence-aware while the copy standard still told every
+ * step "2-4 short natural paragraphs", so a model could obey its instructions at step 2 or 3 and be
+ * rejected by our own validator for doing so. A cold email needs room to make its case; a
+ * compression and a close are supposed to shrink.
+ */
+export const PARAGRAPH_SHAPE: Record<SequenceStep, { min: number; max: number }> = {
+  // Outreach #1: observation, why it matters, and the ask.
+  0: { min: 2, max: 4 },
+  // Follow-up #2 adds one clarity layer; a single tight paragraph is enough.
+  1: { min: 1, max: 3 },
+  // Follow-up #3 compresses. Two paragraphs is already generous.
+  2: { min: 1, max: 2 },
+  // Follow-up #4 closes. One or two short paragraphs, nothing more.
+  3: { min: 1, max: 2 },
+};
+
+/** The paragraph range for a step, phrased for a prompt. Derived, never written out by hand. */
+export function paragraphRangeText(step: SequenceStep): string {
+  const { min, max } = PARAGRAPH_SHAPE[step];
+  return min === max ? `exactly ${String(min)} short natural paragraph${min === 1 ? '' : 's'}`
+    : `${String(min)} to ${String(max)} short natural paragraph${max === 1 ? '' : 's'}`;
+}
+
 /** A first email: the model authors the subject, and there is no thread to continue or repeat. */
 export const INITIAL_EMAIL_SEQUENCE: EmailSequencePosition = {
   step: 0, threadSubject: null, priorMessageBodies: [],

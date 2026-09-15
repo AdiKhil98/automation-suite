@@ -6,6 +6,26 @@ All notable changes per phase. Format loosely follows Keep a Changelog.
 
 ### Fixed
 
+- **The paragraph rule the model was GIVEN no longer contradicts the one it is JUDGED by.** The copy
+  standard still said "2-4 short natural paragraphs" at every step while validation had become
+  sequence-aware, so a model could obey its instructions at step 2 or 3 and be rejected by our own
+  validator. `PARAGRAPH_SHAPE` now lives in `email-types.ts` as the single source of truth: the
+  validator enforces it and the prompt sentence is GENERATED from it, for writer and reviewer alike.
+- **A standalone genericity score is no longer a rejection criterion where the thread carries the
+  specificity.** `genericity_score` asks how reusable the copy would be ON ITS OWN — the right
+  question for an email that arrives alone, the wrong one for a compression or a close. "I will
+  leave this with you. Either way, I will not keep nudging." can honestly score 90-100 and still be
+  exactly the right message, and the reviewer is already told not to reject those steps for reading
+  as though they could apply to another business. The previous 80 ceiling was a number with no
+  source in the lesson; steps 2 and 3 now do not apply the metric as a gate at all. Steps 0 and 1
+  keep 40. The model still reports the score honestly at every step — nothing tells it to report a
+  lower one — and the prompt for steps 2-3 says so explicitly, so it does not pad copy with
+  unnecessary specifics to chase a number.
+- Audit follow-ups: the final step is now told that `primary_cta` must be REPLY_FOR_DETAILS (the
+  global "if VIEW_CONCEPT is allowed" rule otherwise pointed at a CTA deterministic validation
+  refuses there), and that `evidence_ids` remain PROVENANCE rather than a licence to restate the
+  finding — every email must cite evidence, including a close that makes no claims.
+
 - **A reviewer-rejected follow-up was persisted with first-email rendering.** `buildPersist` defaulted
   its render to `INITIAL_EMAIL_SEQUENCE`, and the reviewer-rejected path used that default. Now that
   rendering is sequence-aware, a step-3 draft was STORED carrying "reply and I will share the
@@ -102,7 +122,7 @@ All notable changes per phase. Format loosely follows Keep a Changelog.
   release from them, and the outcome REQUIREMENT is separated from the outcome GUARDRAIL (never sell
   the tool, never invent a number), which stays global along with all safety, evidence, fabrication
   and style rules.
-- Prompt versions bumped (`sequence-jobs-4`, `email-writer-8`, `email-reviewer-8`). The JSON contract
+- Prompt versions bumped (`sequence-jobs-5`, `email-writer-9`, `email-reviewer-10`). The JSON contract
   did not change, so `EMAIL_SCHEMA_VERSION` deliberately stays at `email-copy-schema-5`, and drafts
   written under the old instructions keep the versions they recorded.
 

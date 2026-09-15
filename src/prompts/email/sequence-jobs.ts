@@ -18,7 +18,7 @@ import { type SequenceStep } from '../../domain/outreach/sequence.js';
 // angle, same outcome", which invited a reworded copy of Outreach #1 — and produced one in
 // production. Step 1 now has to state what the first email already established and add a
 // materially new layer, and the reviewer judges exactly that.
-export const SEQUENCE_JOBS_VERSION = 'sequence-jobs-4';
+export const SEQUENCE_JOBS_VERSION = 'sequence-jobs-5';
 
 /**
  * The commercial principle that governs every step: we are paid for outcomes, not for tools. Copy
@@ -104,6 +104,9 @@ Follow-up #2 were already sent in this same thread and received no reply.
 THE JOB OF THIS EMAIL: COMPRESS THE ISSUE AND REDUCE PRESSURE.
 - You are NOT required to open on the observation, to explain why it matters, or to state the
   business outcome again. Those were made in the first two emails. This email compresses.
+- Report genericity_score HONESTLY. A compression that leans on the thread legitimately scores
+  higher than a first email would, and that is not penalised at this position — do not pad the copy
+  with specifics it does not need in order to report a lower number.
 - The recipient already has enough context. Do NOT teach, persuade, or explain again.
 - Become SHORTER than the previous email, not longer. Compress the issue into its simplest useful
   form — ideally one or two short sentences of substance.
@@ -121,6 +124,9 @@ and received no reply. NOTHING is sent after this email.
 THE JOB OF THIS EMAIL: create ONE clean YES / NO decision.
 - This email carries NO observation, NO business-relevance sentence and NO outcome argument. None of
   them are required here and all of them would reopen a conversation this email exists to close.
+- Report genericity_score HONESTLY, even if it is high. A short close reads as reusable out of
+  context by design; that is not penalised here. Do not add specifics you do not need in order to
+  report a lower number.
 - Do NOT convince again. Do NOT teach again. Do NOT reopen or re-explain the problem.
 - Do NOT add another long explanation, another angle, or more value.
 - Do NOT ask them to schedule a call, book a meeting, pick a time, or hop on a quick chat.
@@ -136,6 +142,11 @@ remove that fear. Make the reply feel binary and effortless — a single word is
 - The SYSTEM writes the closing ask for this email — a deterministic yes/no line it appends after
   your body. Do not write your own ask, and do not end the body with a question: that would leave the
   recipient with two. Write only the short, warm lead-in that line closes.
+- primary_cta MUST be REPLY_FOR_DETAILS here. The approved-concept CTA is not available in the final
+  email even when a demo link is allowed: sending someone to a concept asks them to do something,
+  and this email asks only for a decision.
+- evidence_ids still bind this email to the evidence it belongs to. That is PROVENANCE, not a
+  licence to restate the finding: cite it, do not mention it.
 
 ${OUTCOMES_PRINCIPLE}`;
 

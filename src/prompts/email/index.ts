@@ -1,4 +1,4 @@
-import { MAX_EMAIL_WORDS, PRIMARY_CTAS } from '../../domain/email/email-types.js';
+import { MAX_EMAIL_WORDS, paragraphRangeText, PRIMARY_CTAS } from '../../domain/email/email-types.js';
 import { type EmailWriterParsed } from '../../domain/email/email-schema.js';
 import { type SequenceStep } from '../../domain/outreach/sequence.js';
 export { type PriorSequenceMessage } from './sequence-jobs.js';
@@ -21,12 +21,12 @@ export const EMAIL_RUBRIC_VERSION = 'cold-email-copy-standard-4';
 // because applied to a follow-up they demand exactly the restatement the sequence job forbids.
 // The JSON contract is unchanged, so EMAIL_SCHEMA_VERSION deliberately stays where it is, and drafts
 // written under the old instructions keep the versions they recorded.
-export const EMAIL_WRITER_PROMPT_VERSION = 'email-writer-8';
+export const EMAIL_WRITER_PROMPT_VERSION = 'email-writer-9';
 // Bumped again: the rejection conditions became step-scoped, so the reviewer is no longer told to
 // reject a compression or a close for lacking a specific opening, business relevance, persuasion, or
 // standalone specificity — dimensions the approval gate does not apply at those positions. The
 // WRITER prompt did not change in that revision, so the two versions legitimately differ.
-export const EMAIL_REVIEWER_PROMPT_VERSION = 'email-reviewer-9';
+export const EMAIL_REVIEWER_PROMPT_VERSION = 'email-reviewer-10';
 
 export { SEQUENCE_JOBS_VERSION };
 
@@ -138,8 +138,8 @@ const COPY_STANDARD = `COLD EMAIL COPY STANDARD (applies to every email in the s
   visitor-abandonment, or competitor-performance claims.
 - If VIEW_CONCEPT is allowed, explain exactly what the approved concept demonstrates and only for
   findings bound to the approved demo. Do not promise features the demo does not contain.
-- email_body contains 2-4 short natural paragraphs and no greeting, CTA sentence, signoff, link,
-  markdown, or bullet list. Maximum ${String(MAX_EMAIL_WORDS)} words.
+- email_body contains no greeting, CTA sentence, signoff, link, markdown, or bullet list.
+  Maximum ${String(MAX_EMAIL_WORDS)} words.
 - Choose exactly one primary_cta from ${PRIMARY_CTAS.join(', ')}. The system renders it.
 - Use restrained, confident, concrete language. Vary sentence length. Avoid symmetry, generic
   transitions, three-part marketing lists, inflated adjectives, and "not only X, but also Y".
@@ -231,6 +231,17 @@ function bodyJobBlock(seq: SequenceContext): string {
   return seq.step === 0 ? `\n${FIRST_EMAIL_BODY_STANDARD}\n` : '';
 }
 
+/**
+ * The body's SHAPE for this step, generated from the same `PARAGRAPH_SHAPE` the deterministic
+ * validator enforces. Stating "2-4 paragraphs" globally meant a model could follow its instructions
+ * at step 2 or 3 and be rejected by our own validator; deriving both from one constant makes that
+ * disagreement impossible rather than merely fixed.
+ */
+function bodyStructureBlock(seq: SequenceContext): string {
+  return `BODY STRUCTURE FOR THIS EMAIL:
+- email_body contains ${paragraphRangeText(seq.step)}.`;
+}
+
 function writerSubjectBlock(seq: SequenceContext): string {
   if (seq.step === 0) return SUBJECT_AUTHORING_STANDARD;
   return subjectInstructionFor(seq.step, seq.threadSubject) ?? '';
@@ -270,6 +281,8 @@ ${writerSequenceJob(seq.step)}
 ${SAFETY}
 
 ${COPY_STANDARD}
+
+${bodyStructureBlock(seq)}
 ${bodyJobBlock(seq)}
 ${writerSubjectBlock(seq)}
 
@@ -291,6 +304,8 @@ ${reviewerSequenceJob(seq.step)}
 ${SAFETY}
 
 ${COPY_STANDARD}
+
+${bodyStructureBlock(seq)}
 ${bodyJobBlock(seq)}
 ${reviewerSubjectBlock(seq)}
 

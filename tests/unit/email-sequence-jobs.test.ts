@@ -300,9 +300,9 @@ describe('Follow-up #2 clarity contract (production regression)', () => {
   });
 
   it('records the version bump so a stored draft traces to the instructions that produced it', () => {
-    expect(SEQUENCE_JOBS_VERSION).toBe('sequence-jobs-4');
-    expect(EMAIL_WRITER_PROMPT_VERSION).toBe('email-writer-8');
-    expect(EMAIL_REVIEWER_PROMPT_VERSION).toBe('email-reviewer-9');
+    expect(SEQUENCE_JOBS_VERSION).toBe('sequence-jobs-5');
+    expect(EMAIL_WRITER_PROMPT_VERSION).toBe('email-writer-9');
+    expect(EMAIL_REVIEWER_PROMPT_VERSION).toBe('email-reviewer-10');
     // The JSON contract did not change, so the schema version deliberately did not move.
     expect(EMAIL_SCHEMA_VERSION).toBe('email-copy-schema-5');
   });
@@ -451,6 +451,57 @@ describe('the reviewer is never told to reject for a dimension the gate does not
       }
       if (!reviewApplicabilityMatrix(step).openingSpecific) {
         expect(prompt, `step ${String(step)}: generic opening`).not.toContain('the opening is generic');
+      }
+    }
+  });
+});
+
+describe('final audit: no global rule contradicts a step job', () => {
+  const writerAt = (step: SequenceStep): string =>
+    buildEmailWriterMessages(brief, null, seq(step, step === 0 ? null : 'Something I noticed')).system;
+
+  it('the demo CTA rule no longer reaches the one position that forbids it', () => {
+    // The copy standard still says "if VIEW_CONCEPT is allowed, explain what the concept
+    // demonstrates" — true everywhere it can be chosen. Deterministic validation forbids it at the
+    // final step, so that step is told so directly rather than being left to pick a CTA we reject.
+    expect(writerAt(3)).toMatch(/primary_cta MUST be REPLY_FOR_DETAILS here/);
+    expect(writerAt(3)).toMatch(/approved-concept CTA is not available in the final\s*email/);
+    for (const step of [0, 1, 2] as const) {
+      expect(writerAt(step)).not.toContain('primary_cta MUST be REPLY_FOR_DETAILS here');
+    }
+  });
+
+  it('evidence binding is explained as provenance where the job forbids restating it', () => {
+    // Every email must cite evidence (`missing_evidence_ids`, `missing_finding_evidence`), including
+    // a close that makes no claims. Without this line, "cite the finding" could be read as "mention
+    // the finding", which is exactly what the final step must not do.
+    expect(writerAt(3)).toMatch(/That is PROVENANCE, not a\s*licence to restate the finding/);
+  });
+
+  it('honest genericity reporting is asked for where the score is not a gate', () => {
+    for (const step of [2, 3] as const) {
+      expect(writerAt(step)).toMatch(/Report genericity_score HONESTLY/);
+      expect(writerAt(step)).toMatch(/do not (pad the copy|add specifics)/i);
+    }
+    // Steps 0 and 1 are still judged on it, so they get no such note.
+    for (const step of [0, 1] as const) {
+      expect(writerAt(step)).not.toContain('Report genericity_score HONESTLY');
+    }
+  });
+
+  it('the shared standard keeps only rules that are true at every position', () => {
+    // A spot-check of the survivors: safety, evidence honesty, style, punctuation, one CTA.
+    for (const step of [0, 1, 2, 3] as const) {
+      const prompt = writerAt(step);
+      for (const rule of [
+        'Use only supplied evidence',
+        'Never write a URL',
+        'Create urgency only from the verified problem',
+        'Choose exactly one primary_cta',
+        'No em dash, en dash as separator',
+        'The body never carries more than ONE evidence-backed observation',
+      ]) {
+        expect(prompt, `step ${String(step)}: ${rule}`).toContain(rule);
       }
     }
   });
