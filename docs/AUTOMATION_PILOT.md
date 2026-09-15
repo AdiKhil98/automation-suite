@@ -456,6 +456,8 @@ per step, not global. Safety, honesty and style never move.
 | replay refused | n/a | yes | yes | yes |
 | new content required | n/a | yes | no | no |
 | body states observation / relevance / outcome | required | not required | not required | forbidden |
+| genericity_score ceiling | 40 | 40 | 80 | 80 |
+| reviewer: openingSpecific | required | required | not applied | not applied |
 | reviewer: businessRelevanceClear, persuasive | required | not applied | not applied | not applied |
 | reviewer: sufficientlyPersonalized | required | required | not applied | not applied |
 | reviewer: singleObservation, confidentObservation | required | required | required | not applied |
@@ -466,6 +468,10 @@ Universal at every step, fail-closed: `decision=APPROVE`, no fabrication risk, e
 every claim, urgency supported, competitor claims supported, human style, punctuation, exactly one
 primary CTA, buyer language, conversation-not-audit, demo alignment, non-generic opening, plus the
 sequence-job booleans for that step.
+
+Every persisted draft is rendered from its REAL sequence position — `buildPersist` requires it and
+`renderEmail` refuses a threaded email rendered as a first email — so what the reviewer judged, what
+was stored, and what a later resume re-renders are the same bytes.
 
 The final ask is written by the SYSTEM, not the model — the copy standard forbids a CTA in the body,
 so a step-3 model writing its own close would create two asks. The reviewer is shown the exact

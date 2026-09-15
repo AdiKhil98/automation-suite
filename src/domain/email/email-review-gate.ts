@@ -15,9 +15,12 @@ import { type SequenceStep } from '../outreach/sequence.js';
  *   UNIVERSAL — safety, honesty and style. True at every position, fail-closed, never relaxed:
  *     decision=APPROVE, no fabrication risk, evidence supports every claim, urgency is supported,
  *     competitor claims are supported, human style, punctuation, exactly one primary CTA, buyer
- *     language, conversation not audit, demo alignment, and a non-generic opening.
+ *     language, conversation not audit, demo alignment.
  *
  *   STEP-DEPENDENT — copy-JOB quality. Required only where that job applies:
+ *     openingSpecific                            steps 0-1 (a compression is told not to explain
+ *                                                again, and a close has no material to be specific
+ *                                                about; "I will leave this with you" is the job)
  *     businessRelevanceClear / persuasive        step 0 only (the first email must make the case)
  *     sufficientlyPersonalized                   steps 0-1 (a compression and a close are brief by
  *                                                design; the thread carries the personalisation)
@@ -37,6 +40,7 @@ const STEP_DEPENDENT_DIMENSIONS: ReadonlyArray<{
   readonly requiredAt: readonly SequenceStep[];
   readonly why: string;
 }> = [
+  { name: 'openingSpecific', requiredAt: [0, 1], why: 'a first email must earn attention and a clarity layer must stay tied to the specific issue; a compression is told not to explain again and a close carries no material to be specific about, so the thread supplies the specificity there' },
   { name: 'businessRelevanceClear', requiredAt: [0], why: 'only the first email must state why the issue matters; a follow-up that restates it is repeating itself' },
   { name: 'persuasive', requiredAt: [0], why: 'the first email makes the case; clarifying, compressing and closing are not persuasion' },
   { name: 'sufficientlyPersonalized', requiredAt: [0, 1], why: 'a compression and a close are deliberately brief; the thread already carries the personalisation' },
@@ -65,7 +69,6 @@ export function isEmailReviewApprovable(
   // UNIVERSAL: safety, honesty and style. Never relaxed for any step.
   const universal = review.decision === 'APPROVE'
     && !review.fabricationRisk
-    && review.openingSpecific
     && review.urgencySupported
     && review.competitorClaimsSupported
     && review.humanStylePass

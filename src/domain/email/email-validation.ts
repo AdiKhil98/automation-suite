@@ -204,6 +204,30 @@ function validateSequenceCta(out: EmailWriterOutput, sequence: EmailSequencePosi
 }
 
 /**
+ * How generic the copy may honestly be, by position.
+ *
+ * `genericity_score` measures how reusable the copy would be for almost any business — STANDALONE.
+ * A first email has nothing but itself, so it must be specific. A Follow-up #3 compression and a
+ * Follow-up #4 close are deliberately short and are read INSIDE a thread that already carries the
+ * specificity; judged alone they legitimately look reusable, and the same 40 ceiling would make a
+ * truthful model self-reject for doing its job. The answer is not to tell the model to report a
+ * lower number — it must stay honest — but to stop reading a standalone measure as if the message
+ * were standalone.
+ *
+ * A high ceiling remains at every step: copy that would read as bulk mail to anyone, in any thread,
+ * is still refused. Everything else that keeps a follow-up honest — the anti-replay gate, the
+ * sequence job, forbidden phrases, evidence binding — is unchanged.
+ */
+const GENERICITY_CEILING: Record<SequenceStep, number> = {
+  0: 40,
+  // A clarity layer is about one specific issue; it should read as specifically as a first email.
+  1: 40,
+  // Compression and close: the thread supplies the specificity, so only outright bulk-mail copy fails.
+  2: 80,
+  3: 80,
+};
+
+/**
  * How many paragraphs each position may have. A cold email needs room to make its case; a follow-up
  * does not, and two of them are explicitly supposed to shrink. Requiring 2-4 paragraphs everywhere
  * was a first-email assumption that deterministically rejected copy doing its own job: Follow-up #3
@@ -277,7 +301,10 @@ export function validateEmail(out: EmailWriterOutput, ctx: EmailValidationContex
   violations.push(...validateSubjects(out, subjects, ctx.sequence));
   violations.push(...validateFollowupDoesNotReplay(body, ctx.sequence));
   violations.push(...validateSequenceCta(out, ctx.sequence));
-  if (out.genericity_score > 40) violations.push(`genericity_score_too_high:${String(out.genericity_score)}`);
+  const genericityCeiling = GENERICITY_CEILING[ctx.sequence.step];
+  if (out.genericity_score > genericityCeiling) {
+    violations.push(`genericity_score_too_high:${String(out.genericity_score)}`);
+  }
 
   const paragraphs = body.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
   const shape = PARAGRAPH_SHAPE[ctx.sequence.step];

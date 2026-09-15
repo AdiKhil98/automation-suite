@@ -6,6 +6,28 @@ All notable changes per phase. Format loosely follows Keep a Changelog.
 
 ### Fixed
 
+- **A reviewer-rejected follow-up was persisted with first-email rendering.** `buildPersist` defaulted
+  its render to `INITIAL_EMAIL_SEQUENCE`, and the reviewer-rejected path used that default. Now that
+  rendering is sequence-aware, a step-3 draft was STORED carrying "reply and I will share the
+  details" while the reviewer had judged the binary close — and a later reviewer-only resume
+  re-renders correctly and reports RENDER_MISMATCH on a draft nobody touched. `buildPersist` now
+  REQUIRES the `EmailSequencePosition` and renders from it itself; there is no defaulted render and
+  no render argument to get wrong. `renderEmail` additionally refuses the incoherent combination of a
+  thread subject with the step-0 position, which caught thirteen further call sites that were
+  rendering threaded emails as first emails.
+- **`openingSpecific` was a first-email requirement applied to every step.** A final close has no
+  material left to be specific about ("I will leave this with you" is the job), and a compression is
+  told not to explain again. It is now required at steps 0-1 only, and the reviewer's global
+  rejection sentence — "the opening is generic ... business relevance is unclear ... could be sent
+  unchanged to almost any business" — is scoped per step, so the reviewer is never instructed to
+  REJECT for a dimension the approval gate treats as non-applicable.
+- **`genericity_score > 40` was applied to every step.** The score measures how reusable the copy
+  would be STANDALONE; a Follow-up #3 compression and a Follow-up #4 close are short and read inside
+  a thread that already carries the specificity, so a truthful model self-rejected for doing its job.
+  The ceiling is now per step (0 and 1: 40, unchanged; 2 and 3: 80 — outright bulk-mail copy still
+  fails in any thread). The model is NOT told to report a lower number: honest reporting is
+  unchanged, and only the reading of it moved.
+
 - **Deterministic validation carried first-email assumptions into every follow-up.** Three of them,
   each of which deterministically rejected copy doing exactly what its lesson job asks:
   * PARAGRAPHS. 2-4 paragraphs were required everywhere. Follow-up #3 compresses to "ideally one or

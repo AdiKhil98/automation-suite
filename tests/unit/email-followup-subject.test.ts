@@ -178,10 +178,15 @@ describe('render and validation agree on one subject', () => {
   const inputs = (threadSubject: string | null): EmailInputs => ({
     facts: [], findings: [], demo: null, threadSubject,
   });
+  /** A threaded render must state its position: rendering is sequence-aware. */
+  const followupPosition = (threadSubject: string): EmailSequencePosition => ({
+    step: 1, threadSubject, priorMessageBodies: [PRIOR_SENT_BODY],
+  });
 
   it('renders the thread subject as a reply, not the model’s selection', () => {
     const out = echoing(PROD_THREAD_SUBJECT);
-    expect(renderEmail(out, inputs(PROD_THREAD_SUBJECT)).subject).toBe(`Re: ${PROD_THREAD_SUBJECT}`);
+    expect(renderEmail(out, inputs(PROD_THREAD_SUBJECT), followupPosition(PROD_THREAD_SUBJECT)).subject)
+      .toBe(`Re: ${PROD_THREAD_SUBJECT}`);
   });
 
   it('never double-prefixes a stored subject that is already a reply (the resume path)', () => {
@@ -189,7 +194,7 @@ describe('render and validation agree on one subject', () => {
     const out = echoing(PROD_THREAD_SUBJECT);
     // Resume re-renders from the STORED subject; it must reproduce it byte-identically, and the
     // same draft must still validate against it.
-    expect(renderEmail(out, inputs(stored)).subject).toBe(stored);
+    expect(renderEmail(out, inputs(stored), followupPosition(stored)).subject).toBe(stored);
     expect(subjectViolations(out, followup(1, stored))).toEqual([]);
   });
 

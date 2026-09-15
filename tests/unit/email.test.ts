@@ -22,6 +22,7 @@ import { type Lead } from '../../src/domain/leads/lead.js';
 import { type LeadService } from '../../src/domain/leads/lead-service.js';
 import { defaultMockEmailResponder } from '../../src/fixtures/mock-email-responses.js';
 import { MockLlmProvider, type MockResponder } from '../../src/integrations/llm/mock-llm.js';
+import { ctaSentenceFor } from '../../src/domain/email/email-render.js';
 import { type LlmRequest } from '../../src/integrations/llm/provider.js';
 import { EMAIL_COPY_FIXTURES } from '../fixtures/email-copy-standard.js';
 import { INITIAL_EMAIL_SEQUENCE } from '../../src/domain/email/email-types.js';
@@ -700,6 +701,132 @@ describe('EmailWriterService — threaded follow-up composition (production regr
     expect(result.outcome).toBe('APPROVED_READY');
     expect(sink[0]!.email?.sequenceStep).toBe(0);
     expect(sink[0]!.email?.subject.startsWith('Re: ')).toBe(false);
+  });
+});
+
+describe('EmailWriterService — the FINAL step renders, reviews and persists ONE consistent CTA', () => {
+  // Rendering became sequence-aware, and the reviewer-rejected path used to persist with the step-0
+  // default: a step-3 draft was STORED carrying "reply and I will share the details" while the
+  // reviewer had judged the binary close, and a later reviewer-only resume re-rendered correctly and
+  // reported RENDER_MISMATCH on a draft nobody had touched.
+  const THREAD = 'Something I noticed on Complete Dentistry’s mobile site';
+  const PRIOR = {
+    sequenceStep: 0,
+    subject: THREAD,
+    body: 'Hello,\n\nThe contact action is hard to find on a phone.\n\nBest regards,\n{{SENDER_NAME}}',
+  };
+  const FINAL_CLOSE = ctaSentenceFor('en', 'REPLY_FOR_DETAILS', 3);
+  const EARLIER_CTA = ctaSentenceFor('en', 'REPLY_FOR_DETAILS', 0);
+
+  /** A step-3 body: warm, short, and carrying no ask of its own — the system appends that. */
+  const CLOSE_BODY = [
+    'I will leave this with you. A yes or a no is a complete answer, and no is completely fine.',
+    '',
+    'Either way, I will not keep nudging.',
+  ].join('\n');
+
+  /** Writer emits the close; the reviewer verdict is scripted per test. */
+  const provider = (approve: boolean) => {
+    const calls: LlmRequest[] = [];
+    let writerJson: unknown = null;
+    return {
+      calls,
+      writerJson: () => writerJson,
+      provider: new MockLlmProvider((req) => {
+        calls.push(req);
+        if (req.task === 'email_write') {
+          const base = (defaultMockEmailResponder(req, calls.length - 1) as { rawJson: Record<string, unknown> }).rawJson;
+          writerJson = { ...base, email_body: CLOSE_BODY, primary_cta: 'REPLY_FOR_DETAILS' };
+          return { rawJson: writerJson };
+        }
+        return {
+          rawJson: {
+            ...reviewJson(),
+            decision: approve ? 'APPROVE' : 'REJECT',
+            // A correct final close reports the non-applicable first-email dimensions as false.
+            openingSpecific: false, businessRelevanceClear: false, persuasive: false,
+            sufficientlyPersonalized: false, singleObservation: false, confidentObservation: false,
+          },
+        };
+      }),
+    };
+  };
+
+  const input = () => serviceInput({
+    sequence: { step: 3, threadSubject: THREAD, priorMessages: [PRIOR] },
+    outreachRecordId: 'rec-1',
+  });
+
+  it('APPROVED: the reviewer is shown the same closing line that is persisted', async () => {
+    const sink: EmailPersist[] = [];
+    const p = provider(true);
+    const service = new EmailWriterService({ provider: p.provider, uow: fakeUow(sink, 'SENT'), logger, config: config() });
+
+    const result = await service.write(input(), 'run-final');
+
+    expect(result.outcome).toBe('APPROVED_READY');
+    const stored = sink[0]!.email!;
+    expect(stored.body).toContain(FINAL_CLOSE);
+    expect(stored.body).not.toContain(EARLIER_CTA);
+    expect(stored.sequenceStep).toBe(3);
+
+    // The reviewer saw exactly that line, labelled as system-appended.
+    const reviewCall = p.calls.find((c) => c.task === 'email_review')!;
+    expect(reviewCall.user).toContain(FINAL_CLOSE);
+    expect(reviewCall.user).toContain('THE SYSTEM WILL APPEND EXACTLY THIS CLOSING LINE');
+  });
+
+  it('REVIEW_REJECTED: the persisted draft carries the step-3 CTA, not the step-0 one', async () => {
+    const sink: EmailPersist[] = [];
+    const p = provider(false);
+    const service = new EmailWriterService({ provider: p.provider, uow: fakeUow(sink, 'SENT'), logger, config: config() });
+
+    const result = await service.write(input(), 'run-final-rejected');
+
+    expect(result.outcome).toBe('REVIEW_REJECTED');
+    const stored = sink[0]!.email!;
+    expect(stored.status).toBe('REVIEW_FAILED');
+    expect(stored.sequenceStep).toBe(3);
+    // THE REGRESSION: this used to be rendered with INITIAL_EMAIL_SEQUENCE.
+    expect(stored.body).toContain(FINAL_CLOSE);
+    expect(stored.body).not.toContain(EARLIER_CTA);
+  });
+
+  it('a rejected step-3 draft re-renders byte-identically, so resume cannot report RENDER_MISMATCH', async () => {
+    const sink: EmailPersist[] = [];
+    const p = provider(false);
+    const service = new EmailWriterService({ provider: p.provider, uow: fakeUow(sink, 'SENT'), logger, config: config() });
+    await service.write(input(), 'run-final-rejected');
+    const stored = sink[0]!.email!;
+
+    // Exactly what `resume-email-review` does: reload the ACTUAL writer output from the diagnostic
+    // record and re-render it from the draft's own sequence provenance, then compare byte for byte.
+    const reloaded = emailWriterSchema.parse(p.writerJson());
+    const rerendered = renderEmail(
+      reloaded,
+      { facts: baseFacts(), findings: [finding('finding-cta', 'F1')], demo: null, recipient: null, threadSubject: stored.subject },
+      { step: 3, threadSubject: stored.subject, priorMessageBodies: [PRIOR.body] },
+    );
+    expect(rerendered.body).toBe(stored.body);
+    expect(rerendered.subject).toBe(stored.subject);
+  });
+
+  it.each([1, 2] as const)('step %i persistence and rendering are unchanged', async (step) => {
+    const sink: EmailPersist[] = [];
+    const p = provider(true);
+    const service = new EmailWriterService({ provider: p.provider, uow: fakeUow(sink, 'SENT'), logger, config: config() });
+
+    await service.write(serviceInput({
+      sequence: { step, threadSubject: THREAD, priorMessages: [PRIOR] },
+      outreachRecordId: 'rec-1',
+    }), `run-step-${String(step)}`);
+
+    const stored = sink[0]!.email!;
+    expect(stored.sequenceStep).toBe(step);
+    expect(stored.subject).toBe(`Re: ${THREAD}`);
+    // Earlier positions keep the ordinary reply CTA.
+    expect(stored.body).toContain(EARLIER_CTA);
+    expect(stored.body).not.toContain(FINAL_CLOSE);
   });
 });
 

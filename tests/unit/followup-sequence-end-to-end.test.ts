@@ -131,12 +131,14 @@ describe('5-8. Follow-up #4: a binary close with no observation, outcome or pers
     // A correct final close carries none of these by instruction. Their absence is the job being
     // done, and the gate must not read it as a defect.
     const matrix = reviewApplicabilityMatrix(3);
-    for (const dimension of ['businessRelevanceClear', 'persuasive', 'sufficientlyPersonalized', 'singleObservation', 'confidentObservation']) {
+    for (const dimension of ['openingSpecific', 'businessRelevanceClear', 'persuasive', 'sufficientlyPersonalized', 'singleObservation', 'confidentObservation']) {
       expect(matrix[dimension], dimension).toBe(false);
     }
+    // "I will leave this with you" is a correct final opening: there is no material left to be
+    // specific about, and the thread carries the context.
     const verdict = review({
-      businessRelevanceClear: false, persuasive: false, sufficientlyPersonalized: false,
-      singleObservation: false, confidentObservation: false,
+      openingSpecific: false, businessRelevanceClear: false, persuasive: false,
+      sufficientlyPersonalized: false, singleObservation: false, confidentObservation: false,
     });
     expect(isEmailReviewApprovable(verdict, { sequenceStep: 3, subjectIsThreadContinuity: true })).toBe(true);
   });
@@ -146,7 +148,7 @@ describe('5-8. Follow-up #4: a binary close with no observation, outcome or pers
       { fabricationRisk: true }, { evidenceSupported: false }, { humanStylePass: false },
       { punctuationPass: false }, { singlePrimaryCta: false }, { buyerLanguageOnly: false },
       { urgencySupported: false }, { competitorClaimsSupported: false }, { demoAligned: false },
-      { openingSpecific: false }, { conversationNotAudit: false },
+      { conversationNotAudit: false },
       { decision: 'REJECT' as const },
       // ...and on its own sequence job.
       { binaryReplyClose: false }, { pressureReduced: false },
@@ -190,6 +192,55 @@ describe('5-8. Follow-up #4: a binary close with no observation, outcome or pers
     const result = validateEmail(draftFor(3, followups.step3Reexplanation.body), ctxFor(3, [initial.body]));
     expect(result.ok).toBe(false);
     expect(result.violations).toContain('followup_repeats_prior_message');
+  });
+});
+
+describe('genericity is judged against the position, not against a standalone email', () => {
+  // `genericity_score` measures how reusable the copy would look ON ITS OWN. A compression and a
+  // close are short and lean on the thread, so a TRUTHFUL model reports a higher number for doing
+  // its job correctly. The answer is not to tell it to report a lower one — it must stay honest —
+  // but to stop reading a standalone measure as if the message were standalone.
+  const generic = (step: SequenceStep, score: number) => validateEmail(
+    draftFor(step, step === 0 ? firstEmail().email_body : followups[step === 1 ? 'genuineClarification' : step === 2 ? 'validCompression' : 'validBinaryClose'].body,
+      { genericity_score: score }),
+    ctxFor(step, step === 0 ? [] : [initial.body]),
+  ).violations.filter((v) => v.startsWith('genericity_score_too_high'));
+
+  it('step 0 still fails a generic first email', () => {
+    expect(generic(0, 41)).toEqual(['genericity_score_too_high:41']);
+    expect(generic(0, 40)).toEqual([]);
+  });
+
+  it('step 1 keeps the same specificity bar: a clarity layer is about ONE specific issue', () => {
+    expect(generic(1, 41)).toEqual(['genericity_score_too_high:41']);
+    expect(generic(1, 40)).toEqual([]);
+  });
+
+  it('a correct step-2 compression is NOT rejected for an honest high score', () => {
+    expect(generic(2, 75)).toEqual([]);
+    // ...but outright bulk-mail copy still fails, in any thread.
+    expect(generic(2, 95)).toEqual(['genericity_score_too_high:95']);
+  });
+
+  it('a correct step-3 close is NOT rejected for an honest high score', () => {
+    expect(generic(3, 75)).toEqual([]);
+    expect(generic(3, 95)).toEqual(['genericity_score_too_high:95']);
+  });
+});
+
+describe('openingSpecific applies where the job calls for a specific opening', () => {
+  it('is required for the first email and the clarity layer', () => {
+    for (const step of [0, 1] as const) {
+      expect(reviewApplicabilityMatrix(step).openingSpecific, `step ${String(step)}`).toBe(true);
+      expect(isEmailReviewApprovable(review({ openingSpecific: false }), { sequenceStep: step, subjectIsThreadContinuity: step > 0 })).toBe(false);
+    }
+  });
+
+  it('is NOT required for a compression or a close', () => {
+    for (const step of [2, 3] as const) {
+      expect(reviewApplicabilityMatrix(step).openingSpecific, `step ${String(step)}`).toBe(false);
+      expect(isEmailReviewApprovable(review({ openingSpecific: false }), { sequenceStep: step, subjectIsThreadContinuity: true })).toBe(true);
+    }
   });
 });
 

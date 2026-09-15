@@ -194,6 +194,14 @@ export function renderEmail(
   inputs: EmailInputs,
   sequence: EmailSequencePosition = INITIAL_EMAIL_SEQUENCE,
 ): RenderedEmail {
+  // COHERENCE GUARD. Rendering is sequence-aware — the final step gets its own deterministic close —
+  // so rendering a THREADED email with the step-0 position silently produces the wrong CTA and the
+  // wrong provenance. That is exactly how a reviewer-rejected step-3 draft came to be persisted with
+  // the first email's ask, only to fail its own integrity check on resume. A thread to continue and
+  // "this is the first email" cannot both be true, so refuse the combination instead of rendering it.
+  if (inputs.threadSubject && sequence.step === 0) {
+    throw new Error('renderEmail: a threaded email cannot be rendered with the step-0 sequence position');
+  }
   const language = resolveEmailLanguage(inputs.facts);
   // A personal greeting is gated on the RECIPIENT, not merely on a name being known: knowing the
   // owner's name says nothing about whose inbox `info@practice.co.uk` is. Without a PERSONAL_VERIFIED

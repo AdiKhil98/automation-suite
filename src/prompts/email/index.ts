@@ -22,7 +22,11 @@ export const EMAIL_RUBRIC_VERSION = 'cold-email-copy-standard-4';
 // The JSON contract is unchanged, so EMAIL_SCHEMA_VERSION deliberately stays where it is, and drafts
 // written under the old instructions keep the versions they recorded.
 export const EMAIL_WRITER_PROMPT_VERSION = 'email-writer-8';
-export const EMAIL_REVIEWER_PROMPT_VERSION = 'email-reviewer-8';
+// Bumped again: the rejection conditions became step-scoped, so the reviewer is no longer told to
+// reject a compression or a close for lacking a specific opening, business relevance, persuasion, or
+// standalone specificity — dimensions the approval gate does not apply at those positions. The
+// WRITER prompt did not change in that revision, so the two versions legitimately differ.
+export const EMAIL_REVIEWER_PROMPT_VERSION = 'email-reviewer-9';
 
 export { SEQUENCE_JOBS_VERSION };
 
@@ -189,6 +193,37 @@ Game-changing; Tailored solution.`;
  * `validateEmail` fails the composition closed (`followup_thread_subject_missing`).
  */
 /**
+ * WHAT MAY CAUSE A REJECTION, scoped to the dimensions that actually apply at this position.
+ *
+ * The universal half is honesty and style, and never moves. The rest is copy-JOB quality: telling
+ * the reviewer to reject a Follow-up #4 because "the opening is generic" or "it could be sent to
+ * almost any business" would ask it to reject the job being done correctly — a close is short and
+ * leans on the thread — and the approval gate does not require those dimensions there either. A
+ * reviewer must never be instructed to REJECT for something the gate treats as non-applicable.
+ */
+function rejectConditions(seq: SequenceContext): string {
+  const universal = `Reject or require revisions when urgency is fabricated, competitor language is
+unsupported, AI-style language or punctuation fails, there is more than one CTA, evidence does not
+support every claim, or the email promises more than the approved demo visibly delivers.`;
+  if (seq.step === 0) {
+    return `${universal}
+Also reject when the opening is generic, business relevance is unclear, the email is unpersuasive, or
+it could be sent unchanged to almost any business.`;
+  }
+  if (seq.step === 1) {
+    return `${universal}
+Also reject when the opening is generic or the clarification could apply to almost any business.
+Do NOT reject because this email does not restate the business case or does not argue again: at this
+position that is correct.`;
+  }
+  return `${universal}
+Do NOT reject this email for being short, for not restating the observation or the business
+relevance, for not arguing again, or for reading as though it could apply to another business when
+taken out of context. It is read inside a thread that already carries that context, and being brief
+and unpersuasive is this position's job. Judge honesty, style, and the sequence booleans.`;
+}
+
+/**
  * The copy-JOB requirements for this step. Step 0 gets the first-email standard; every follow-up is
  * governed by its own sequence job instead, and receives nothing here that could contradict it.
  */
@@ -261,10 +296,7 @@ ${reviewerSubjectBlock(seq)}
 
 ${FORBIDDEN}
 
-Reject or require revisions when the opening is generic, business relevance is unclear,
-urgency is fabricated, competitor language is unsupported, AI-style language or punctuation fails,
-there is more than one CTA, the email could be sent unchanged to almost any business, evidence does
-not support every claim, or the email promises more than the approved demo visibly delivers.
+${rejectConditions(seq)}
 
 Judge the SINGLE-OBSERVATION, BUYER-LANGUAGE STANDARD with four fail-closed booleans:
 - singleObservation: false when the body makes more than one distinct observation, stacks findings, or

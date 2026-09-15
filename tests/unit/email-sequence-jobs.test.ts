@@ -10,7 +10,11 @@ import {
 import { SEQUENCE_JOBS_VERSION } from '../../src/prompts/email/sequence-jobs.js';
 import { EMAIL_SCHEMA_VERSION } from '../../src/domain/email/email-schema.js';
 import { type EmailReviewParsed } from '../../src/domain/email/email-schema.js';
-import { isEmailReviewApprovable, sequenceJobSatisfied } from '../../src/domain/email/email-review-gate.js';
+import {
+  isEmailReviewApprovable,
+  reviewApplicabilityMatrix,
+  sequenceJobSatisfied,
+} from '../../src/domain/email/email-review-gate.js';
 import { type EmailWriterParsed } from '../../src/domain/email/email-schema.js';
 import { replySubject } from '../../src/domain/email/email-render.js';
 import { type SequenceStep } from '../../src/domain/outreach/sequence.js';
@@ -298,7 +302,7 @@ describe('Follow-up #2 clarity contract (production regression)', () => {
   it('records the version bump so a stored draft traces to the instructions that produced it', () => {
     expect(SEQUENCE_JOBS_VERSION).toBe('sequence-jobs-4');
     expect(EMAIL_WRITER_PROMPT_VERSION).toBe('email-writer-8');
-    expect(EMAIL_REVIEWER_PROMPT_VERSION).toBe('email-reviewer-8');
+    expect(EMAIL_REVIEWER_PROMPT_VERSION).toBe('email-reviewer-9');
     // The JSON contract did not change, so the schema version deliberately did not move.
     expect(EMAIL_SCHEMA_VERSION).toBe('email-copy-schema-5');
   });
@@ -377,6 +381,77 @@ describe('no step receives an instruction that contradicts its own job', () => {
     for (const step of [0, 1, 2, 3] as const) {
       expect(prompts(step)[0]).toContain('The body never carries more than ONE evidence-backed observation');
       expect(prompts(step)[0]).not.toContain('The body makes exactly ONE evidence-backed observation');
+    }
+  });
+});
+
+describe('the reviewer is never told to reject for a dimension the gate does not apply', () => {
+  // The rejection instruction used to be one global sentence listing generic-opening, unclear
+  // business relevance and "could be sent to almost any business". At steps 2 and 3 the approval
+  // gate treats all of those as non-applicable, so instructing a REJECT for them would have the
+  // reviewer refuse the job being done correctly — and the gate would never have seen the verdict.
+  const reviewerAt = (step: SequenceStep): string =>
+    buildEmailReviewerMessages(brief, draft, seq(step, step === 0 ? null : 'Something I noticed')).system;
+
+  it('keeps the universal rejection conditions at every step', () => {
+    for (const step of [0, 1, 2, 3] as const) {
+      const prompt = reviewerAt(step);
+      expect(prompt).toContain('urgency is fabricated');
+      expect(prompt).toContain('competitor language is');
+      expect(prompt).toContain('there is more than one CTA');
+      expect(prompt).toContain('evidence does not');
+      expect(prompt).toContain('promises more than the approved demo visibly delivers');
+    }
+  });
+
+  it('step 0 keeps the full first-email rejection conditions', () => {
+    const prompt = reviewerAt(0);
+    expect(prompt).toContain('the opening is generic');
+    expect(prompt).toContain('business relevance is unclear');
+    expect(prompt).toContain('the email is unpersuasive');
+    expect(prompt).toContain('could be sent unchanged to almost any business');
+  });
+
+  it('step 1 keeps specificity but is told not to demand the business case again', () => {
+    const prompt = reviewerAt(1);
+    expect(prompt).toContain('the opening is generic');
+    expect(prompt).toMatch(/Do NOT reject because this email does not restate the business case/);
+    expect(prompt).not.toContain('business relevance is unclear');
+    expect(prompt).not.toContain('the email is unpersuasive');
+  });
+
+  it.each([2, 3] as const)('step %i is not told to reject for brevity, genericity or a missing argument', (step) => {
+    const prompt = reviewerAt(step);
+    // None of the first-email rejection conditions reach these positions...
+    expect(prompt).not.toContain('the opening is generic');
+    expect(prompt).not.toContain('business relevance is unclear');
+    expect(prompt).not.toContain('the email is unpersuasive');
+    expect(prompt).not.toContain('could be sent unchanged to almost any business');
+    // ...and the prompt says so explicitly, in each of the four ways this can go wrong.
+    expect(prompt).toMatch(/Do NOT reject this email for being short/);
+    expect(prompt).toMatch(/not restating the observation or the business\s*relevance/);
+    expect(prompt).toMatch(/for not arguing again/);
+    expect(prompt).toMatch(/could apply to another business when\s*taken out of context/);
+  });
+
+  it('step 3 is additionally told a non-specific close is correct', () => {
+    const prompt = reviewerAt(3);
+    expect(prompt).toMatch(/Do NOT lower businessRelevanceClear, persuasive, sufficientlyPersonalized/);
+    expect(prompt).toMatch(/THE ASK IS NOT IN THE BODY/);
+  });
+
+  it('the rejection scope matches the approval gate exactly', () => {
+    // Anything the reviewer is told to reject for at this step must be a dimension the gate
+    // actually requires there. This is the invariant the old global sentence broke.
+    const firstEmailOnly = ['business relevance is unclear', 'the email is unpersuasive'];
+    for (const step of [1, 2, 3] as const) {
+      const prompt = reviewerAt(step);
+      for (const condition of firstEmailOnly) {
+        expect(prompt, `step ${String(step)}: ${condition}`).not.toContain(condition);
+      }
+      if (!reviewApplicabilityMatrix(step).openingSpecific) {
+        expect(prompt, `step ${String(step)}: generic opening`).not.toContain('the opening is generic');
+      }
     }
   });
 });
