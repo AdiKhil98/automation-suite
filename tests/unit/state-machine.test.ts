@@ -27,6 +27,30 @@ describe('lead state machine', () => {
     expect(canTransition('SCHEDULED', 'SENT')).toBe(true);
   });
 
+  it('lets a rejected FOLLOW-UP return the lead to SENT, the counterpart of the sequence re-entry', () => {
+    // PRODUCTION: rejecting a Follow-up #2 through ReviewService threw
+    // InvalidStateTransitionError: READY_FOR_HUMAN_APPROVAL -> SENT. The table said the state could
+    // only advance or die, while this file's own SENT documentation said "rejecting a follow-up in
+    // review returns the lead to SENT — it never REJECTS the lead", and ReviewService implemented
+    // exactly that. The table was the thing that was wrong.
+    expect(canTransition('READY_FOR_HUMAN_APPROVAL', 'SENT')).toBe(true);
+
+    // The existing edges are untouched.
+    expect(canTransition('READY_FOR_HUMAN_APPROVAL', 'HUMAN_APPROVED')).toBe(true);
+    expect(canTransition('READY_FOR_HUMAN_APPROVAL', 'REJECTED')).toBe(true);
+    expect(allowedTransitions('READY_FOR_HUMAN_APPROVAL'))
+      .toEqual(['HUMAN_APPROVED', 'REJECTED', 'SENT', 'UNSUBSCRIBED']);
+  });
+
+  it('does NOT make SENT generally reachable', () => {
+    // The edge exists for one purpose: sequence recovery after a human rejects follow-up copy.
+    // Every other route into SENT is unchanged, and SCHEDULED remains the only forward one.
+    const intoSent = stateMachineInfo.statuses
+      .filter((from) => canTransition(from, 'SENT'))
+      .sort();
+    expect(intoSent).toEqual(['READY_FOR_HUMAN_APPROVAL', 'SCHEDULED']);
+  });
+
   it('rejects undocumented transitions', () => {
     expect(canTransition('NEW', 'QUALIFIED')).toBe(false);
     expect(canTransition('NEW', 'SENT')).toBe(false);

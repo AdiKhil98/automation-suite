@@ -61,7 +61,19 @@ const BASE_TRANSITIONS: Record<LeadStatus, LeadStatus[]> = {
   WAITING_FOR_DEMO_URL: ['READY_FOR_HUMAN_APPROVAL', 'FINALIZED_EMAIL_PENDING', 'REJECTED', 'NEEDS_MANUAL_REVIEW'],
   // Second human approval of the URL-resolved finalized email.
   FINALIZED_EMAIL_PENDING: ['HUMAN_APPROVED', 'REJECTED', 'NEEDS_MANUAL_REVIEW'],
-  READY_FOR_HUMAN_APPROVAL: ['HUMAN_APPROVED', 'REJECTED'],
+  // The human review queue. Approving advances; rejecting ends the lead — EXCEPT for follow-up copy.
+  //
+  // SENT is the follow-up rejection edge, and it is the counterpart of the SENT -> EMAIL_DRAFTED
+  // re-entry documented below. Rejecting a Follow-up #2 rejects THAT COPY, never the prospect: the
+  // lead has already been emailed, its outreach record is live, and REJECTED is terminal apart from
+  // an audited reopen. Returning it to SENT puts it back exactly where it stood before the sequence
+  // re-entry, leaving the outreach record and the immutable timeline untouched, so the step can be
+  // re-scheduled and fresh copy composed.
+  //
+  // NARROW BY CONSTRUCTION: `ReviewService.decideEmail` takes this edge ONLY when the rejected
+  // draft's `sequence_step >= 1`. A rejected FIRST email still goes to REJECTED, and nothing else
+  // in the pipeline transitions into SENT from here.
+  READY_FOR_HUMAN_APPROVAL: ['HUMAN_APPROVED', 'REJECTED', 'SENT'],
   // Phase 12: Gmail draft creation; auth/invalid conditions park for manual review.
   HUMAN_APPROVED: ['DRAFT_CREATED', 'NEEDS_MANUAL_REVIEW'],
   // Phase 13: schedule the created draft (no send). Cancel returns to DRAFT_CREATED; an invalid
