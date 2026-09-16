@@ -6,6 +6,126 @@ All notable changes per phase. Format loosely follows Keep a Changelog.
 
 ### Fixed
 
+- **The paragraph rule the model was GIVEN no longer contradicts the one it is JUDGED by.** The copy
+  standard still said "2-4 short natural paragraphs" at every step while validation had become
+  sequence-aware, so a model could obey its instructions at step 2 or 3 and be rejected by our own
+  validator. `PARAGRAPH_SHAPE` now lives in `email-types.ts` as the single source of truth: the
+  validator enforces it and the prompt sentence is GENERATED from it, for writer and reviewer alike.
+- **A standalone genericity score is no longer a rejection criterion where the thread carries the
+  specificity.** `genericity_score` asks how reusable the copy would be ON ITS OWN — the right
+  question for an email that arrives alone, the wrong one for a compression or a close. "I will
+  leave this with you. Either way, I will not keep nudging." can honestly score 90-100 and still be
+  exactly the right message, and the reviewer is already told not to reject those steps for reading
+  as though they could apply to another business. The previous 80 ceiling was a number with no
+  source in the lesson; steps 2 and 3 now do not apply the metric as a gate at all. Steps 0 and 1
+  keep 40. The model still reports the score honestly at every step — nothing tells it to report a
+  lower one — and the prompt for steps 2-3 says so explicitly, so it does not pad copy with
+  unnecessary specifics to chase a number.
+- Audit follow-ups: the final step is now told that `primary_cta` must be REPLY_FOR_DETAILS (the
+  global "if VIEW_CONCEPT is allowed" rule otherwise pointed at a CTA deterministic validation
+  refuses there), and that `evidence_ids` remain PROVENANCE rather than a licence to restate the
+  finding — every email must cite evidence, including a close that makes no claims.
+
+- **A reviewer-rejected follow-up was persisted with first-email rendering.** `buildPersist` defaulted
+  its render to `INITIAL_EMAIL_SEQUENCE`, and the reviewer-rejected path used that default. Now that
+  rendering is sequence-aware, a step-3 draft was STORED carrying "reply and I will share the
+  details" while the reviewer had judged the binary close — and a later reviewer-only resume
+  re-renders correctly and reports RENDER_MISMATCH on a draft nobody touched. `buildPersist` now
+  REQUIRES the `EmailSequencePosition` and renders from it itself; there is no defaulted render and
+  no render argument to get wrong. `renderEmail` additionally refuses the incoherent combination of a
+  thread subject with the step-0 position, which caught thirteen further call sites that were
+  rendering threaded emails as first emails.
+- **`openingSpecific` was a first-email requirement applied to every step.** A final close has no
+  material left to be specific about ("I will leave this with you" is the job), and a compression is
+  told not to explain again. It is now required at steps 0-1 only, and the reviewer's global
+  rejection sentence — "the opening is generic ... business relevance is unclear ... could be sent
+  unchanged to almost any business" — is scoped per step, so the reviewer is never instructed to
+  REJECT for a dimension the approval gate treats as non-applicable.
+- **`genericity_score > 40` was applied to every step.** The score measures how reusable the copy
+  would be STANDALONE; a Follow-up #3 compression and a Follow-up #4 close are short and read inside
+  a thread that already carries the specificity, so a truthful model self-rejected for doing its job.
+  The ceiling is now per step (0 and 1: 40, unchanged; 2 and 3: 80 — outright bulk-mail copy still
+  fails in any thread). The model is NOT told to report a lower number: honest reporting is
+  unchanged, and only the reading of it moved.
+
+- **Deterministic validation carried first-email assumptions into every follow-up.** Three of them,
+  each of which deterministically rejected copy doing exactly what its lesson job asks:
+  * PARAGRAPHS. 2-4 paragraphs were required everywhere. Follow-up #3 compresses to "ideally one or
+    two short sentences" and Follow-up #4 is a shorter close. The shape is now per step
+    (0: 2-4, 1: 1-3, 2: 1-2, 3: 1-2); the word cap and every safety rule stay global.
+  * REVIEWER GATE. `businessRelevanceClear`, `persuasive`, `sufficientlyPersonalized`,
+    `singleObservation` and `confidentObservation` were required at every step, so a CORRECT
+    Follow-up #4 — instructed to carry no observation, no relevance sentence and no persuasion —
+    could be rejected for lacking what it was told not to write. Dimensions are now classified once,
+    as data, in an explicit matrix: universal safety/honesty/style always applies; copy-job quality
+    applies only where that job does. The reviewer rubric tells each step the same thing.
+  * FINAL CTA. The renderer appended "reply and I will share the details" at every step, which asks
+    for a conversation at the position whose job is to close one. Follow-up #4 now renders a
+    deterministic binary close ("...reply yes. If not, no is a complete answer."). The model
+    contract is unchanged — step 3 still emits REPLY_FOR_DETAILS and still must not write its own
+    ask — and `VIEW_CONCEPT` at the final step is now refused outright
+    (`final_step_requires_binary_reply_cta`).
+- **The reviewer judged a body whose ask it could not see.** The CTA is appended after generation, so
+  `binaryReplyClose` was a guess about text the model was forbidden to write. The exact sentence the
+  renderer will append is now included in the reviewer prompt, and the step-3 rubric says to judge
+  the close against it rather than against the body alone.
+- Repetition thresholds RECALIBRATED against the authoritative stored Outreach #1 (the fixture was
+  previously a reconstruction). The production Follow-up #2 measures `run=3, reuse=0.23` — it
+  rephrased rather than lifted — while every legitimate follow-up measured scores 0.06 or less, so
+  `maxSharedBigramRatio` moved 0.20 -> 0.15, into the middle of that gap instead of its edge.
+  `maxSharedContentRun` (4) and `minNovelContentTokens` (4) are unchanged and still justified: the
+  step-2 and step-3 re-explanations reach runs of 6 and 4, and the bare nudge contributes 2 novel
+  words against a floor of 4.
+
+- **Follow-up #2 could restate Outreach #1 and be approved.** The step-1 writer job ended with
+  "Preserve continuity with the original email: same observation, same angle, same outcome" — an
+  instruction a model satisfies by rewriting the first email, and in production one did: the same
+  cookie-banner observation and the same friction consequence in fresh words. Nothing stopped it.
+  The reviewer's `addsClarityNotRestart` only listed ways of RESTARTING (restart the pitch,
+  re-introduce, recap, "just following up", switch angle) — none of which a fluent paraphrase does —
+  and no deterministic check ever compared the candidate with what had already been sent. Three
+  changes:
+  * the step-1 writer job now requires naming what the first email established and adding exactly
+    one new layer (distinction, concrete implication, specific moment, or an artefact offered), and
+    makes the REFERENCE-vs-RESTATE line explicit, including that synonyms are still restating;
+  * the step-1 reviewer rubric is decided by one question — "what new understanding does the
+    prospect gain that they did not already have?" — and `addsClarityNotRestart` is false for a
+    paraphrase, repeated evidence, a consequence restated in synonyms, or a message that leaves the
+    prospect knowing nothing new. Fabrication and honesty rules are untouched;
+  * a deterministic, model-free anti-repetition gate (`followup-repetition.ts`) compares the
+    candidate body with the bodies already sent and emits `followup_repeats_prior_message` before the
+    reviewer is ever called.
+- **A rejected follow-up could not be regenerated.** Rejecting step-1 copy correctly returns the lead
+  to SENT and cancels the pending row, but the preparation runner then treated that rejection as
+  applying to any FUTURE row for the same step: re-scheduling step 1 — the only way to ask for
+  replacement copy — was cancelled again on the next timer fire. A pending row scheduled strictly
+  AFTER the human rejection is now recognised as a deliberate replacement request, so the rescheduled
+  step composes fresh copy. Eligibility is decided by `email_drafts.human_reviewed_at` — the rejection
+  is the causal event, and comparing draft CREATION time would misread the ordinary
+  compose -> schedule -> reject order as a stale rejection. A REJECTED draft with no recorded review
+  time fails closed. The rejected draft is never touched and migration 0044 is unchanged: its partial
+  index already excludes REJECTED rows, so the replacement occupies the slot legally.
+- The deterministic gate is now STEP-AWARE. It never claimed to, but it did require new content from
+  every follow-up — which contradicts two of the three lesson jobs: Follow-up #3 compresses and
+  Follow-up #4 closes, and neither may add value. Replay detection applies at every follow-up step;
+  the novelty floor belongs to step 1 alone.
+- A follow-up composed with NO prior sent message now fails closed (`followup_prior_messages_missing`)
+  instead of silently skipping the comparison it could not perform.
+- Rendered NAMED greetings ("Hello Dr Richard,") are stripped before comparison. They were not, because
+  a named greeting cannot be matched as a fixed phrase; the greeting LINE is now removed by shape,
+  derived from the renderer's own greeting words and referencing no prospect name.
+- **The global copy standard contradicted the follow-up jobs.** "Start email_body with a verified
+  observation", "explain why the issue matters", "state the business relevance" and "connect the
+  observation to ONE outcome" were sent to every step. They are right for Outreach #1 and demand
+  exactly the restatement the follow-up jobs forbid — a second, independent cause of the production
+  failure. Those copy-JOB requirements now belong to step 0 alone; each follow-up receives an explicit
+  release from them, and the outcome REQUIREMENT is separated from the outcome GUARDRAIL (never sell
+  the tool, never invent a number), which stays global along with all safety, evidence, fabrication
+  and style rules.
+- Prompt versions bumped (`sequence-jobs-5`, `email-writer-9`, `email-reviewer-10`). The JSON contract
+  did not change, so `EMAIL_SCHEMA_VERSION` deliberately stays at `email-copy-schema-5`, and drafts
+  written under the old instructions keep the versions they recorded.
+
 - **The reviewer-only retry budget was per-call, not per-draft.** Because failed reviewer attempts
   now deliberately increment `total_cost_usd`, admitting a retry on "this one call fits under the
   cap" would let unlimited retries walk past the per-lead budget while each call looked affordable.

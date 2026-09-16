@@ -2,11 +2,19 @@ import { describe, expect, it } from 'vitest';
 import {
   buildEmailReviewerMessages,
   buildEmailWriterMessages,
+  EMAIL_REVIEWER_PROMPT_VERSION,
+  EMAIL_WRITER_PROMPT_VERSION,
   type EmailBrief,
   type SequenceContext,
 } from '../../src/prompts/email/index.js';
+import { SEQUENCE_JOBS_VERSION } from '../../src/prompts/email/sequence-jobs.js';
+import { EMAIL_SCHEMA_VERSION } from '../../src/domain/email/email-schema.js';
 import { type EmailReviewParsed } from '../../src/domain/email/email-schema.js';
-import { isEmailReviewApprovable, sequenceJobSatisfied } from '../../src/domain/email/email-review-gate.js';
+import {
+  isEmailReviewApprovable,
+  reviewApplicabilityMatrix,
+  sequenceJobSatisfied,
+} from '../../src/domain/email/email-review-gate.js';
 import { type EmailWriterParsed } from '../../src/domain/email/email-schema.js';
 import { replySubject } from '../../src/domain/email/email-render.js';
 import { type SequenceStep } from '../../src/domain/outreach/sequence.js';
@@ -222,5 +230,279 @@ describe('thread continuity', () => {
     expect(replySubject('Something I noticed')).toBe('Re: Something I noticed');
     expect(replySubject('Re: Something I noticed')).toBe('Re: Something I noticed');
     expect(replySubject('RE: Something I noticed')).toBe('RE: Something I noticed');
+  });
+});
+
+describe('Follow-up #2 clarity contract (production regression)', () => {
+  // The step-1 job used to say "Preserve continuity with the original email: same observation, same
+  // angle, same outcome" — an instruction a model satisfies by rewriting Outreach #1, which is
+  // exactly what shipped. Both prompts now demand a NEW layer and name the failure mode.
+  const writerStep1 = (): string => buildEmailWriterMessages(brief, null, seq(1)).system;
+  const reviewerStep1 = (): string => buildEmailReviewerMessages(brief, draft, seq(1)).system;
+
+  it('no longer tells the writer to reproduce the same observation and outcome', () => {
+    expect(writerStep1()).not.toContain('same observation, same angle, same outcome');
+  });
+
+  it('makes the reference-vs-restate distinction explicit for the writer', () => {
+    const system = writerStep1();
+    expect(system).toContain('REFERENCE THE PREVIOUS ISSUE — DO NOT RESTATE IT');
+    expect(system).toMatch(/REFERENCE \(required\)/);
+    expect(system).toMatch(/RESTATE \(forbidden\)/);
+    // Synonyms are named as the trap they are.
+    expect(system).toMatch(/fresh synonyms is still saying the same thing/i);
+  });
+
+  it('tells the writer to work out what the first email already established', () => {
+    const system = writerStep1();
+    expect(system).toMatch(/what it ALREADY established/);
+    expect(system).toMatch(/WHAT COUNTS AS A NEW LAYER/);
+    // ...and that a new layer is not licence to invent evidence.
+    expect(system).toMatch(/A new LAYER is not a new CLAIM: invent nothing/);
+  });
+
+  it('keeps the step-1 constraints that already worked', () => {
+    const system = writerStep1();
+    expect(system).toContain('just following up');
+    expect(system).toContain('Do NOT restart the pitch');
+    expect(system).toMatch(/SHORTER and easier to read than the first email/);
+    expect(system).toMatch(/No pressure, no deadline, no scarcity/);
+  });
+
+  it('gives the reviewer the question that decides the verdict', () => {
+    const system = reviewerStep1();
+    expect(system).toMatch(/WHAT NEW UNDERSTANDING DOES THE PROSPECT GAIN/);
+    expect(system).toMatch(/If the honest answer is "none"/);
+  });
+
+  it('names every way a step-1 email can fail by adding nothing', () => {
+    const system = reviewerStep1();
+    expect(system).toMatch(/paraphrases the previous observation/);
+    expect(system).toMatch(/repeats the same evidence without adding a clarification/);
+    expect(system).toMatch(/restates the same business consequence in synonyms/);
+    expect(system).toMatch(/knowing essentially nothing they did not know before/);
+    expect(system).toMatch(/Fluent rewriting is not clarity/);
+  });
+
+  it('does not weaken the fabrication and honesty rules', () => {
+    const system = reviewerStep1();
+    expect(system).toContain('fabricationRisk');
+    expect(system).toMatch(/Never invent customer behavior, revenue, performance/);
+    expect(system).toContain('SINGLE-OBSERVATION, BUYER-LANGUAGE STANDARD');
+  });
+
+  it('leaves steps 2 and 3 with their own jobs', () => {
+    expect(buildEmailWriterMessages(brief, null, seq(2)).system).toContain('COMPRESS THE ISSUE AND REDUCE PRESSURE');
+    expect(buildEmailWriterMessages(brief, null, seq(3)).system).toContain('create ONE clean YES / NO decision');
+    // The step-1 clarity block belongs to step 1 only.
+    expect(buildEmailWriterMessages(brief, null, seq(2)).system).not.toContain('REFERENCE THE PREVIOUS ISSUE');
+    expect(buildEmailWriterMessages(brief, null, seq(0)).system).not.toContain('REFERENCE THE PREVIOUS ISSUE');
+  });
+
+  it('records the version bump so a stored draft traces to the instructions that produced it', () => {
+    expect(SEQUENCE_JOBS_VERSION).toBe('sequence-jobs-5');
+    expect(EMAIL_WRITER_PROMPT_VERSION).toBe('email-writer-9');
+    expect(EMAIL_REVIEWER_PROMPT_VERSION).toBe('email-reviewer-10');
+    // The JSON contract did not change, so the schema version deliberately did not move.
+    expect(EMAIL_SCHEMA_VERSION).toBe('email-copy-schema-5');
+  });
+});
+
+describe('no step receives an instruction that contradicts its own job', () => {
+  // The copy-JOB requirements — open on the observation, explain why it matters, connect it to an
+  // outcome — used to be global. They are right for Outreach #1 and wrong for every follow-up: they
+  // demand exactly the restatement the sequence jobs forbid, which is how a Follow-up #2 that
+  // repeated Outreach #1 came to be written AND approved.
+  const prompts = (step: SequenceStep): string[] => [
+    buildEmailWriterMessages(brief, null, seq(step, step === 0 ? null : 'Something I noticed')).system,
+    buildEmailReviewerMessages(brief, draft, seq(step, step === 0 ? null : 'Something I noticed')).system,
+  ];
+
+  /** The first-email body requirements, each phrased as it appears in the prompt. */
+  const FIRST_EMAIL_REQUIREMENTS = [
+    'Start email_body with a verified observation',
+    'Explain why the issue matters in the customer or patient journey',
+    'State the business relevance in ONE short sentence',
+    'Connect that observation to ONE useful business outcome',
+  ];
+
+  it('step 0 keeps the full observation -> relevance -> outcome standard', () => {
+    for (const prompt of prompts(0)) {
+      for (const requirement of FIRST_EMAIL_REQUIREMENTS) expect(prompt).toContain(requirement);
+    }
+  });
+
+  it.each([1, 2, 3] as const)('step %i receives NONE of them', (step) => {
+    for (const prompt of prompts(step)) {
+      for (const requirement of FIRST_EMAIL_REQUIREMENTS) expect(prompt).not.toContain(requirement);
+    }
+  });
+
+  it.each([1, 2, 3] as const)('step %i is told it does not owe a restatement', (step) => {
+    const writer = prompts(step)[0]!;
+    const release = {
+      1: 'YOU ARE NOT REQUIRED TO RESTATE ANYTHING',
+      2: 'You are NOT required to open on the observation',
+      3: 'This email carries NO observation, NO business-relevance sentence and NO outcome argument',
+    }[step];
+    expect(writer).toContain(release);
+  });
+
+  it('the outcome REQUIREMENT is step 0 only; the outcome GUARDRAIL is everywhere', () => {
+    expect(prompts(0)[0]).toContain('Connect the evidence-backed observation to ONE of those outcomes');
+    for (const step of [1, 2, 3] as const) {
+      expect(prompts(step)[0]).not.toContain('Connect the evidence-backed observation to ONE of those outcomes');
+      // ...while "never sell the tool, never invent a number" still applies at every step.
+      expect(prompts(step)[0]).toContain('OUTCOMES GET PAID. TOOLS DON\'T.');
+      expect(prompts(step)[0]).toContain('Do NOT quantify an outcome');
+    }
+  });
+
+  it('keeps safety, evidence, fabrication and style rules global', () => {
+    const shared = [
+      'SECURITY AND EVIDENCE RULES',
+      'Never invent customer behavior, revenue, performance',
+      'Never write a URL',
+      'FORBIDDEN PHRASES INCLUDE',
+      'No em dash, en dash as separator',
+      'SINGLE-OBSERVATION, BUYER-LANGUAGE STANDARD',
+      'COLD EMAIL COPY STANDARD',
+    ];
+    for (const step of [0, 1, 2, 3] as const) {
+      for (const rule of shared) {
+        expect(prompts(step)[0], `writer step ${String(step)}`).toContain(rule);
+        expect(prompts(step)[1], `reviewer step ${String(step)}`).toContain(rule);
+      }
+    }
+  });
+
+  it('the single-observation rule no longer demands an observation the job forbids', () => {
+    // Step 3 carries none by design, so the rule is a ceiling ("never more than one"), not a floor.
+    for (const step of [0, 1, 2, 3] as const) {
+      expect(prompts(step)[0]).toContain('The body never carries more than ONE evidence-backed observation');
+      expect(prompts(step)[0]).not.toContain('The body makes exactly ONE evidence-backed observation');
+    }
+  });
+});
+
+describe('the reviewer is never told to reject for a dimension the gate does not apply', () => {
+  // The rejection instruction used to be one global sentence listing generic-opening, unclear
+  // business relevance and "could be sent to almost any business". At steps 2 and 3 the approval
+  // gate treats all of those as non-applicable, so instructing a REJECT for them would have the
+  // reviewer refuse the job being done correctly — and the gate would never have seen the verdict.
+  const reviewerAt = (step: SequenceStep): string =>
+    buildEmailReviewerMessages(brief, draft, seq(step, step === 0 ? null : 'Something I noticed')).system;
+
+  it('keeps the universal rejection conditions at every step', () => {
+    for (const step of [0, 1, 2, 3] as const) {
+      const prompt = reviewerAt(step);
+      expect(prompt).toContain('urgency is fabricated');
+      expect(prompt).toContain('competitor language is');
+      expect(prompt).toContain('there is more than one CTA');
+      expect(prompt).toContain('evidence does not');
+      expect(prompt).toContain('promises more than the approved demo visibly delivers');
+    }
+  });
+
+  it('step 0 keeps the full first-email rejection conditions', () => {
+    const prompt = reviewerAt(0);
+    expect(prompt).toContain('the opening is generic');
+    expect(prompt).toContain('business relevance is unclear');
+    expect(prompt).toContain('the email is unpersuasive');
+    expect(prompt).toContain('could be sent unchanged to almost any business');
+  });
+
+  it('step 1 keeps specificity but is told not to demand the business case again', () => {
+    const prompt = reviewerAt(1);
+    expect(prompt).toContain('the opening is generic');
+    expect(prompt).toMatch(/Do NOT reject because this email does not restate the business case/);
+    expect(prompt).not.toContain('business relevance is unclear');
+    expect(prompt).not.toContain('the email is unpersuasive');
+  });
+
+  it.each([2, 3] as const)('step %i is not told to reject for brevity, genericity or a missing argument', (step) => {
+    const prompt = reviewerAt(step);
+    // None of the first-email rejection conditions reach these positions...
+    expect(prompt).not.toContain('the opening is generic');
+    expect(prompt).not.toContain('business relevance is unclear');
+    expect(prompt).not.toContain('the email is unpersuasive');
+    expect(prompt).not.toContain('could be sent unchanged to almost any business');
+    // ...and the prompt says so explicitly, in each of the four ways this can go wrong.
+    expect(prompt).toMatch(/Do NOT reject this email for being short/);
+    expect(prompt).toMatch(/not restating the observation or the business\s*relevance/);
+    expect(prompt).toMatch(/for not arguing again/);
+    expect(prompt).toMatch(/could apply to another business when\s*taken out of context/);
+  });
+
+  it('step 3 is additionally told a non-specific close is correct', () => {
+    const prompt = reviewerAt(3);
+    expect(prompt).toMatch(/Do NOT lower businessRelevanceClear, persuasive, sufficientlyPersonalized/);
+    expect(prompt).toMatch(/THE ASK IS NOT IN THE BODY/);
+  });
+
+  it('the rejection scope matches the approval gate exactly', () => {
+    // Anything the reviewer is told to reject for at this step must be a dimension the gate
+    // actually requires there. This is the invariant the old global sentence broke.
+    const firstEmailOnly = ['business relevance is unclear', 'the email is unpersuasive'];
+    for (const step of [1, 2, 3] as const) {
+      const prompt = reviewerAt(step);
+      for (const condition of firstEmailOnly) {
+        expect(prompt, `step ${String(step)}: ${condition}`).not.toContain(condition);
+      }
+      if (!reviewApplicabilityMatrix(step).openingSpecific) {
+        expect(prompt, `step ${String(step)}: generic opening`).not.toContain('the opening is generic');
+      }
+    }
+  });
+});
+
+describe('final audit: no global rule contradicts a step job', () => {
+  const writerAt = (step: SequenceStep): string =>
+    buildEmailWriterMessages(brief, null, seq(step, step === 0 ? null : 'Something I noticed')).system;
+
+  it('the demo CTA rule no longer reaches the one position that forbids it', () => {
+    // The copy standard still says "if VIEW_CONCEPT is allowed, explain what the concept
+    // demonstrates" — true everywhere it can be chosen. Deterministic validation forbids it at the
+    // final step, so that step is told so directly rather than being left to pick a CTA we reject.
+    expect(writerAt(3)).toMatch(/primary_cta MUST be REPLY_FOR_DETAILS here/);
+    expect(writerAt(3)).toMatch(/approved-concept CTA is not available in the final\s*email/);
+    for (const step of [0, 1, 2] as const) {
+      expect(writerAt(step)).not.toContain('primary_cta MUST be REPLY_FOR_DETAILS here');
+    }
+  });
+
+  it('evidence binding is explained as provenance where the job forbids restating it', () => {
+    // Every email must cite evidence (`missing_evidence_ids`, `missing_finding_evidence`), including
+    // a close that makes no claims. Without this line, "cite the finding" could be read as "mention
+    // the finding", which is exactly what the final step must not do.
+    expect(writerAt(3)).toMatch(/That is PROVENANCE, not a\s*licence to restate the finding/);
+  });
+
+  it('honest genericity reporting is asked for where the score is not a gate', () => {
+    for (const step of [2, 3] as const) {
+      expect(writerAt(step)).toMatch(/Report genericity_score HONESTLY/);
+      expect(writerAt(step)).toMatch(/do not (pad the copy|add specifics)/i);
+    }
+    // Steps 0 and 1 are still judged on it, so they get no such note.
+    for (const step of [0, 1] as const) {
+      expect(writerAt(step)).not.toContain('Report genericity_score HONESTLY');
+    }
+  });
+
+  it('the shared standard keeps only rules that are true at every position', () => {
+    // A spot-check of the survivors: safety, evidence honesty, style, punctuation, one CTA.
+    for (const step of [0, 1, 2, 3] as const) {
+      const prompt = writerAt(step);
+      for (const rule of [
+        'Use only supplied evidence',
+        'Never write a URL',
+        'Create urgency only from the verified problem',
+        'Choose exactly one primary_cta',
+        'No em dash, en dash as separator',
+        'The body never carries more than ONE evidence-backed observation',
+      ]) {
+        expect(prompt, `step ${String(step)}: ${rule}`).toContain(rule);
+      }
+    }
   });
 });

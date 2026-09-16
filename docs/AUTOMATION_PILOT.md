@@ -408,6 +408,81 @@ skip the record as `AWAITING_HUMAN_REVIEW` while the failed draft is the newest 
 follow-up step. Resume requires the lead at `EMAIL_REVIEW_FAILED`, the draft at `REVIEW_FAILED`, and
 the debug record for its run to still exist (`EMAIL_DEBUG_DIR`, 7-day TTL).
 
+## Follow-up #2 must add something (anti-repetition)
+
+A follow-up that says the first email again in different words is worthless, and one reached human
+review in production. Three layers now answer it:
+
+| layer | what it does | what it cannot do |
+|---|---|---|
+| writer prompt (step 1) | must state what the first email established, then add ONE new layer; reference the issue, never restate it | nothing forces a model to comply |
+| deterministic gate | compares the candidate body with everything already sent; `followup_repeats_prior_message`. Free, runs before the reviewer | cannot see a true synonym rewrite |
+| reviewer (`addsClarityNotRestart`) | answers "what new understanding does the prospect gain?"; false for paraphrase, repeated evidence, or a consequence restated in synonyms | judgement, not arithmetic |
+
+The gate is STEP-AWARE, because the steps have different jobs:
+
+| step | job | replay refused | new content required |
+|---|---|---|---|
+| 1 — Follow-up #2 | add clarity | yes | **yes** |
+| 2 — Follow-up #3 | compress, reduce pressure | yes | no — a short compression that adds nothing is the job |
+| 3 — Follow-up #4 | binary yes/no close | yes | no — a close carries no new business information by design |
+
+A follow-up with no prior sent message fails closed (`followup_prior_messages_missing`): the
+comparison could not be performed, and an unperformed check must never read as a pass.
+
+The gate is deliberately conservative — naming the same issue ("cookie banner", "mobile", the
+business name, the thread subject) is continuity, not repetition, and is never penalised. Thresholds
+live in `REPETITION_LIMITS` with the measurements that set them.
+
+**Regenerating rejected copy.** Rejecting a follow-up rejects THAT COPY: the lead returns to SENT,
+the outreach record and its history are untouched, and the rejected draft is preserved. The pending
+row is then cancelled by the preparation runner. To get replacement copy, re-schedule that step
+(`outreach schedule-followup`); the next preparation run composes fresh copy for it, because a row
+scheduled strictly AFTER the human rejection is a deliberate replacement request. Eligibility is read
+from `email_drafts.human_reviewed_at` — the rejection, not the draft's creation, is the causal event —
+and a rejection with no recorded decision time fails closed. No writer call happens until
+preparation runs, and migration 0044's index allows the new draft because REJECTED rows are excluded
+from it.
+
+## What each sequence position is actually judged on
+
+Every email in the sequence has a different job, so the deterministic rules and the approval gate are
+per step, not global. Safety, honesty and style never move.
+
+| | step 0 Outreach #1 | step 1 Follow-up #2 | step 2 Follow-up #3 | step 3 Follow-up #4 |
+|---|---|---|---|---|
+| job | earn attention | add clarity | compress, reduce pressure | binary yes/no close |
+| paragraphs (prompt AND validator, from `PARAGRAPH_SHAPE`) | 2-4 | 1-3 | 1-2 | 1-2 |
+| replay refused | n/a | yes | yes | yes |
+| new content required | n/a | yes | no | no |
+| body states observation / relevance / outcome | required | not required | not required | forbidden |
+| genericity_score ceiling | 40 | 40 | not applied | not applied |
+| reviewer: openingSpecific | required | required | not applied | not applied |
+| reviewer: businessRelevanceClear, persuasive | required | not applied | not applied | not applied |
+| reviewer: sufficientlyPersonalized | required | required | not applied | not applied |
+| reviewer: singleObservation, confidentObservation | required | required | required | not applied |
+| rendered CTA | "reply and I will share the details" | same | same | deterministic binary close |
+| VIEW_CONCEPT allowed | yes | yes | yes | **no** |
+
+Universal at every step, fail-closed: `decision=APPROVE`, no fabrication risk, evidence supports
+every claim, urgency supported, competitor claims supported, human style, punctuation, exactly one
+primary CTA, buyer language, conversation-not-audit, demo alignment, non-generic opening, plus the
+sequence-job booleans for that step.
+
+`genericity_score` is still reported honestly at every step; at steps 2-3 it is simply not read as a
+rejection criterion, because a short message that leans on its thread is supposed to look reusable
+out of context. What protects those positions instead is the anti-replay gate, the sequence-job
+booleans, forbidden phrases, the CTA rules and every safety rule — all unchanged.
+
+Every persisted draft is rendered from its REAL sequence position — `buildPersist` requires it and
+`renderEmail` refuses a threaded email rendered as a first email — so what the reviewer judged, what
+was stored, and what a later resume re-renders are the same bytes.
+
+The final ask is written by the SYSTEM, not the model — the copy standard forbids a CTA in the body,
+so a step-3 model writing its own close would create two asks. The reviewer is shown the exact
+sentence that will be appended, so `binaryReplyClose` is judged against the message the recipient
+actually receives.
+
 ## Controlled first-follow-up validation
 
 **The point of no return is the SCHEDULE stage.** Dispatch requires `leads.status='SCHEDULED'` AND an

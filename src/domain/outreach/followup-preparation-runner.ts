@@ -39,7 +39,25 @@ export interface FollowupCandidateView {
    * repeated timer run a no-op; its human decision is what distinguishes "still awaiting review"
    * from "the operator rejected this copy".
    */
-  existingDraft: { id: string; humanDecision: string | null } | null;
+  existingDraft: {
+    id: string;
+    humanDecision: string | null;
+    /**
+     * WHEN THE HUMAN DECIDED — not when the draft was written. The rejection is the causal event: a
+     * draft can be composed, a follow-up row can be scheduled, and only then can a human reject it.
+     * Comparing draft CREATION time would read that ordinary sequence as "the row came later, so the
+     * rejection is stale" and compose replacement copy for a rejection that had not happened yet.
+     * Null on a REJECTED draft means the decision's time was never recorded, so causality cannot be
+     * established at all and the rejection stands.
+     */
+    humanReviewedAtMs: number | null;
+  } | null;
+  /**
+   * When the PENDING follow-up row was created. Compared against the human REJECTION time to tell
+   * "this rejection is about the row in front of me" from "an operator rejected the old copy and
+   * then deliberately rescheduled this step, asking for a replacement".
+   */
+  followupCreatedAtMs: number;
 }
 
 export type FollowupPrepareAction =
@@ -79,7 +97,23 @@ export function decideFollowupPreparation(c: FollowupCandidateView): FollowupPre
   if (!suppression.allowed) {
     return { action: 'BLOCKED', reason: suppression.reason, detail: suppression.detail };
   }
-  if (c.existingDraft) {
+  // A pending row scheduled STRICTLY AFTER a human rejection is a deliberate request for
+  // replacement copy: the operator saw that draft, rejected it, and then re-scheduled the step
+  // through the normal path — the only way a replacement is ever asked for. Treating that rejection
+  // as if it applied to the new row would cancel the freshly-scheduled follow-up on the next timer
+  // fire, making regeneration impossible without editing the database by hand.
+  //
+  // The comparison is against the REJECTION time, never the draft's creation time: composing a
+  // draft, scheduling a row and rejecting the draft is a perfectly ordinary order of events, and
+  // reading creation time would misclassify it as a superseded rejection. Fail closed when the
+  // rejection carries no timestamp — an unknown decision time can never license fresh spend.
+  //
+  // The rejected row itself is never touched, and migration 0044's index permits the replacement
+  // precisely because REJECTED rows are excluded from it.
+  const rejectedAtMs = c.existingDraft?.humanDecision === 'REJECTED' ? c.existingDraft.humanReviewedAtMs : null;
+  const rejectionSupersededByReschedule = rejectedAtMs !== null && c.followupCreatedAtMs > rejectedAtMs;
+
+  if (c.existingDraft && !rejectionSupersededByReschedule) {
     if (c.existingDraft.humanDecision === 'REJECTED') {
       return {
         action: 'CANCEL_REJECTED',

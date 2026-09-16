@@ -2,10 +2,15 @@ import {
   DEMO_URL_TOKEN,
   type EmailSequencePosition,
   MAX_EMAIL_WORDS,
+  // The paragraph shape is shared with the prompt the model is given: one source of truth, so the
+  // instructions and the validator can never disagree about what a step's body should look like.
+  PARAGRAPH_SHAPE,
   replySubject,
   type EmailWriterOutput,
 } from './email-types.js';
 import { type EmailLanguage, hasForeignLanguage } from './email-language.js';
+import { analyzeFollowupRepetition } from './followup-repetition.js';
+import { FINAL_FOLLOWUP_STEP, type SequenceStep } from '../outreach/sequence.js';
 
 export interface EmailValidationContext {
   availableEvidenceIds: Set<string>;
@@ -182,6 +187,88 @@ function validateSubjects(
 }
 
 /**
+ * CTA COMPATIBILITY WITH THE SEQUENCE POSITION.
+ *
+ * The FINAL email closes the sequence with one clean yes/no decision, and the renderer appends a
+ * deterministic binary sentence for exactly that. A demo link at that position asks for something
+ * else entirely — it reopens the conversation the email exists to close — so `VIEW_CONCEPT` is
+ * refused there outright rather than silently rendered as something it is not.
+ *
+ * Steps 1 and 2 get no extra CTA rule: their lesson jobs say nothing about which ask is appropriate
+ * beyond the single-CTA requirement every step already carries, and inventing one here would be a
+ * rule with no source. The "no second ask in the body" constraint is enforced globally by
+ * `cta_in_model_body`, which is why the deterministic close cannot collide with a model-written one.
+ */
+function validateSequenceCta(out: EmailWriterOutput, sequence: EmailSequencePosition): string[] {
+  if (sequence.step === FINAL_FOLLOWUP_STEP && out.primary_cta !== 'REPLY_FOR_DETAILS') {
+    return [`final_step_requires_binary_reply_cta:${out.primary_cta}`];
+  }
+  return [];
+}
+
+/**
+ * WHERE A STANDALONE GENERICITY SCORE IS A REJECTION CRITERION AT ALL.
+ *
+ * `genericity_score` is defined for the model as 0 = uniquely specific, 100 = reusable for almost any
+ * business — judged on the email ALONE. That is the right question for an email that arrives alone.
+ *
+ * It is the wrong question for a compression or a close. "I will leave this with you. Either way, I
+ * will not keep nudging." can honestly score 90-100 standalone and still be exactly the right
+ * message, because the THREAD carries the specificity — which is also precisely what the reviewer is
+ * now told not to reject those steps for. Any numeric ceiling there would be a rule with no source
+ * in the lesson: it would reject correct copy for a property the position is supposed to have. So
+ * the metric is simply NOT APPLIED as a gate at steps 2 and 3.
+ *
+ * The model still reports the score honestly at every step — nothing instructs it to report a lower
+ * one, and the value stays on the record. What protects steps 2-3 instead is everything that
+ * actually describes bad copy there: the anti-replay gate, the sequence-job booleans, forbidden
+ * phrases, the CTA rules, evidence binding, and every safety and style rule, all unchanged.
+ */
+const GENERICITY_CEILING: Record<SequenceStep, number | null> = {
+  0: 40,
+  // A clarity layer is about ONE specific issue; it should read as specifically as a first email.
+  1: 40,
+  // Compression and close: not applied. The thread is the context, and there is no lesson rule that
+  // says a short close must read as unique when read out of its thread.
+  2: null,
+  3: null,
+};
+
+/**
+ * A follow-up may REFERENCE what came before; it may not REPLAY it. Deterministic, model-free
+ * comparison against the bodies already sent in this thread, refused before the reviewer is ever
+ * called. Which checks apply depends on the step's lesson job — step 1 must add clarity, while a
+ * step-2 compression and a step-3 close are not required to add anything at all. See
+ * `followup-repetition.ts` for the policy, the thresholds and the normalisation.
+ *
+ * Referencing the same issue is explicitly fine — the shared subject of the conversation is the
+ * whole point of a thread.
+ */
+function validateFollowupDoesNotReplay(body: string, sequence: EmailSequencePosition): string[] {
+  if (sequence.step === 0) return [];
+  if (sequence.priorMessageBodies.length === 0) {
+    // A follow-up continues a thread that, by definition, already contains at least the initial
+    // email. An empty list means the comparison CANNOT be performed — the thread could not be read,
+    // or the caller did not supply it — and an unperformed check must never read as a pass.
+    return ['followup_prior_messages_missing'];
+  }
+  const analysis = analyzeFollowupRepetition({
+    step: sequence.step,
+    candidateBody: body,
+    priorBodies: sequence.priorMessageBodies,
+    threadSubject: sequence.threadSubject,
+  });
+  if (!analysis.repeats) return [];
+  return [
+    'followup_repeats_prior_message',
+    // Diagnostic companion: which rule fired and on what measurement, so a rejected draft can be
+    // understood without re-running anything.
+    `followup_repetition:${analysis.reason ?? 'UNKNOWN'}:run=${String(analysis.longestSharedRun)}`
+      + `:reuse=${analysis.sharedBigramRatio.toFixed(2)}:novel=${String(analysis.novelContentTokens)}`,
+  ];
+}
+
+/**
  * Fail-closed deterministic copy gate. It checks objective syntax, provenance, CTA, competitor,
  * urgency, genericity, and approved-demo bindings before the independent reviewer is called.
  */
@@ -199,10 +286,18 @@ export function validateEmail(out: EmailWriterOutput, ctx: EmailValidationContex
   const allModelText = [...copySegments, ...strategySegments].join('\n');
 
   violations.push(...validateSubjects(out, subjects, ctx.sequence));
-  if (out.genericity_score > 40) violations.push(`genericity_score_too_high:${String(out.genericity_score)}`);
+  violations.push(...validateFollowupDoesNotReplay(body, ctx.sequence));
+  violations.push(...validateSequenceCta(out, ctx.sequence));
+  const genericityCeiling = GENERICITY_CEILING[ctx.sequence.step];
+  if (genericityCeiling !== null && out.genericity_score > genericityCeiling) {
+    violations.push(`genericity_score_too_high:${String(out.genericity_score)}`);
+  }
 
   const paragraphs = body.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
-  if (paragraphs.length < 2 || paragraphs.length > 4) violations.push(`unnatural_paragraph_count:${String(paragraphs.length)}`);
+  const shape = PARAGRAPH_SHAPE[ctx.sequence.step];
+  if (paragraphs.length < shape.min || paragraphs.length > shape.max) {
+    violations.push(`unnatural_paragraph_count:${String(paragraphs.length)}`);
+  }
   if (wordCount(body) > MAX_EMAIL_WORDS) violations.push(`body_too_long:${String(wordCount(body))}`);
   if (GENERIC_OPENING_RE.test(paragraphs[0] ?? '')) violations.push('generic_opening');
 

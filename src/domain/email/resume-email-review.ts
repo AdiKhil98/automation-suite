@@ -15,7 +15,14 @@ import {
 import { type LeadFact } from '../lead-facts/lead-fact.js';
 import { type LeadStatus } from '../leads/status.js';
 import { buildEmailBrief } from './email-brief.js';
-import { buildEmailContext, type EmailDemoMeta, type EmailFinding, type EmailInputs, renderEmail } from './email-render.js';
+import {
+  buildEmailContext,
+  ctaSentenceFor,
+  type EmailDemoMeta,
+  type EmailFinding,
+  type EmailInputs,
+  renderEmail,
+} from './email-render.js';
 import {
   EMAIL_SCHEMA_VERSION,
   EMAIL_REVIEW_JSON_SCHEMA,
@@ -323,6 +330,9 @@ export class ResumeEmailReviewService {
     const position: EmailSequencePosition = {
       step: draftRow.sequenceStep,
       threadSubject: isFollowup ? thread.threadSubject : draftRow.threadSubject,
+      // Re-validating with the CURRENT validator means the anti-repetition gate runs here too, so a
+      // resumed follow-up is judged against the same thread the preparation path would have used.
+      priorMessageBodies: thread.priorMessages.map((m) => m.body),
     };
     const emailInputs: EmailInputs = {
       facts: inputs.facts, findings: inputs.findings, demo: inputs.demo,
@@ -331,7 +341,7 @@ export class ResumeEmailReviewService {
     const ctx = buildEmailContext(emailInputs, position);
 
     // Integrity gate: the reloaded draft must render byte-identically to the persisted row.
-    const rendered = renderEmail(draft, emailInputs);
+    const rendered = renderEmail(draft, emailInputs, position);
     if (rendered.subject !== draftRow.subject || rendered.body !== draftRow.body) {
       throw new ResumeReviewAbort('RENDER_MISMATCH', `Reloaded draft does not render to the persisted subject/body for ${draftId}; refusing to resume a divergent draft.`);
     }
@@ -366,13 +376,19 @@ export class ResumeEmailReviewService {
 
     // Exactly one reviewer call — same reviewer contract as the writer service.
     const brief = buildEmailBrief(emailInputs);
-    const rMsgs = buildEmailReviewerMessages(brief, draft, {
-      step: draftRow.sequenceStep,
-      threadSubject: position.threadSubject,
-      // The exact messages already sent in this thread. Without them the sequence-job rubric is
-      // unjudgeable; with them the resumed review sees what the preparation path's review saw.
-      priorMessages: thread.priorMessages,
-    });
+    const rMsgs = buildEmailReviewerMessages(
+      brief,
+      draft,
+      {
+        step: draftRow.sequenceStep,
+        threadSubject: position.threadSubject,
+        // The exact messages already sent in this thread. Without them the sequence-job rubric is
+        // unjudgeable; with them the resumed review sees what the preparation path's review saw.
+        priorMessages: thread.priorMessages,
+      },
+      // ...and the deterministic closing line the recipient will actually receive.
+      ctaSentenceFor(ctx.language, draft.primary_cta, draftRow.sequenceStep),
+    );
     const rRes = await this.deps.provider.generate({
       task: 'email_review', system: rMsgs.system, user: rMsgs.user, images: [], outputSchema: EMAIL_REVIEW_JSON_SCHEMA,
       schemaName: 'email_review', model: c.reviewerModel, reasoningEffort: c.reviewerEffort, store: c.store,

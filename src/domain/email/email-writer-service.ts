@@ -9,7 +9,6 @@ import {
   INITIAL_SEQUENCE_CONTEXT,
   type SequenceContext,
 } from '../../prompts/email/index.js';
-import { type SequenceStep } from '../outreach/sequence.js';
 import { type LlmProvider, type LlmResult, type ReasoningEffort } from '../../integrations/llm/provider.js';
 import { worstCaseCostUsd } from '../../integrations/llm/pricing.js';
 import { EMAIL_DEBUG_TTL_MS, type EmailDebugStore } from '../../integrations/email/email-debug-store.js';
@@ -19,7 +18,15 @@ import { type LeadStatus } from '../leads/status.js';
 import { type NewPipelineEvent } from '../pipeline/pipeline-event.js';
 import { EMAIL_SCHEMA_VERSION, EMAIL_REVIEW_JSON_SCHEMA, EMAIL_WRITER_JSON_SCHEMA, emailReviewSchema, emailWriterSchema } from './email-schema.js';
 import { buildEmailBrief } from './email-brief.js';
-import { buildEmailContext, type EmailDemoMeta, type EmailFinding, type EmailInputs, type EmailRecipientContext, renderEmail } from './email-render.js';
+import {
+  buildEmailContext,
+  ctaSentenceFor,
+  type EmailDemoMeta,
+  type EmailFinding,
+  type EmailInputs,
+  type EmailRecipientContext,
+  renderEmail,
+} from './email-render.js';
 import { EMAIL_WRITER_RULES_VERSION, type EmailStatus } from './email-types.js';
 import { type EmailSequencePosition } from './email-types.js';
 import { validateEmail } from './email-validation.js';
@@ -214,7 +221,11 @@ export class EmailWriterService {
     const seq: SequenceContext = input.sequence ?? INITIAL_SEQUENCE_CONTEXT;
     // ONE sequence position drives both the rendered subject and the subject validation, so the
     // renderer and the validator can never disagree about whether this is a threaded follow-up.
-    const position: EmailSequencePosition = { step: seq.step, threadSubject: seq.threadSubject };
+    const position: EmailSequencePosition = {
+      step: seq.step,
+      threadSubject: seq.threadSubject,
+      priorMessageBodies: seq.priorMessages.map((m) => m.body),
+    };
     const emailInputs: EmailInputs = { facts: input.facts, findings: safeFindings, demo: input.demo,
       recipient: input.recipient ?? null, threadSubject: position.threadSubject };
     const ctx = buildEmailContext(emailInputs, position);
@@ -326,15 +337,22 @@ export class EmailWriterService {
     const check = validateEmail(draft, ctx);
     if (!check.ok) {
       wRec.validationViolations = check.violations;
-      const p = this.buildPersist(input, draft, null, 'REVIEW_FAILED', 'EMAIL_REVIEW_FAILED', emailInputs, wRes, null, cost, modelCalls,
-        undefined, seq.step, input.outreachRecordId ?? null);
+      const p = this.buildPersist({
+        input, draft, review: null, status: 'REVIEW_FAILED', route: 'EMAIL_REVIEW_FAILED',
+        emailInputs, wRes, rRes: null, cost, modelCalls, position,
+        outreachRecordId: input.outreachRecordId ?? null,
+      });
       await recordDebug('VALIDATION_FAILED', draft, null, check.violations);
       return finish('VALIDATION_FAILED', p);
     }
 
     // ---- Independent adversarial reviewer ----
     if (!canCall(c.reviewerModel)) return finish('BUDGET_BLOCKED', failPersist('EMAIL_REVIEW_FAILED'));
-    const rMsgs = buildEmailReviewerMessages(brief, draft, seq);
+    const rMsgs = buildEmailReviewerMessages(
+      brief, draft, seq,
+      // The exact sentence the renderer will append, so the reviewer judges the effective message.
+      ctaSentenceFor(ctx.language, draft.primary_cta, seq.step),
+    );
     const rRes = await this.deps.provider.generate({
       task: 'email_review', system: rMsgs.system, user: rMsgs.user, images: [], outputSchema: EMAIL_REVIEW_JSON_SCHEMA,
       schemaName: 'email_review', model: c.reviewerModel, reasoningEffort: c.reviewerEffort, store: c.store, timeoutMs: c.timeoutMs,
@@ -361,37 +379,57 @@ export class EmailWriterService {
       subjectIsThreadContinuity: seq.threadSubject !== null,
     });
     if (!approvable) {
-      const p = this.buildPersist(input, draft, review, 'REVIEW_FAILED', 'EMAIL_REVIEW_FAILED', emailInputs, wRes, rRes, cost, modelCalls,
-        undefined, seq.step, input.outreachRecordId ?? null);
+      const p = this.buildPersist({
+        input, draft, review, status: 'REVIEW_FAILED', route: 'EMAIL_REVIEW_FAILED',
+        emailInputs, wRes, rRes, cost, modelCalls, position,
+        outreachRecordId: input.outreachRecordId ?? null,
+      });
       await recordDebug('REVIEW_REJECTED', draft, review, []);
       return finish('REVIEW_REJECTED', p);
     }
 
     // ---- Approved: render + route ----
-    const rendered = renderEmail(draft, emailInputs);
+    const rendered = renderEmail(draft, emailInputs, position);
     const route: LeadStatus = rendered.hasDemoUrlPlaceholder ? 'WAITING_FOR_DEMO_URL' : 'READY_FOR_HUMAN_APPROVAL';
     const outcome: EmailOutcome = rendered.hasDemoUrlPlaceholder ? 'APPROVED_WAITING_URL' : 'APPROVED_READY';
-    const p = this.buildPersist(input, draft, review, 'APPROVED', route, emailInputs, wRes, rRes, cost, modelCalls, rendered,
-      seq.step, input.outreachRecordId ?? null);
+    const p = this.buildPersist({
+      input, draft, review, status: 'APPROVED', route, emailInputs, wRes, rRes, cost, modelCalls, position,
+      outreachRecordId: input.outreachRecordId ?? null,
+    });
     await recordDebug(outcome, draft, review, []);
     return finish(outcome, p);
   }
 
-  private buildPersist(
-    input: EmailWriteInput,
-    draft: import('./email-schema.js').EmailWriterParsed,
-    review: import('./email-schema.js').EmailReviewParsed | null,
-    status: EmailStatus,
-    route: LeadStatus,
-    emailInputs: EmailInputs,
-    wRes: LlmResult,
-    rRes: LlmResult | null,
-    cost: number,
-    modelCalls: EmailModelCall[],
-    rendered = renderEmail(draft, emailInputs),
-    sequenceStep: SequenceStep = 0,
-    outreachRecordId: string | null = null,
-  ): EmailPersist {
+  /**
+   * Build the row to persist. The SEQUENCE POSITION is required and the render is computed here from
+   * it — never defaulted, never passed in.
+   *
+   * Rendering became sequence-aware (the final step gets its own deterministic binary CTA), which
+   * made a defaulted position actively dangerous: the reviewer-rejected path used to omit the render
+   * and fall back to step-0 rendering, so a step-3 draft was STORED with "reply and I will share the
+   * details" while the reviewer had judged the binary close. A later reviewer-only resume re-renders
+   * correctly and the integrity gate then reports RENDER_MISMATCH on a draft nobody had touched.
+   * Requiring the position makes that mistake unrepresentable rather than merely fixed.
+   */
+  private buildPersist(args: {
+    input: EmailWriteInput;
+    draft: import('./email-schema.js').EmailWriterParsed;
+    review: import('./email-schema.js').EmailReviewParsed | null;
+    status: EmailStatus;
+    route: LeadStatus;
+    emailInputs: EmailInputs;
+    wRes: LlmResult;
+    rRes: LlmResult | null;
+    cost: number;
+    modelCalls: EmailModelCall[];
+    position: EmailSequencePosition;
+    outreachRecordId: string | null;
+  }): EmailPersist {
+    const { input, draft, review, status, route, emailInputs, wRes, rRes, cost, modelCalls, position, outreachRecordId } = args;
+    // One render, from the real position. `renderEmail` is pure, so this is byte-identical to the
+    // render the approved path already computed for routing, and to the one resume recomputes.
+    const rendered = renderEmail(draft, emailInputs, position);
+    const sequenceStep = position.step;
     const c = this.deps.config;
     const emailId = randomUUID();
     return {

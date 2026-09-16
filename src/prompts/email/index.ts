@@ -1,4 +1,4 @@
-import { MAX_EMAIL_WORDS, PRIMARY_CTAS } from '../../domain/email/email-types.js';
+import { MAX_EMAIL_WORDS, paragraphRangeText, PRIMARY_CTAS } from '../../domain/email/email-types.js';
 import { type EmailWriterParsed } from '../../domain/email/email-schema.js';
 import { type SequenceStep } from '../../domain/outreach/sequence.js';
 export { type PriorSequenceMessage } from './sequence-jobs.js';
@@ -14,8 +14,19 @@ import {
 // Bumped for the sequence-aware rewrite: every step now carries its own job block (writer) and its
 // own rubric (reviewer), and the shared copy standard states the outcomes-over-tools principle.
 export const EMAIL_RUBRIC_VERSION = 'cold-email-copy-standard-4';
-export const EMAIL_WRITER_PROMPT_VERSION = 'email-writer-5';
-export const EMAIL_REVIEWER_PROMPT_VERSION = 'email-reviewer-5';
+// Bumped together with `SEQUENCE_JOBS_VERSION` for the follow-up clarity work: the step-1 writer job
+// and the step-1 reviewer rubric changed materially (reference vs restate; "what new understanding
+// does the prospect gain?"), and the copy-JOB requirements — open on the observation, explain why it
+// matters, connect it to an outcome — stopped being global. They now belong to the first email only,
+// because applied to a follow-up they demand exactly the restatement the sequence job forbids.
+// The JSON contract is unchanged, so EMAIL_SCHEMA_VERSION deliberately stays where it is, and drafts
+// written under the old instructions keep the versions they recorded.
+export const EMAIL_WRITER_PROMPT_VERSION = 'email-writer-9';
+// Bumped again: the rejection conditions became step-scoped, so the reviewer is no longer told to
+// reject a compression or a close for lacking a specific opening, business relevance, persuasion, or
+// standalone specificity — dimensions the approval gate does not apply at those positions. The
+// WRITER prompt did not change in that revision, so the two versions legitimately differ.
+export const EMAIL_REVIEWER_PROMPT_VERSION = 'email-reviewer-10';
 
 export { SEQUENCE_JOBS_VERSION };
 
@@ -98,16 +109,37 @@ const SUBJECT_AUTHORING_STANDARD = `SUBJECT LINE (you author it for this email):
 
 ${SUBJECT_STANDARD}`;
 
-const COPY_STANDARD = `COLD EMAIL COPY STANDARD:
+/**
+ * WHAT THE BODY MUST CONTAIN — for the FIRST email only (step 0).
+ *
+ * These are copy-JOB requirements, not safety rules: open on the observation, explain why it matters,
+ * connect it to an outcome. They are exactly right for Outreach #1 and wrong for everything after it.
+ * Applied globally they forced a follow-up to reproduce the first email's observation and business
+ * consequence — which is how a Follow-up #2 that restated Outreach #1 came to be written and
+ * approved — and they contradict the later jobs outright: Follow-up #3 must COMPRESS rather than
+ * re-explain, and Follow-up #4 must be a binary close carrying no new business argument at all.
+ *
+ * The SEQUENCE JOB is authoritative. Only the first email receives this block; each follow-up
+ * receives its own job and is explicitly released from these requirements.
+ */
+const FIRST_EMAIL_BODY_STANDARD = `WHAT THIS EMAIL'S BODY MUST DO:
 - Start email_body with a verified observation. No introduction, fake compliment, fake customer
   pose, or "I hope this email finds you well".
 - Explain why the issue matters in the customer or patient journey using clear business language.
+- State the business relevance in ONE short sentence: why that single observation matters in the
+  customer or patient journey.
+- Connect that observation to ONE useful business outcome (revenue gained, conversions improved,
+  time saved, admin reduced, leads recovered, missed follow-ups reduced, risk or friction removed).
+- State the observation plainly and confidently. The curiosity gap belongs to the SUBJECT only; never
+  obscure or withhold the observation in the body to manufacture curiosity.`;
+
+const COPY_STANDARD = `COLD EMAIL COPY STANDARD (applies to every email in the sequence):
 - Create urgency only from the verified problem's importance. No deadline, scarcity, lost-revenue,
   visitor-abandonment, or competitor-performance claims.
 - If VIEW_CONCEPT is allowed, explain exactly what the approved concept demonstrates and only for
   findings bound to the approved demo. Do not promise features the demo does not contain.
-- email_body contains 2-4 short natural paragraphs and no greeting, CTA sentence, signoff, link,
-  markdown, or bullet list. Maximum ${String(MAX_EMAIL_WORDS)} words.
+- email_body contains no greeting, CTA sentence, signoff, link, markdown, or bullet list.
+  Maximum ${String(MAX_EMAIL_WORDS)} words.
 - Choose exactly one primary_cta from ${PRIMARY_CTAS.join(', ')}. The system renders it.
 - Use restrained, confident, concrete language. Vary sentence length. Avoid symmetry, generic
   transitions, three-part marketing lists, inflated adjectives, and "not only X, but also Y".
@@ -119,24 +151,23 @@ const COPY_STANDARD = `COLD EMAIL COPY STANDARD:
 - demo_alignment_result is PASS for a verified aligned concept CTA, otherwise NOT_APPLICABLE.
 
 OUTCOMES GET PAID, TOOLS DO NOT:
-- business_relevance must name a useful business outcome (revenue gained, conversions improved, time
-  saved, admin reduced, leads recovered, missed follow-ups reduced, risk or friction removed), not a
-  technology, a tool, "AI", or a feature. Never sell the mechanism; state the result it serves.
+- The structured field business_relevance must name a useful business outcome (revenue gained,
+  conversions improved, time saved, admin reduced, leads recovered, missed follow-ups reduced, risk
+  or friction removed), not a technology, a tool, "AI", or a feature. Never sell the mechanism;
+  state the result it serves. This is a requirement on the FIELD; whether the BODY restates that
+  outcome is decided by this email's sequence job.
 
 SINGLE-OBSERVATION, BUYER-LANGUAGE STANDARD:
-- The body makes exactly ONE evidence-backed observation. Do not stack a second finding, list several
-  issues, or turn the email into a mini audit of the site.
+- The body never carries more than ONE evidence-backed observation. Do not stack a second finding,
+  list several issues, or turn the email into a mini audit of the site. (How much of the observation
+  this particular email restates — if any — is decided by its sequence job below.)
 - Translate technical evidence into plain language the business owner uses. Describe what a visitor,
   customer, or patient experiences, not the implementation detail behind it. Never mention code, markup,
   attributes, link targets, encoded characters, or diagnostic steps.
-- State the business relevance in ONE short sentence: why that single observation matters in the
-  customer or patient journey.
 - Do NOT include remediation steps, an implementation diagnosis, a fix walkthrough, a tool or AI pitch,
   or any outcome or result claim the evidence does not support.
 - At most ONE necessary, concise qualifier is allowed when a claim genuinely needs it. Do not over-hedge
-  or pile up cautious words that make the observation sound uncertain or self-defeating.
-- State the observation plainly and confidently. The curiosity gap belongs to the SUBJECT only; never
-  obscure or withhold the observation in the body to manufacture curiosity.`;
+  or pile up cautious words that make the observation sound uncertain or self-defeating.`;
 
 const FORBIDDEN = `FORBIDDEN PHRASES INCLUDE:
 German: In der heutigen digitalen Welt; In der heutigen schnelllebigen Zeit; Es ist wichtig zu beachten;
@@ -161,6 +192,56 @@ Game-changing; Tailored solution.`;
  * and inventing one would start a second conversation, so nothing is asked of the model and
  * `validateEmail` fails the composition closed (`followup_thread_subject_missing`).
  */
+/**
+ * WHAT MAY CAUSE A REJECTION, scoped to the dimensions that actually apply at this position.
+ *
+ * The universal half is honesty and style, and never moves. The rest is copy-JOB quality: telling
+ * the reviewer to reject a Follow-up #4 because "the opening is generic" or "it could be sent to
+ * almost any business" would ask it to reject the job being done correctly — a close is short and
+ * leans on the thread — and the approval gate does not require those dimensions there either. A
+ * reviewer must never be instructed to REJECT for something the gate treats as non-applicable.
+ */
+function rejectConditions(seq: SequenceContext): string {
+  const universal = `Reject or require revisions when urgency is fabricated, competitor language is
+unsupported, AI-style language or punctuation fails, there is more than one CTA, evidence does not
+support every claim, or the email promises more than the approved demo visibly delivers.`;
+  if (seq.step === 0) {
+    return `${universal}
+Also reject when the opening is generic, business relevance is unclear, the email is unpersuasive, or
+it could be sent unchanged to almost any business.`;
+  }
+  if (seq.step === 1) {
+    return `${universal}
+Also reject when the opening is generic or the clarification could apply to almost any business.
+Do NOT reject because this email does not restate the business case or does not argue again: at this
+position that is correct.`;
+  }
+  return `${universal}
+Do NOT reject this email for being short, for not restating the observation or the business
+relevance, for not arguing again, or for reading as though it could apply to another business when
+taken out of context. It is read inside a thread that already carries that context, and being brief
+and unpersuasive is this position's job. Judge honesty, style, and the sequence booleans.`;
+}
+
+/**
+ * The copy-JOB requirements for this step. Step 0 gets the first-email standard; every follow-up is
+ * governed by its own sequence job instead, and receives nothing here that could contradict it.
+ */
+function bodyJobBlock(seq: SequenceContext): string {
+  return seq.step === 0 ? `\n${FIRST_EMAIL_BODY_STANDARD}\n` : '';
+}
+
+/**
+ * The body's SHAPE for this step, generated from the same `PARAGRAPH_SHAPE` the deterministic
+ * validator enforces. Stating "2-4 paragraphs" globally meant a model could follow its instructions
+ * at step 2 or 3 and be rejected by our own validator; deriving both from one constant makes that
+ * disagreement impossible rather than merely fixed.
+ */
+function bodyStructureBlock(seq: SequenceContext): string {
+  return `BODY STRUCTURE FOR THIS EMAIL:
+- email_body contains ${paragraphRangeText(seq.step)}.`;
+}
+
 function writerSubjectBlock(seq: SequenceContext): string {
   if (seq.step === 0) return SUBJECT_AUTHORING_STANDARD;
   return subjectInstructionFor(seq.step, seq.threadSubject) ?? '';
@@ -201,6 +282,8 @@ ${SAFETY}
 
 ${COPY_STANDARD}
 
+${bodyStructureBlock(seq)}
+${bodyJobBlock(seq)}
 ${writerSubjectBlock(seq)}
 
 ${FORBIDDEN}
@@ -222,14 +305,13 @@ ${SAFETY}
 
 ${COPY_STANDARD}
 
+${bodyStructureBlock(seq)}
+${bodyJobBlock(seq)}
 ${reviewerSubjectBlock(seq)}
 
 ${FORBIDDEN}
 
-Reject or require revisions when the opening is generic, business relevance is unclear,
-urgency is fabricated, competitor language is unsupported, AI-style language or punctuation fails,
-there is more than one CTA, the email could be sent unchanged to almost any business, evidence does
-not support every claim, or the email promises more than the approved demo visibly delivers.
+${rejectConditions(seq)}
 
 Judge the SINGLE-OBSERVATION, BUYER-LANGUAGE STANDARD with four fail-closed booleans:
 - singleObservation: false when the body makes more than one distinct observation, stacks findings, or
@@ -311,7 +393,17 @@ export function buildEmailReviewerMessages(
   brief: EmailBrief,
   draft: EmailWriterParsed,
   seq: SequenceContext = INITIAL_SEQUENCE_CONTEXT,
+  finalCtaSentence: string | null = null,
 ): { system: string; user: string } {
+  // The reviewer judges the EFFECTIVE message. The model never writes the ask — the system appends a
+  // deterministic one — so without this the reviewer would be judging a body whose call to action it
+  // cannot see, and `binaryReplyClose` at the final step would be a guess about text the model was
+  // forbidden to write.
+  const cta = finalCtaSentence === null ? '' : `
+
+THE SYSTEM WILL APPEND EXACTLY THIS CLOSING LINE TO THE BODY (the recipient sees it; the model did
+not write it and must not duplicate it):
+${finalCtaSentence}`;
   return {
     system: reviewerSystem(seq),
     user: `Review this draft against the exact evidence, the approved-demo bindings, and its position in the sequence.
@@ -319,6 +411,6 @@ export function buildEmailReviewerMessages(
 ${serializeBrief(brief)}${serializeSequence(seq)}
 
 PROPOSED EMAIL:
-${JSON.stringify(draft, null, 2)}`,
+${JSON.stringify(draft, null, 2)}${cta}`,
   };
 }

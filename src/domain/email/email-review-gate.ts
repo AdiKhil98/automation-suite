@@ -2,50 +2,93 @@ import { type EmailReviewParsed } from './email-schema.js';
 import { type SequenceStep } from '../outreach/sequence.js';
 
 /**
- * The single source of truth for whether an independent adversarial email review APPROVES a draft.
+ * THE APPROVAL GATE — which reviewer dimensions must hold, for which step.
  *
- * Revisions are never silently approved without being applied: the decision must be APPROVE,
- * fabricationRisk must be false, and every boolean quality dimension that applies to this email
- * must pass. The writer service, resume-review recovery, and the compose-preview reviewer all use
- * this exact conjunction so the gate can never drift between the three paths.
+ * Every email in the sequence has a different job, so a single universal conjunction was wrong in
+ * both directions: it let a Follow-up #2 that restated Outreach #1 through (the sequence booleans
+ * were the only step-aware part), and it would reject a CORRECT Follow-up #4 for lacking things its
+ * own instructions forbid it from having — an observation, a business-relevance sentence, a
+ * persuasive argument.
  *
- * Two dimensions are step-dependent:
+ * Dimensions are therefore classified once, explicitly, here:
  *
- *  - SEQUENCE JOB. Each step has a different job, so a different subset of the four sequence-job
- *    booleans is enforced (step 0 = Outreach #1, step 1 = lesson Follow-up #2, step 2 = #3,
- *    step 3 = #4). The reviewer reports all four every time; the non-applicable ones are reported
- *    as true and are simply not part of the conjunction for that step.
- *  - SUBJECT. A follow-up continues the EXISTING Gmail thread, so its subject is deterministic
- *    thread continuity ("Re: <original>") produced by code, not authored copy. Judging it for a
- *    curiosity gap would reject every correctly-threaded follow-up, so the two subject dimensions
- *    are enforced only where the model actually authors the subject. They stay fail-closed for the
- *    initial email and for any follow-up that is NOT threaded.
+ *   UNIVERSAL — safety, honesty and style. True at every position, fail-closed, never relaxed:
+ *     decision=APPROVE, no fabrication risk, evidence supports every claim, urgency is supported,
+ *     competitor claims are supported, human style, punctuation, exactly one primary CTA, buyer
+ *     language, conversation not audit, demo alignment.
+ *
+ *   STEP-DEPENDENT — copy-JOB quality. Required only where that job applies:
+ *     openingSpecific                            steps 0-1 (a compression is told not to explain
+ *                                                again, and a close has no material to be specific
+ *                                                about; "I will leave this with you" is the job)
+ *     businessRelevanceClear / persuasive        step 0 only (the first email must make the case)
+ *     sufficientlyPersonalized                   steps 0-1 (a compression and a close are brief by
+ *                                                design; the thread carries the personalisation)
+ *     singleObservation / confidentObservation   steps 0-2 (step 3 carries NO observation, so there
+ *                                                is nothing for either dimension to judge)
+ *     subjectSpecific / subjectCuriosityGap      only where the model authors the subject
+ *     sequence-job booleans                      exactly the subset that applies to the step
+ *
+ * A dimension that does not apply is NOT evidence of quality — it simply has nothing to judge, and
+ * the reviewer is told so in its own rubric. Keeping the list here, as data, is what stops that
+ * knowledge from scattering into exceptions.
  */
+
+/** The copy-job dimensions, and the steps at which each is required. */
+const STEP_DEPENDENT_DIMENSIONS: ReadonlyArray<{
+  readonly name: keyof EmailReviewParsed;
+  readonly requiredAt: readonly SequenceStep[];
+  readonly why: string;
+}> = [
+  { name: 'openingSpecific', requiredAt: [0, 1], why: 'a first email must earn attention and a clarity layer must stay tied to the specific issue; a compression is told not to explain again and a close carries no material to be specific about, so the thread supplies the specificity there' },
+  { name: 'businessRelevanceClear', requiredAt: [0], why: 'only the first email must state why the issue matters; a follow-up that restates it is repeating itself' },
+  { name: 'persuasive', requiredAt: [0], why: 'the first email makes the case; clarifying, compressing and closing are not persuasion' },
+  { name: 'sufficientlyPersonalized', requiredAt: [0, 1], why: 'a compression and a close are deliberately brief; the thread already carries the personalisation' },
+  { name: 'singleObservation', requiredAt: [0, 1, 2], why: 'step 3 carries no observation at all, so the ceiling has nothing to measure' },
+  { name: 'confidentObservation', requiredAt: [0, 1, 2], why: 'there is no observation to hedge in a binary close' },
+];
+
+/** Whether a step-dependent dimension applies at this step. Exported for tests and diagnostics. */
+export function reviewDimensionApplies(name: keyof EmailReviewParsed, step: SequenceStep): boolean {
+  const entry = STEP_DEPENDENT_DIMENSIONS.find((d) => d.name === name);
+  return entry ? entry.requiredAt.includes(step) : true;
+}
+
+/** The full applicability matrix, for tests, documentation and operator tooling. */
+export function reviewApplicabilityMatrix(step: SequenceStep): Record<string, boolean> {
+  return Object.fromEntries(STEP_DEPENDENT_DIMENSIONS.map((d) => [d.name, d.requiredAt.includes(step)]));
+}
+
 export function isEmailReviewApprovable(
   review: EmailReviewParsed,
   opts: { sequenceStep?: SequenceStep; subjectIsThreadContinuity?: boolean } = {},
 ): boolean {
   const step = opts.sequenceStep ?? 0;
   const subjectAuthored = !(opts.subjectIsThreadContinuity ?? false);
-  return review.decision === 'APPROVE'
+
+  // UNIVERSAL: safety, honesty and style. Never relaxed for any step.
+  const universal = review.decision === 'APPROVE'
     && !review.fabricationRisk
-    && (!subjectAuthored || (review.subjectSpecific && review.subjectCuriosityGap))
-    && review.openingSpecific
-    && review.businessRelevanceClear
     && review.urgencySupported
     && review.competitorClaimsSupported
     && review.humanStylePass
     && review.punctuationPass
     && review.singlePrimaryCta
-    && review.sufficientlyPersonalized
     && review.evidenceSupported
     && review.demoAligned
-    && review.persuasive
-    && review.singleObservation
     && review.buyerLanguageOnly
-    && review.conversationNotAudit
-    && review.confidentObservation
-    && sequenceJobSatisfied(review, step);
+    && review.conversationNotAudit;
+
+  // SUBJECT: enforced only where the model actually authors it (a threaded follow-up's subject is
+  // deterministic thread continuity produced by code).
+  const subject = !subjectAuthored || (review.subjectSpecific && review.subjectCuriosityGap);
+
+  // COPY JOB: exactly the dimensions this step's job calls for.
+  const copyJob = STEP_DEPENDENT_DIMENSIONS.every(
+    (d) => !d.requiredAt.includes(step) || review[d.name] === true,
+  );
+
+  return universal && subject && copyJob && sequenceJobSatisfied(review, step);
 }
 
 /**

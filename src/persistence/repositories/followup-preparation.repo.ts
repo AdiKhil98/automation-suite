@@ -72,6 +72,7 @@ export class FollowupPreparationRepository {
         followupId: outreachFollowups.id,
         step: outreachFollowups.step,
         dueAt: outreachFollowups.dueAt,
+        followupCreatedAt: outreachFollowups.createdAt,
         // Selected even though the WHERE clause already pins it: the pure decision functions
         // re-assert row liveness and due-ness themselves rather than trusting this query.
         followupStatus: outreachFollowups.status,
@@ -136,7 +137,12 @@ export class FollowupPreparationRepository {
       // is what makes a repeated timer run a no-op; migration 0044's partial unique index is the
       // hard backstop against two concurrent runs racing to compose the same follow-up.
       const existing = (await this.db
-        .select({ id: emailDrafts.id, humanDecision: emailDrafts.humanDecision })
+        .select({
+          id: emailDrafts.id,
+          humanDecision: emailDrafts.humanDecision,
+          // The causal event for replacement eligibility: when the human actually decided.
+          humanReviewedAt: emailDrafts.humanReviewedAt,
+        })
         .from(emailDrafts)
         .where(and(
           eq(emailDrafts.outreachRecordId, r.outreachRecordId),
@@ -147,7 +153,14 @@ export class FollowupPreparationRepository {
       out.push({
         ...r,
         recordStatus: isOutreachStatus(r.recordStatus) ? r.recordStatus : null,
-        existingDraft: existing ? { id: existing.id, humanDecision: existing.humanDecision } : null,
+        followupCreatedAtMs: r.followupCreatedAt.getTime(),
+        existingDraft: existing
+          ? {
+              id: existing.id,
+              humanDecision: existing.humanDecision,
+              humanReviewedAtMs: existing.humanReviewedAt?.getTime() ?? null,
+            }
+          : null,
       });
     }
     return out;

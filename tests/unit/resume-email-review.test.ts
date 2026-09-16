@@ -325,7 +325,8 @@ describe('resume-email-review — schema-version provenance', () => {
 
   it('an in-place recovery writes no schema version at all', async () => {
     const draft = fixtureWriter('strong English business email');
-    const rendered = renderEmail(draft, { ...emailInputs, threadSubject: INITIAL_SENT_SUBJECT });
+    const rendered = renderEmail(draft, { ...emailInputs, threadSubject: INITIAL_SENT_SUBJECT },
+      { step: 1, threadSubject: INITIAL_SENT_SUBJECT, priorMessageBodies: [INITIAL_SENT_BODY] });
     const row: PersistedDraftRow = {
       ...rowFor(draft), subject: rendered.subject, body: rendered.body, sequenceStep: 1,
       outreachRecordId: 'rec-1', threadSubject: rendered.subject, schemaVersion: 'email-copy-schema-4',
@@ -336,7 +337,8 @@ describe('resume-email-review — schema-version provenance', () => {
       selected_subject: INITIAL_SENT_SUBJECT,
       selected_subject_reason: 'Thread continuity is preserved.',
     };
-    const followupRendered = renderEmail(followup, { ...emailInputs, threadSubject: INITIAL_SENT_SUBJECT });
+    const followupRendered = renderEmail(followup, { ...emailInputs, threadSubject: INITIAL_SENT_SUBJECT },
+      { step: 1, threadSubject: INITIAL_SENT_SUBJECT, priorMessageBodies: [INITIAL_SENT_BODY] });
     const h = harness({
       row: { ...row, subject: followupRendered.subject, body: followupRendered.body, threadSubject: followupRendered.subject },
       record: debugRecord(followup),
@@ -364,7 +366,8 @@ describe('resume-email-review — a paid reviewer call that yields nothing usabl
   });
 
   const followupRow = (draft: EmailWriterOutput): PersistedDraftRow => {
-    const rendered = renderEmail(draft, { ...emailInputs, threadSubject: THREAD_SUBJECT });
+    const rendered = renderEmail(draft, { ...emailInputs, threadSubject: THREAD_SUBJECT },
+      { step: 1, threadSubject: THREAD_SUBJECT, priorMessageBodies: [INITIAL_SENT_BODY] });
     return {
       ...rowFor(draft), subject: rendered.subject, body: rendered.body,
       sequenceStep: 1, outreachRecordId: 'rec-1', threadSubject: rendered.subject, totalCostUsd: 0.0529,
@@ -527,7 +530,13 @@ describe('resume-email-review — threaded follow-ups', () => {
 
   /** The persisted row for such a draft: the stored subject already carries its `Re: ` prefix. */
   const followupRow = (draft: EmailWriterOutput, step: 1 | 2 | 3 = 1, over: Partial<PersistedDraftRow> = {}): PersistedDraftRow => {
-    const rendered = renderEmail(draft, { ...emailInputs, threadSubject: THREAD_SUBJECT });
+    // Rendered exactly as production would for THIS step — the final step appends a different,
+    // deterministic closing line, so a row rendered at step 0 would not match on resume.
+    const rendered = renderEmail(
+      draft,
+      { ...emailInputs, threadSubject: THREAD_SUBJECT },
+      { step, threadSubject: THREAD_SUBJECT, priorMessageBodies: [INITIAL_SENT_BODY] },
+    );
     return {
       ...rowFor(draft),
       subject: rendered.subject,

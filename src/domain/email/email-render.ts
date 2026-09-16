@@ -1,8 +1,10 @@
 import { type LeadFact } from '../lead-facts/lead-fact.js';
+import { FINAL_FOLLOWUP_STEP, type SequenceStep } from '../outreach/sequence.js';
 import {
   DEMO_URL_TOKEN,
   type EmailCtaKind,
   type EmailSequencePosition,
+  INITIAL_EMAIL_SEQUENCE,
   replySubject,
   type EmailPrimaryCta,
   type EmailWriterOutput,
@@ -92,10 +94,68 @@ const CTA_SENTENCE: Record<EmailLanguage, Record<EmailPrimaryCta, string>> = {
   },
 };
 
+/**
+ * THE FINAL EMAIL'S CTA. Follow-up #4 closes the sequence, and its job is one clean YES/NO decision:
+ * a single word is a complete answer, no explanation, no meeting, and saying no must be an
+ * acceptable, stated option. The ordinary reply sentence ("reply and I will share the details") asks
+ * for a conversation instead, which is the wrong ask at this position.
+ *
+ * It is rendered DETERMINISTICALLY, like every other CTA. The alternative — telling the step-3 model
+ * to write its own close — would put a second ask in `email_body`, which the copy standard forbids
+ * and `cta_in_model_body` rejects. The model contract is therefore unchanged: step 3 still emits
+ * REPLY_FOR_DETAILS, and the renderer chooses the sentence that position actually needs.
+ */
+const FINAL_CLOSE_CTA: Record<EmailLanguage, string> = {
+  en: 'If you would like me to send it, reply yes. If not, no is a complete answer.',
+  de: 'Wenn ich es Ihnen schicken soll, antworten Sie mit Ja. Wenn nicht, ist Nein eine vollständige Antwort.',
+};
+
 const SIGNOFF_TEXT: Record<EmailLanguage, string> = {
   en: 'Best regards,',
   de: 'Beste Grüße',
 };
+
+/**
+ * Every fixed phrase the renderer adds around the model's copy. Exported so the deterministic
+ * anti-repetition gate can subtract them before comparing a follow-up with what was already sent:
+ * a shared greeting, CTA sentence or signoff is the system's own wording, never evidence that the
+ * model repeated itself.
+ */
+export const RENDER_BOILERPLATE_PHRASES: readonly string[] = [
+  ...Object.values(NEUTRAL_GREETING),
+  ...Object.values(SIGNOFF_TEXT),
+  ...Object.values(CTA_SENTENCE).flatMap((byCta) => Object.values(byCta)),
+  SENDER_NAME_TOKEN,
+];
+
+/**
+ * The words a rendered greeting can start with, in every language the renderer greets in. A NAMED
+ * greeting ("Hello Dr Richard,") cannot be matched as a fixed phrase — the name is lead data — so
+ * consumers strip the greeting LINE by shape instead, using these words. Derived from the greeting
+ * builders themselves so a new language cannot be added in one place and missed in the other.
+ */
+export const RENDER_GREETING_WORDS: readonly string[] = [
+  ...new Set([
+    ...Object.values(NEUTRAL_GREETING),
+    ...Object.values(NAMED_GREETING).map((build) => build('x')),
+  ].map((greeting) => greeting.trim().split(/[\s,]+/)[0]!.toLocaleLowerCase())),
+];
+
+/**
+ * The exact sentence the system will append for this email. Deterministic and step-aware, and
+ * exported so the REVIEWER can be shown the CTA the recipient will actually receive — without it,
+ * the reviewer judges a body whose ask it cannot see, and `binaryReplyClose` at step 3 would be a
+ * guess about text the model never wrote.
+ */
+export function ctaSentenceFor(
+  language: EmailLanguage,
+  cta: EmailPrimaryCta,
+  step: SequenceStep,
+): string {
+  // The final email closes; every earlier position keeps its existing behaviour exactly.
+  if (step === FINAL_FOLLOWUP_STEP && cta === 'REPLY_FOR_DETAILS') return FINAL_CLOSE_CTA[language];
+  return CTA_SENTENCE[language][cta];
+}
 
 export function demoLinkAllowed(demo: EmailDemoMeta | null): boolean {
   return demo !== null && demo.status === 'APPROVED';
@@ -129,7 +189,19 @@ export function buildEmailContext(
 }
 
 /** Assemble the final plain-text message after validation; no model controls URLs or signoff. */
-export function renderEmail(out: EmailWriterOutput, inputs: EmailInputs): RenderedEmail {
+export function renderEmail(
+  out: EmailWriterOutput,
+  inputs: EmailInputs,
+  sequence: EmailSequencePosition = INITIAL_EMAIL_SEQUENCE,
+): RenderedEmail {
+  // COHERENCE GUARD. Rendering is sequence-aware — the final step gets its own deterministic close —
+  // so rendering a THREADED email with the step-0 position silently produces the wrong CTA and the
+  // wrong provenance. That is exactly how a reviewer-rejected step-3 draft came to be persisted with
+  // the first email's ask, only to fail its own integrity check on resume. A thread to continue and
+  // "this is the first email" cannot both be true, so refuse the combination instead of rendering it.
+  if (inputs.threadSubject && sequence.step === 0) {
+    throw new Error('renderEmail: a threaded email cannot be rendered with the step-0 sequence position');
+  }
   const language = resolveEmailLanguage(inputs.facts);
   // A personal greeting is gated on the RECIPIENT, not merely on a name being known: knowing the
   // owner's name says nothing about whose inbox `info@practice.co.uk` is. Without a PERSONAL_VERIFIED
@@ -143,7 +215,7 @@ export function renderEmail(out: EmailWriterOutput, inputs: EmailInputs): Render
     '',
     out.email_body.trim(),
     '',
-    CTA_SENTENCE[language][out.primary_cta],
+    ctaSentenceFor(language, out.primary_cta, sequence.step),
     '',
     SIGNOFF_TEXT[language],
     SENDER_NAME_TOKEN,
