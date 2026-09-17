@@ -93,7 +93,12 @@ export async function runFollowupAutomationCommand(ctx: CliContext, cliOpts: Run
   const prepRepo = new FollowupPreparationRepository(ctx.db);
   const runs = new PipelineRunsRepository(ctx.db);
   let runId: string | null = null;
-  const getRunId = async (): Promise<string> => (runId ??= await runs.start('outreach:followup-automation', c.DRY_RUN));
+  // PROVENANCE: the run row records how THIS command actually executed, so it must be stamped with
+  // the same `dryRun` every gate above and below reads — never the global `DRY_RUN` config. This
+  // command deliberately takes its mode from `--dry-run` alone, and the repository .env carries
+  // `DRY_RUN=true` as a safe default for commands that DO honour it; stamping the run from config
+  // therefore recorded an armed run — real paid model calls, a real persisted draft — as a dry run.
+  const getRunId = async (): Promise<string> => (runId ??= await runs.start('outreach:followup-automation', dryRun));
 
   let promoReport: FollowupPromotionReport | null = null;
   let prepReport: FollowupPreparationReport | null = null;
