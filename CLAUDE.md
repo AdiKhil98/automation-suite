@@ -27,14 +27,36 @@ outbound-outreach pipeline for a web-design / AI-automation services business:
 
 ## Current approved phase
 
-**Phases 0-16 are complete, committed, and tagged. Demo Engine V2 fictional validation is complete (a
-fictional acceptance package reached a live Sol score of 79 with zero blockers). Phase 3C-A is approved for
-exactly ONE guarded, read-only KU64 evidence export.** V1 remains authoritative (`DEMO_ENGINE_VERSION=v1`,
-`DEMO_V2_ENABLED=false`). No V2 generation, translation, asset download, rendering, visual review,
-deployment, email, Gmail, or provider behavior is authorized. No live Gmail operation, OAuth
-reauthorization, real-data restoration, real credential ACL change, readiness approval, schedule,
-or email send is authorized. All sending flags remain disabled and the mock provider remains the
-default. `docs/CURRENT_STATUS.md` and `docs/ROADMAP.md` are the authoritative current handoff.
+Two independent tracks are live in this repo. Approval on one never extends to the other.
+
+**Outreach production pipeline — LIVE.** Phases 0–16, plus 17A/17A2/17A3/17B/17C/17C1 (outreach tracking,
+read-only Gmail reply sync, live Sheets projection, the controlled first-send smoke test, and delivery-failure
+reconciliation) are implemented, and the pipeline is deployed to production via systemd on the operator's VM.
+`docs/AUTOMATION_PILOT.md` is authoritative for the exact units, gates, and runbooks — read it before touching
+production. Confirmed live and validated: `automation-suite-scheduled-sends.{service,timer}` is enabled/active
+and is the **sole** outbound sender, under a durable `scheduled_send_authorizations` grant, with effective
+`SENDING_DAILY_CAP=5` set in the unit's own environment (the repo `.env` intentionally stays at the safe
+default `SENDING_DAILY_CAP=1` — production gates live only in the systemd unit, never in git). Outreach #1
+(initial send) and the lesson-based Follow-up #2 (sequence step 1) have each been sent and confirmed
+`SENT_CONFIRMED`, with correct Gmail threading and clean reply/bounce/suppression checks.
+`FOLLOWUP_PREPARATION_ENABLED=true` is live (composes follow-up copy through the writer/reviewer pipeline into
+the existing human-approval queue only — it cannot send). **`FOLLOWUP_PROGRESSION_ENABLED` remains `false`.**
+Flipping it is the single next production-activation step — it lets a HUMAN-approved follow-up advance through
+reply-finalization → Gmail draft → send schedule (still not a send path itself: dispatch stays exclusively
+`run-scheduled-sends` → `SendService` under its own separate gates/cap/authorization) — and requires its own
+explicit operator approval before any Claude Code session enables it, edits the follow-up systemd unit, or
+touches its drop-ins.
+
+**Demo Engine V2 / KU64 — separately scoped, unchanged.** Demo Engine V2 fictional validation is complete (a
+fictional acceptance package reached a live Sol score of 79 with zero blockers). Phase 3C-A (one guarded,
+read-only KU64 evidence export) and Phase 3C-B (a private, local-only review package rendered from that
+evidence) are approved and implemented — see below. V1 remains authoritative (`DEMO_ENGINE_VERSION=v1`,
+`DEMO_V2_ENABLED=false`). No V2 generation, translation, asset download, rendering, visual review, deployment,
+email, Gmail, or provider behavior beyond 3C-A/3C-B is authorized for this track. No OAuth reauthorization,
+additional real-data restoration, or real credential ACL change is authorized here.
+
+`docs/CURRENT_STATUS.md`, `docs/ROADMAP.md`, and `docs/AUTOMATION_PILOT.md` are the authoritative current
+handoff for both tracks.
 
 **Phase 3C-A scope (read-only).** The `ku64-v2-export-evidence` CLI may read the operational database
 SELECT-only, under a session opened `default_transaction_read_only=on`, to export ONE lead's already-stored,
@@ -161,7 +183,9 @@ status, or technical failures. Use `unknown` / `needs_manual_review` when eviden
 
 ## Forbidden actions
 
-Do not: build all phases in one run; skip tests; continue without approval; send real outreach; create Gmail
+Do not: build all phases in one run; skip tests; continue without approval; send real outreach; enable
+`FOLLOWUP_PROGRESSION_ENABLED` or any other new production sending/scheduling capability, or edit a production
+systemd unit or its drop-ins, without an explicit operator approval naming that specific capability; create Gmail
 drafts before Phase 11; deploy branded demos before Phase 10; expose secrets; commit `.env`; invent prospect
 data; use fake reviews; generate deceptive demos; hide assumptions; silently change architecture; combine
 phases in one commit; run destructive DB operations without a rollback plan; use AI for deterministic

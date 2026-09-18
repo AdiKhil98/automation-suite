@@ -33,6 +33,27 @@ and local render/preview/screenshot/review-package tooling. V1 remains authorita
 paid call, deployment, screenshot-review model, email, Gmail, or scheduling path was added; the lifecycle
 still cannot reach a real AUTO_REVIEW_PASSED, HUMAN_APPROVED, or deployment-eligible state.
 
+## Outreach production activation (live; separate from the KU64/Demo V2 track above)
+
+The outreach production pipeline (Phase 17A–17C1 plus the unattended follow-up automation feature —
+`run-followup-automation`, migration `0044_outreach_sequence_followup_3.sql`, PRs #1–#8 on `main`) is deployed
+to production via systemd on the operator's VM. `docs/AUTOMATION_PILOT.md` is authoritative for the exact
+units, environment, and runbooks; this entry only reconciles the phase-gate language above (and in
+`CLAUDE.md`) with that reality.
+
+Confirmed live and validated (read-only verification, 2026-09-18): `automation-suite-scheduled-sends.
+{service,timer}` is enabled/active and is the sole outbound sender, under a durable
+`scheduled_send_authorizations` grant, with effective `SENDING_DAILY_CAP=5` set in the unit's own
+`Environment=` (the repo `.env` intentionally stays at the safe default `SENDING_DAILY_CAP=1`).
+`automation-suite-followups.{service,timer}` is installed and its timer enabled/active, with
+`FOLLOWUP_PREPARATION_ENABLED=true` live via drop-in `20-preparation-live.conf` (composes follow-up copy into
+the existing human-approval queue only — it cannot send). Outreach #1 (initial send) and the lesson-based
+Follow-up #2 (sequence step 1) have each been sent and confirmed `SENT_CONFIRMED`, correct Gmail thread
+preserved, `outreach_records.status = FOLLOW_UP_1_SENT`, no reply/bounce/suppression/`OUTCOME_UNKNOWN`.
+
+**`FOLLOWUP_PROGRESSION_ENABLED` remains `false`.** This is the next explicit, separately-approved production
+activation step — see `CLAUDE.md`'s "Current approved phase" section before enabling it.
+
 ## Confirmed operating decisions (2026-08-09)
 
 These are standing decisions; treat them as authoritative until explicitly changed.

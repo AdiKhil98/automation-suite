@@ -18,8 +18,18 @@ defaults (`DRY_RUN=true`, `SENDING_ENABLED=false`, `OUTBOUND_ACTIONS_ENABLED=fal
 
 | Unit | Status | Cadence | Command | Sends? |
 |---|---|---|---|---|
-| `automation-suite-scheduled-sends.{service,timer}` | **LIVE** (enabled; has performed a real send) | every minute | `pnpm cli run-scheduled-sends` | **YES — the sole sender** |
-| `automation-suite-followups.{service,timer}` | **PROPOSED, not installed** (`deploy/systemd/`) | Mon–Fri 08:00–18:00 /15 min | `pnpm cli run-followup-automation` | **NO — cannot send** |
+| `automation-suite-scheduled-sends.{service,timer}` | **LIVE** (enabled/active; has performed real sends; durable authorization) | every minute | `pnpm cli run-scheduled-sends` | **YES — the sole sender** |
+| `automation-suite-followups.{service,timer}` | **LIVE** (installed; timer enabled/active; `FOLLOWUP_PREPARATION_ENABLED=true` via drop-in; `FOLLOWUP_PROGRESSION_ENABLED=false`) | Mon–Fri 08:00–18:00 /15 min | `pnpm cli run-followup-automation` | **NO — cannot send** |
+
+**Verified live status (read-only verification, 2026-09-18).** The follow-up unit is installed (not merely
+proposed) and its timer is enabled and active. `FOLLOWUP_PREPARATION_ENABLED=true` is live via drop-in
+`20-preparation-live.conf`, so due follow-ups are composed and parked in the human review queue.
+`FOLLOWUP_PROGRESSION_ENABLED` is still `false` — the follow-up unit has no sending authority regardless (see
+below), and enabling progression is the next explicit, separately-approved production-activation step (see
+`CLAUDE.md`'s "Current approved phase"). Actual sending remains handled exclusively by
+`automation-suite-scheduled-sends.service`, live under its existing safety gates and durable authorization.
+The first live Outreach #1 and the lesson-based Follow-up #2 (sequence step 1) are each confirmed
+`SENT_CONFIRMED`; Follow-up #2 preserved the original Gmail thread.
 
 `run-scheduled-sends` is the **only** orchestrator that dispatches email. It alone carries
 `SENDING_ENABLED`, `OUTBOUND_ACTIONS_ENABLED`, `SCHEDULED_SEND_ENABLED`, `SENDING_PROVIDER=http`
@@ -166,9 +176,12 @@ default **false**), plus the already-required `OUTREACH_TRACKING_ENABLED=true`,
 spend) and `FOLLOWUP_PROGRESSION_MAX_PER_RUN` (default 10).
 
 **On the live VM use the systemd unit**, not the n8n workflow above:
-`deploy/systemd/automation-suite-followups.{service,timer}`. It ships with both `FOLLOWUP_*` gates
-set to `false`, so installing and enabling the timer performs no work until they are deliberately
-flipped. The n8n JSON above is the legacy alternative for a non-systemd host.
+`deploy/systemd/automation-suite-followups.{service,timer}`. The repository unit ships with both
+`FOLLOWUP_*` gates set to `false`, so installing and enabling the timer performs no work until they are
+deliberately flipped in a drop-in. **On the live VM this unit is installed and its timer is enabled/active**,
+with `FOLLOWUP_PREPARATION_ENABLED=true` flipped on via drop-in `20-preparation-live.conf`;
+`FOLLOWUP_PROGRESSION_ENABLED` remains `false` there too, pending its own separate approval. The n8n JSON
+above is the legacy alternative for a non-systemd host.
 
 ### Operator workflow once this pass is enabled
 1. A follow-up becomes due → the 08:40 pass composes and AI-reviews it.

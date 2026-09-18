@@ -58,7 +58,15 @@ write, or follow-up occurred during implementation). Phase 17C1 — Harden DSN C
 priority-ranked, fail-closed on ambiguity; DSN parsing handles multipart/report + nested message/rfc822 +
 text/plain; a narrowly-scoped correction command invalidates — never deletes — mis-correlated delivery events;
 migration 0028 adds additive supersede columns; no Gmail read, email, Sheet write, or follow-up occurred).**
-**Last updated:** 2026-08-12
+**Outreach production activation (live): the outreach pipeline (17A–17C1 plus the unattended follow-up
+automation feature, migration `0044`) is deployed to production via systemd on the operator's VM —
+`docs/AUTOMATION_PILOT.md` is authoritative. `automation-suite-scheduled-sends.{service,timer}` is the live,
+enabled/active sole sender (durable authorization, effective `SENDING_DAILY_CAP=5` in the unit environment;
+repo `.env` stays at the safe default `SENDING_DAILY_CAP=1`). Outreach #1 and Follow-up #2 (sequence step 1)
+have each sent and confirmed `SENT_CONFIRMED` in production. `FOLLOWUP_PREPARATION_ENABLED=true` is live
+(composes follow-up copy into the human-approval queue only). `FOLLOWUP_PROGRESSION_ENABLED` remains `false`
+— the next explicit, separately-approved production activation step; see `CLAUDE.md`.**
+**Last updated:** 2026-09-18
 
 One phase at a time. Each phase ends with tests, a commit, an annotated tag, and an explicit approval gate.
 No phase begins before the previous one is approved with `APPROVE PHASE X`.
@@ -280,6 +288,23 @@ advancement stops at `HUMAN_REVIEW_REQUIRED`. V1 remains selected and unchanged.
 > or follow-up and touching no Gmail. The five-id incident correction is an operator step — see
 > `docs/OPERATIONS.md`. No Gmail read, email, Gmail modification, Sheet write, or follow-up occurred during
 > implementation or tests.
+>
+> **Outreach production activation (LIVE; separate from any formal phase tag).** The unattended follow-up
+> automation feature (`run-followup-automation`; PRs #1–#8 on `main`; migration `0044_outreach_sequence_
+> followup_3.sql`, adding `email_drafts.sequence_step` / `outreach_record_id` for steps 1–3 = lesson
+> Follow-up #2/#3/#4) is implemented and, together with 17A–17C1, deployed to production via systemd on the
+> operator's VM. `docs/AUTOMATION_PILOT.md` is authoritative for the exact units, gates, and runbooks.
+> Confirmed live: `automation-suite-scheduled-sends.{service,timer}` enabled/active as the sole sender under a
+> durable authorization (effective `SENDING_DAILY_CAP=5` in the unit environment); `automation-suite-followups.
+> {service,timer}` installed with its timer enabled/active and `FOLLOWUP_PREPARATION_ENABLED=true` live via a
+> drop-in (composes follow-up copy into the human-approval queue only — never sends). Outreach #1 and the
+> lesson-based Follow-up #2 (sequence step 1) have each sent and confirmed `SENT_CONFIRMED`, correct Gmail
+> thread preserved, clean reply/bounce/suppression checks. **`FOLLOWUP_PROGRESSION_ENABLED` remains `false`** —
+> enabling it (so a HUMAN-approved follow-up can advance through reply-finalization → Gmail draft → send
+> schedule; dispatch itself stays exclusively `run-scheduled-sends` → `SendService`) is the next explicit,
+> separately-approved production-activation step. No tests/commit/tag cycle under this roadmap's phase-approval
+> protocol has been recorded for this feature; this entry documents the real production state as verified, not
+> a formal phase approval.
 
 ## Phase 0 — Discovery & system specification
 
