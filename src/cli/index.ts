@@ -31,6 +31,7 @@ import { gmailCredentialAclCommand } from './commands/gmail-credential-acl.js';
 import { approveSendingReadinessCommand, reconcileSendAttemptCommand, recoverStartedSendCommand, revokeSendingReadinessCommand,
   sendAttemptStatusCommand, sendingReadinessStatusCommand } from './commands/send-admin.js';
 import { approveScheduledSendCommand, revokeScheduledSendCommand, scheduledSendStatusCommand } from './commands/scheduled-send-admin.js';
+import { backlogStatusCommand } from './commands/backlog-status.js';
 import { runScheduledSendsCommand } from './commands/run-scheduled-sends.js';
 import { previewDemoCommand } from './commands/preview-demo.js';
 import { qualifyLeadsCommand } from './commands/qualify-leads.js';
@@ -781,6 +782,13 @@ program
   .command('scheduled-send-status')
   .description('Show the durable scheduled-send authorization + gate state (read-only; never sends)')
   .action(() => withContext(scheduledSendStatusCommand));
+
+program
+  .command('backlog-status')
+  .description('Read-only backlog/capacity report: RAW/PIPELINE/STALLED buckets, initial vs follow-up review/ready-unscheduled/scheduled inventory, known vs projected follow-up forecast, and 7-day + 10-day KNOWN/CONSERVATIVE coverage. No writes, no sends, no Gmail, no paid calls. --daily-cap is required for capacity/deficit arithmetic.')
+  .option('--daily-cap <n>', 'the production per-day send cap to plan against (required for capacity/deficit output; never inferred from repo .env or the durable authorization alone)')
+  .option('--horizon-days <n>', 'an additional custom horizon to report alongside the mandatory 7-day and 10-day windows')
+  .action((opts: { dailyCap?: string; horizonDays?: string }) => withContext((ctx) => backlogStatusCommand(ctx, opts)));
 
 program
   .command('run-scheduled-sends')
