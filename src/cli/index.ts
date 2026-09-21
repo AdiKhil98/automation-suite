@@ -41,6 +41,7 @@ import { createSampleLeads } from './commands/create-sample-leads.js';
 import { leadState } from './commands/lead-state.js';
 import { rejectLeadCommand } from './commands/reject-lead.js';
 import { reopenLeadCommand } from './commands/reopen-lead.js';
+import { requeueLeadForAuditCommand } from './commands/requeue-lead-for-audit.js';
 import { deterministicFindingApproveCommand } from './commands/deterministic-finding-approve.js';
 import { operatorEmailApproveCommand } from './commands/operator-email-approve.js';
 import { replyEmailFinalizeCommand } from './commands/reply-email-finalize.js';
@@ -440,6 +441,16 @@ program
   .requiredOption('--by <operator>', 'operator identity recorded on the correction event')
   .action((opts: { lead: string; reason: string; by: string }) =>
     withContext((ctx) => reopenLeadCommand(ctx, opts)),
+  );
+
+program
+  .command('requeue-lead-for-audit')
+  .description('Requeue exactly one NEEDS_MANUAL_REVIEW lead back to READY_FOR_AUDIT via the supported recovery transition, recording an immutable recovery NOTE (reason + operator + recovery type + previous/target status). Transition and NOTE are written in one transaction. Preserves all prior audit runs, findings, and history (append-only). Fails closed for unknown/non-NEEDS_MANUAL_REVIEW leads. Makes the lead eligible for a later audit-websites run; performs NO audit, LLM, network, Gmail, email, draft, schedule, or send action.')
+  .requiredOption('--lead <id>', 'exact lead id to requeue (single lead; no bulk fallback)')
+  .requiredOption('--reason <text>', 'audited recovery reason (e.g. REQUEUE_AFTER_VALIDATOR_FIX_...)')
+  .requiredOption('--by <operator>', 'operator identity recorded on the recovery event')
+  .action((opts: { lead: string; reason: string; by: string }) =>
+    withContext((ctx) => requeueLeadForAuditCommand(ctx, opts)),
   );
 
 program
