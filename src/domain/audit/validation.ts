@@ -41,7 +41,13 @@ const FORBIDDEN_CLAIM_PATTERNS: Array<[RegExp, string]> = [
   [/\blost (revenue|customers|leads|sales)\b/i, 'loss_claim'],
 ];
 
-const PLACEHOLDER = /(TODO|FIXME|lorem ipsum|\{\{|<insert|xxxx|placeholder)/i;
+// Unfilled template output the model must never emit. "placeholder" is the one
+// ambiguous token: it is also the correct technical term for an observed page
+// element (e.g. href="#" anchors), and naming one is a legitimate finding. It is
+// therefore blocked EXCEPT where it directly qualifies such an element. Genuine
+// template text ("placeholder text", "[placeholder]") still fails.
+const PLACEHOLDER =
+  /(TODO|FIXME|lorem ipsum|\{\{|<insert|xxxx|\bplaceholders?\b(?!\s+(?:anchors?|links?|hrefs?|urls?|images?|attributes?|elements?|targets?|destinations?)\b))/i;
 const PROMPT_LEAK =
   /(system prompt|you are an? (ai|assistant|expert)|as an ai|ignore (all )?previous instructions|do not reveal|reveal (your|the) (prompt|instructions)|my instructions)/i;
 

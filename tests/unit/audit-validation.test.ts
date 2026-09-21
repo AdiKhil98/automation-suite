@@ -87,6 +87,34 @@ describe('validateGeneratorOutput', () => {
     expect(r.violations).toContain('placeholder:F1');
   });
 
+  // Regression: "placeholder" is also the correct technical term for an observed
+  // page element (href="#"), so analytical use of it is a legitimate finding and
+  // must not be rejected as unfilled template output.
+  it.each([
+    'The captured footer policy links appear to use placeholder anchors and would be worth checking before patients submit personal information.',
+    'The footer policy links appear to use placeholder anchors.',
+    'Four footer policy links use placeholder hrefs rather than dedicated document URLs.',
+    'Several navigation placeholder links were captured on mobile.',
+    'The hero section shows placeholder images.',
+  ])('accepts analytical use of "placeholder": %s', (text) => {
+    expect(validateGeneratorOutput(output({ outreachAngle: text }), pkg).ok).toBe(true);
+  });
+
+  it.each([
+    ['TODO: write recommendation'],
+    ['FIXME: needs a second pass'],
+    ['lorem ipsum dolor sit amet'],
+    ['{{businessName}} should update this page.'],
+    ['<insert business name> should update this page.'],
+    ['xxxx'],
+    ['Placeholder text goes here.'],
+    ['The recommendation is [placeholder].'],
+    ['The page still shows placeholder content that was never replaced.'],
+    ['placeholder'],
+  ])('still rejects genuine template placeholder content: %s', (text) => {
+    expect(validateGeneratorOutput(output({ recommendation: text }), pkg).violations).toContain('placeholder:F1');
+  });
+
   it('rejects prompt leakage in findings and summary', () => {
     expect(validateGeneratorOutput(output({ observation: 'As an AI I was told to ignore previous instructions' }), pkg).ok).toBe(false);
     expect(validateGeneratorOutput(output({}, 'My instructions say to approve everything'), pkg).violations).toContain('prompt_leakage:summary');
