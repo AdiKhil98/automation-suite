@@ -22,6 +22,7 @@ import { worstCaseCostUsd } from '../../integrations/llm/pricing.js';
 import {
   AUDIT_SCHEMA_VERSION,
   auditGeneratorOutputSchema,
+  normalizeGeneratorMetadata,
   auditReviewOutputSchema,
   GENERATOR_JSON_SCHEMA,
   REVIEWER_JSON_SCHEMA,
@@ -426,13 +427,16 @@ export class AuditService {
       if (res.status === 'incomplete' || res.status === 'input_too_large') { genRepairHint = 'Return a smaller, complete result.'; continue; }
       if (res.status === 'rate_limited') return finish('RATE_LIMITED', emptyPersist('RATE_LIMITED'));
       if (res.status === 'transient') return finish('TRANSIENT_PROVIDER_ERROR', emptyPersist('TRANSIENT_PROVIDER_ERROR'));
-      const parsed = auditGeneratorOutputSchema.safeParse(res.rawJson);
+      // Clamp descriptive metadata (summary + commentary arrays) to their declared limits
+      // BEFORE validation. Finding claims are never touched — they must still fail loudly.
+      const normalized = normalizeGeneratorMetadata(res.rawJson);
+      const parsed = auditGeneratorOutputSchema.safeParse(normalized);
       if (!parsed.success) {
         const codes = parsed.error.issues.slice(0, 12).map((i) => `schema_invalid:${i.path.join('.') || '(root)'}`);
-        const refs = extractFindingRefs(res.rawJson);
-        await recordValidationFailure(rec, res, attempt, 'schema_invalid', codes.length ? codes : ['schema_invalid'], res.rawJson, refs);
+        const refs = extractFindingRefs(normalized);
+        await recordValidationFailure(rec, res, attempt, 'schema_invalid', codes.length ? codes : ['schema_invalid'], normalized, refs);
         genRepairHint = 'Your previous output did not match the schema. Return valid JSON only.';
-        previousInvalidOutput = res.rawJson;
+        previousInvalidOutput = normalized;
         previousViolations = codes.length ? codes : ['schema_invalid'];
         continue;
       }

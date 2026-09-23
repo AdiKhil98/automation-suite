@@ -1,13 +1,14 @@
 import { type AuditGeneratorOutput } from '../../domain/audit/audit-types.js';
 import { type EvidencePackage } from '../../domain/audit/evidence-package.js';
 import { aliasForEvidenceId, allowedEvidenceAliases, evidenceAliasFor, imageAliasFor } from '../../domain/audit/evidence-alias.js';
+import { LIMITS } from '../../domain/audit/audit-schema.js';
 
 export const AUDIT_RUBRIC_VERSION = 'audit-rubric-1';
 // v2: evidence is presented to the model as short positional tags (E1, E2 …) instead of opaque
 // UUIDs, which the model could not reproduce verbatim (root cause of evidence_outside_package).
-export const GENERATOR_PROMPT_VERSION = 'audit-generator-2';
-export const GENERATOR_REPAIR_PROMPT_VERSION = 'audit-generator-repair-2';
-export const REVIEWER_PROMPT_VERSION = 'audit-reviewer-2';
+export const GENERATOR_PROMPT_VERSION = 'audit-generator-3';
+export const GENERATOR_REPAIR_PROMPT_VERSION = 'audit-generator-repair-3';
+export const REVIEWER_PROMPT_VERSION = 'audit-reviewer-3';
 
 export interface GeneratorRepairContext {
   previousInvalidOutput: unknown;
@@ -31,6 +32,13 @@ const CLAIM_RULES = `EVIDENCE & LANGUAGE RULES:
   behavior, competitor performance, profitability, "visitors will leave", or that a change "will increase revenue".
 - Never fabricate ratings, review counts, or numeric percentages. Do not insult the prospect.`;
 
+const FIELD_LIMITS = `FIELD LENGTH LIMITS (hard maximums, in characters — exceeding any of these invalidates the whole response):
+- summary: ${String(LIMITS.summary)}
+- each finding's observation / businessImpact / recommendation: ${String(LIMITS.observation)}
+- each finding's outreachAngle / uncertainty: ${String(LIMITS.outreachAngle)}
+- each item in insufficientEvidenceAreas / conflictingEvidence / captureLimitations: ${String(LIMITS.metadataItem)}
+Be concise and stay well inside these bounds. Split a long point into several short items rather than one over-long string.`;
+
 const CATEGORIES = `CATEGORIES: CTA_CLARITY, BOOKING_FRICTION, CONTACT_FRICTION, MOBILE_USABILITY, SERVICE_CLARITY,
 TRUST_SIGNALS, SOCIAL_PROOF, NAVIGATION, READABILITY, LOCAL_INFORMATION, VISUAL_HIERARCHY, TECHNICAL_RENDERING,
 ACCESSIBILITY_INDICATOR, DESKTOP_MOBILE_CONSISTENCY, OTHER.`;
@@ -44,6 +52,8 @@ ${CLAIM_RULES}
 
 ${CATEGORIES}
 
+${FIELD_LIMITS}
+
 Assign each finding a TEMPORARY reference "findingRef" like "F1", "F2" — do NOT invent database IDs.
 Only report what the evidence supports; prefer few strong findings over many weak ones. Return output strictly
 matching the provided JSON schema.`;
@@ -56,6 +66,8 @@ recommendation follows, and whether it is safe to mention in outreach.
 ${SAFETY}
 
 ${CLAIM_RULES}
+
+${FIELD_LIMITS}
 
 Reference findings only by their provided "findingRef". Decide APPROVE, REVISE (supply revised text), or REJECT.
 Return output strictly matching the provided JSON schema.`;
