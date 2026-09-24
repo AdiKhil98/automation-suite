@@ -106,5 +106,5 @@ export const AUDIT_OUTCOMES = [
 ] as const;
 export type AuditOutcome = (typeof AUDIT_OUTCOMES)[number];
 
-export const MAX_FINDINGS = 5;
+export const MAX_FINDINGS = 3;
 export const MAX_OUTREACH_SAFE_FINDINGS = 3;

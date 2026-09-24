@@ -17,7 +17,9 @@ export function describeViolation(code: string): string {
     evidence_outside_package: 'Finding cites an evidence ID that was not in the supplied package.',
     unsupported_url: 'Finding references a URL that is not in the captured page set.',
     confidence_range: 'Confidence is outside the allowed [0,1] range.',
-    placeholder: 'Text contains placeholder content (e.g. TODO / lorem ipsum).',
+    template_artifact: 'Text contains an unresolved template artifact (e.g. {{VAR}}, ${var}, <insert ...>, TODO:, lorem ipsum).',
+    // Legacy code retained so historical stored violations still describe correctly.
+    placeholder: 'Text contained the word "placeholder" (retired rule; superseded by template_artifact).',
     prompt_leakage: 'Text appears to leak system/prompt instructions.',
     forbidden_claim: 'Text makes a forbidden claim (e.g. revenue, traffic, ranking, percentage, guarantee).',
     review_ref_unknown: 'Reviewer referenced a finding ref not produced by the generator.',
@@ -41,13 +43,26 @@ const FORBIDDEN_CLAIM_PATTERNS: Array<[RegExp, string]> = [
   [/\blost (revenue|customers|leads|sales)\b/i, 'loss_claim'],
 ];
 
-// Unfilled template output the model must never emit. "placeholder" is the one
-// ambiguous token: it is also the correct technical term for an observed page
-// element (e.g. href="#" anchors), and naming one is a legitimate finding. It is
-// therefore blocked EXCEPT where it directly qualifies such an element. Genuine
-// template text ("placeholder text", "[placeholder]") still fails.
-const PLACEHOLDER =
-  /(TODO|FIXME|lorem ipsum|\{\{|<insert|xxxx|\bplaceholders?\b(?!\s+(?:anchors?|links?|hrefs?|urls?|images?|attributes?|elements?|targets?|destinations?)\b))/i;
+// Unresolved TEMPLATE ARTIFACTS the model must never emit. This detects STRUCTURE
+// (mustache/shell interpolation, bracketed sentinels, filler text) — never ordinary
+// vocabulary. The bare word "placeholder" is deliberately NOT matched: on a website
+// audit it is normal technical English ("placeholder anchors", "placeholder text
+// disappears", "do not rely on placeholders as the only field description"), and
+// policing it destroyed two paid audits. Maintaining an allow-list of innocent
+// phrasings was the wrong shape of fix; structure is the reliable signal.
+const TEMPLATE_ARTIFACT = new RegExp(
+  [
+    String.raw`\{\{[^}]*\}\}`, // {{VARIABLE}}
+    String.raw`\$\{[^}]*\}`, // ${variable}
+    String.raw`<\s*insert\b[^>]*>`, // <insert business name>
+    String.raw`\[\s*(?:TODO|FIXME|PLACEHOLDER|INSERT|XXX+)\b[^\]]*\]`, // [TODO: ...] / [PLACEHOLDER]
+    String.raw`\bTODO\s*:`, // TODO:
+    String.raw`\bFIXME\b`,
+    String.raw`lorem ipsum`,
+    String.raw`\bX{4,}\b`, // XXXX sentinel
+  ].join('|'),
+  'i',
+);
 const PROMPT_LEAK =
   /(system prompt|you are an? (ai|assistant|expert)|as an ai|ignore (all )?previous instructions|do not reveal|reveal (your|the) (prompt|instructions)|my instructions)/i;
 
@@ -83,7 +98,7 @@ export function validateGeneratorOutput(
     if (f.confidence < 0 || f.confidence > 1) violations.push(`confidence_range:${f.findingRef}`);
 
     const text = textOf([f.observation, f.businessImpact, f.recommendation, f.outreachAngle, f.uncertainty]);
-    if (PLACEHOLDER.test(text)) violations.push(`placeholder:${f.findingRef}`);
+    if (TEMPLATE_ARTIFACT.test(text)) violations.push(`template_artifact:${f.findingRef}`);
     if (PROMPT_LEAK.test(text)) violations.push(`prompt_leakage:${f.findingRef}`);
     for (const [re, label] of FORBIDDEN_CLAIM_PATTERNS) {
       if (re.test(text)) violations.push(`forbidden_claim:${label}:${f.findingRef}`);
@@ -110,7 +125,7 @@ export function validateReviewMapping(
     if (!genRefs.has(r.findingRef)) violations.push(`review_ref_unknown:${r.findingRef}`);
     // Revised text is subject to the same forbidden-claim checks.
     const text = textOf([r.revisedObservation, r.revisedBusinessImpact, r.revisedRecommendation, r.revisedOutreachAngle]);
-    if (PLACEHOLDER.test(text)) violations.push(`placeholder:review:${r.findingRef}`);
+    if (TEMPLATE_ARTIFACT.test(text)) violations.push(`template_artifact:review:${r.findingRef}`);
     if (PROMPT_LEAK.test(text)) violations.push(`prompt_leakage:review:${r.findingRef}`);
     for (const [re, label] of FORBIDDEN_CLAIM_PATTERNS) {
       if (re.test(text)) violations.push(`forbidden_claim:${label}:review:${r.findingRef}`);

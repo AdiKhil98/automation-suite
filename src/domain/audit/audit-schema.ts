@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { AUDIT_CATEGORIES, PROFILES, SEVERITIES } from './audit-types.js';
+import { AUDIT_CATEGORIES, MAX_FINDINGS, PROFILES, SEVERITIES } from './audit-types.js';
 
 export const AUDIT_SCHEMA_VERSION = 'audit-schema-1';
 
@@ -23,7 +23,7 @@ export const generatorFindingSchema = z.object({
 
 export const auditGeneratorOutputSchema = z.object({
   summary: z.string().max(1200),
-  findings: z.array(generatorFindingSchema).max(12),
+  findings: z.array(generatorFindingSchema).max(MAX_FINDINGS),
   insufficientEvidenceAreas: z.array(z.string().max(200)).max(20),
   conflictingEvidence: z.array(z.string().max(200)).max(20),
   captureLimitations: z.array(z.string().max(200)).max(20),
@@ -44,7 +44,7 @@ export const findingReviewSchema = z.object({
 });
 
 export const auditReviewOutputSchema = z.object({
-  findings: z.array(findingReviewSchema).max(12),
+  findings: z.array(findingReviewSchema).max(MAX_FINDINGS),
   overallDecision: z.enum(['APPROVE', 'APPROVE_WITH_REVISIONS', 'REJECT', 'MANUAL_REVIEW']),
 });
 export type AuditReviewOutputParsed = z.infer<typeof auditReviewOutputSchema>;
@@ -145,7 +145,7 @@ const generatorFindingJson = strObj(
 export const GENERATOR_JSON_SCHEMA = strObj(
   {
     summary: { type: 'string', maxLength: LIMITS.summary },
-    findings: { type: 'array', items: generatorFindingJson, maxItems: 12 },
+    findings: { type: 'array', items: generatorFindingJson, maxItems: MAX_FINDINGS },
     insufficientEvidenceAreas: { type: 'array', items: { type: 'string', maxLength: LIMITS.metadataItem }, maxItems: 20 },
     conflictingEvidence: { type: 'array', items: { type: 'string', maxLength: LIMITS.metadataItem }, maxItems: 20 },
     captureLimitations: { type: 'array', items: { type: 'string', maxLength: LIMITS.metadataItem }, maxItems: 20 },
@@ -174,7 +174,7 @@ const findingReviewJson = strObj(
 
 export const REVIEWER_JSON_SCHEMA = strObj(
   {
-    findings: { type: 'array', items: findingReviewJson, maxItems: 12 },
+    findings: { type: 'array', items: findingReviewJson, maxItems: MAX_FINDINGS },
     overallDecision: { type: 'string', enum: ['APPROVE', 'APPROVE_WITH_REVISIONS', 'REJECT', 'MANUAL_REVIEW'] },
   },
   ['findings', 'overallDecision'],

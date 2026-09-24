@@ -82,37 +82,43 @@ describe('validateGeneratorOutput', () => {
     expect(r.violations.some((v) => v.includes(label))).toBe(true);
   });
 
-  it('rejects placeholder text', () => {
+  it('rejects an unresolved template artifact', () => {
     const r = validateGeneratorOutput(output({ recommendation: 'TODO: write recommendation' }), pkg);
-    expect(r.violations).toContain('placeholder:F1');
+    expect(r.violations).toContain('template_artifact:F1');
   });
 
-  // Regression: "placeholder" is also the correct technical term for an observed
-  // page element (href="#"), so analytical use of it is a legitimate finding and
-  // must not be rejected as unfilled template output.
+  // Regression, from two real paid audits destroyed by the retired word-policing rule:
+  // Gipsy Hill run 9af30a7a ("placeholder anchors") and 311 Dental Care run b431a104
+  // (accessibility finding about HTML form placeholders). "placeholder" is ordinary
+  // website vocabulary and must never fail on its own.
   it.each([
     'The captured footer policy links appear to use placeholder anchors and would be worth checking before patients submit personal information.',
-    'The footer policy links appear to use placeholder anchors.',
-    'Four footer policy links use placeholder hrefs rather than dedicated document URLs.',
+    'Form controls without persistent programmatic labels may be harder to understand for screen-reader users and for users when placeholder text disappears.',
+    'Do not rely on placeholders as the only field description.',
+    'The capture does not expose placeholder text or the rendered accessibility tree, so manual inspection is required.',
+    'The hero section shows a placeholder image.',
     'Several navigation placeholder links were captured on mobile.',
-    'The hero section shows placeholder images.',
-  ])('accepts analytical use of "placeholder": %s', (text) => {
+  ])('accepts ordinary use of the word "placeholder": %s', (text) => {
     expect(validateGeneratorOutput(output({ outreachAngle: text }), pkg).ok).toBe(true);
   });
 
+  // Structural unresolved-template artifacts must still fail.
   it.each([
-    ['TODO: write recommendation'],
-    ['FIXME: needs a second pass'],
-    ['lorem ipsum dolor sit amet'],
     ['{{businessName}} should update this page.'],
+    ['{{ PRACTICE_NAME }} has not been filled in.'],
+    ['Contact ${practiceName} for details.'],
     ['<insert business name> should update this page.'],
-    ['xxxx'],
-    ['Placeholder text goes here.'],
-    ['The recommendation is [placeholder].'],
-    ['The page still shows placeholder content that was never replaced.'],
-    ['placeholder'],
-  ])('still rejects genuine template placeholder content: %s', (text) => {
-    expect(validateGeneratorOutput(output({ recommendation: text }), pkg).violations).toContain('placeholder:F1');
+    ['[TODO: write the recommendation]'],
+    ['[PLACEHOLDER]'],
+    ['[FIXME check this]'],
+    ['TODO: write recommendation'],
+    ['FIXME needs a second pass'],
+    ['lorem ipsum dolor sit amet'],
+    ['The value is XXXX and needs filling in.'],
+  ])('still rejects unresolved template artifacts: %s', (text) => {
+    expect(validateGeneratorOutput(output({ recommendation: text }), pkg).violations).toContain(
+      'template_artifact:F1',
+    );
   });
 
   it('rejects prompt leakage in findings and summary', () => {
