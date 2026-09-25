@@ -82,6 +82,44 @@ describe('validateGeneratorOutput', () => {
     expect(r.violations.some((v) => v.includes(label))).toBe(true);
   });
 
+  // PERFORMANCE PROMISE — structural regression set.
+  //
+  // The retired rule was "future-tense word … business noun before the next full stop",
+  // which rejected the Vaswani recommendation below (lead e3813658, audit run ffc67e4a,
+  // `forbidden_claim:performance_promise`). Ordinary prose uses "will" constantly; the
+  // rule must key on the performance-change CONSTRUCTION instead.
+  it.each([
+    'The practice will confirm the booking.',
+    'The page explains when the team will confirm a booking.',
+    'Patients will see the booking form.',
+    'The booking page will open in a new tab.',
+    'The receptionist will contact the patient.',
+    'The form explains how the practice will confirm the appointment.',
+    'Add a short line under the form that explains how and when the practice will confirm the booking.',
+    'Improve the experience for patients by saying what happens after the form is sent.',
+    'The page asks patients to call the practice for further enquiries.',
+    'Patient information is collected before the appointment is confirmed.',
+    'The booking journey could be made clearer for new patients.',
+  ])('accepts descriptive prose that merely uses future tense: %s', (text) => {
+    expect(validateGeneratorOutput(output({ recommendation: text }), pkg).ok).toBe(true);
+  });
+
+  it.each([
+    'This will increase bookings.',
+    'This will boost conversions.',
+    'This will generate more leads.',
+    'This will increase revenue.',
+    'This will double sales.',
+    'This change guarantees more bookings.',
+    'You will get more customers.',
+    'Adding the form increases the number of bookings.',
+    'A clearer call to action definitely brings in more patients.',
+  ])('still rejects an unsupported performance promise: %s', (text) => {
+    const r = validateGeneratorOutput(output({ businessImpact: text }), pkg);
+    expect(r.ok).toBe(false);
+    expect(r.violations.some((v) => v.includes('performance_promise'))).toBe(true);
+  });
+
   it('rejects an unresolved template artifact', () => {
     const r = validateGeneratorOutput(output({ recommendation: 'TODO: write recommendation' }), pkg);
     expect(r.violations).toContain('template_artifact:F1');

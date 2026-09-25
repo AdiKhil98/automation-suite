@@ -34,6 +34,7 @@ import {
   type AuditGeneratorOutput,
   type AuditOutcome,
   type FindingReview,
+  type OverallReviewDecision,
   MAX_FINDINGS,
   MAX_OUTREACH_SAFE_FINDINGS,
 } from './audit-types.js';
@@ -121,6 +122,10 @@ export interface AuditPersist {
   };
   accepted: AcceptedFinding[];
   reviews: FindingReview[];
+  /** The reviewer's OWN overall verdict, carried through to persistence. `null` means no
+   * reviewer verdict exists (the run never reached a validated reviewer response), in which
+   * case no `audit_reviews` row is written — a verdict is never invented. */
+  reviewOverallDecision: OverallReviewDecision | null;
   opportunity: OpportunityResult | null;
   modelCalls: ModelCallRecord[];
 }
@@ -403,6 +408,7 @@ export class AuditService {
       auditRun: { ...baseRun(), outcome },
       accepted: [],
       reviews: [],
+      reviewOverallDecision: null,
       opportunity: null,
       modelCalls,
     });
@@ -485,6 +491,7 @@ export class AuditService {
     if (review.overallDecision === 'REJECT' || review.overallDecision === 'MANUAL_REVIEW') {
       const p = emptyPersist('MANUAL_REVIEW_REQUIRED');
       p.reviews = review.findings;
+      p.reviewOverallDecision = review.overallDecision;
       return finish('MANUAL_REVIEW_REQUIRED', p);
     }
 
@@ -502,7 +509,14 @@ export class AuditService {
     run.totalOutputTokens = modelCalls.reduce((s, m) => s + (m.outputTokens ?? 0), 0);
 
     const outcome: AuditOutcome = accepted.length === 0 ? 'AUDITED_NO_ACTIONABLE_FINDINGS' : 'AUDITED';
-    return finish(outcome, { auditRun: run, accepted, reviews: review.findings, opportunity, modelCalls });
+    return finish(outcome, {
+      auditRun: run,
+      accepted,
+      reviews: review.findings,
+      reviewOverallDecision: review.overallDecision,
+      opportunity,
+      modelCalls,
+    });
   }
 
   private acceptFindings(gen: AuditGeneratorOutput, review: import('./audit-schema.js').AuditReviewOutputParsed): AcceptedFinding[] {

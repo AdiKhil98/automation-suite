@@ -12,6 +12,19 @@ import {
   opportunityAssessments,
 } from '../schema.js';
 
+/** The stored verdict for one audit run, or `null` when no `audit_reviews` row belongs there.
+ *
+ * A recovery envelope written BEFORE the verdict was carried through `AuditPersist` has no
+ * `reviewOverallDecision` at all, and `resume-audit` can still replay one. Such a replay
+ * records `UNKNOWN` rather than inventing a verdict the reviewer may never have given — the
+ * finding-level decisions in that envelope still prove a reviewer call occurred. Already-stored
+ * rows are never rewritten. */
+function legacySafeOverallDecision(record: AuditPersist): string | null {
+  const decision = (record as { reviewOverallDecision?: string | null }).reviewOverallDecision;
+  if (decision === undefined) return record.reviews.length > 0 ? 'UNKNOWN' : null;
+  return decision;
+}
+
 /** Persists a complete audit result. Every model call is recorded, even when the
  * outcome kept the lead in READY_FOR_AUDIT (no paid call disappears from history). */
 export class AuditRepository implements AuditRunStore {
@@ -52,25 +65,32 @@ export class AuditRepository implements AuditRunStore {
       }
     }
 
-    if (record.reviews.length > 0) {
+    // The reviewer VERDICT is what makes this row meaningful, so the row exists exactly
+    // when a reviewer call actually produced one — including a REJECT / MANUAL_REVIEW that
+    // accepted no findings, which previously left no review record at all. The decision is
+    // the reviewer’s own; it is never defaulted to APPROVE_WITH_REVISIONS.
+    const overallDecision = legacySafeOverallDecision(record);
+    if (overallDecision !== null) {
       const reviewId = randomUUID();
-      await this.db.insert(auditReviews).values({ id: reviewId, auditRunId: run.id, overallDecision: 'APPROVE_WITH_REVISIONS' });
-      await this.db.insert(auditReviewFindings).values(
-        record.reviews.map((r) => ({
-          id: randomUUID(),
-          auditReviewId: reviewId,
-          findingRef: r.findingRef,
-          decision: r.decision,
-          evidenceSupported: r.evidenceSupported,
-          impactSupported: r.impactSupported,
-          safeForOutreach: r.safeForOutreach,
-          problems: r.problems,
-          revisedObservation: r.revisedObservation,
-          revisedBusinessImpact: r.revisedBusinessImpact,
-          revisedRecommendation: r.revisedRecommendation,
-          revisedOutreachAngle: r.revisedOutreachAngle,
-        })),
-      );
+      await this.db.insert(auditReviews).values({ id: reviewId, auditRunId: run.id, overallDecision });
+      if (record.reviews.length > 0) {
+        await this.db.insert(auditReviewFindings).values(
+          record.reviews.map((r) => ({
+            id: randomUUID(),
+            auditReviewId: reviewId,
+            findingRef: r.findingRef,
+            decision: r.decision,
+            evidenceSupported: r.evidenceSupported,
+            impactSupported: r.impactSupported,
+            safeForOutreach: r.safeForOutreach,
+            problems: r.problems,
+            revisedObservation: r.revisedObservation,
+            revisedBusinessImpact: r.revisedBusinessImpact,
+            revisedRecommendation: r.revisedRecommendation,
+            revisedOutreachAngle: r.revisedOutreachAngle,
+          })),
+        );
+      }
     }
 
     if (record.opportunity) {
