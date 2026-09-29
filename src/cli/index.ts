@@ -685,11 +685,12 @@ program
 
 program
   .command('schedule-drafts')
-  .description('Phase 13: record deterministic, timezone-aware send times for DRAFT_CREATED leads (never sends). --dry-run previews with no changes.')
-  .option('--limit <n>', 'max leads to schedule this run')
+  .description('Phase 13: record deterministic, timezone-aware send times for DRAFT_CREATED leads (never sends). --lead restricts the run to exactly one lead and fails closed if it is missing, not DRAFT_CREATED, or has no created Gmail draft (it never falls back to the broad sweep). --dry-run previews with no changes.')
+  .option('--lead <id>', 'schedule ONLY this exact lead id (fail-closed; no broad sweep)')
+  .option('--limit <n>', 'max leads to schedule this run (broad sweep only)')
   .option('--dry-run', 'compute + display proposed slots without any database or external changes')
   .option('--not-before <iso>', 'do not schedule before this ISO instant')
-  .action((opts: { limit?: string; dryRun?: boolean; notBefore?: string }) => withContext((ctx) => scheduleDraftsCommand(ctx, opts)));
+  .action((opts: { lead?: string; limit?: string; dryRun?: boolean; notBefore?: string }) => withContext((ctx) => scheduleDraftsCommand(ctx, opts)));
 
 program
   .command('schedule-status')
